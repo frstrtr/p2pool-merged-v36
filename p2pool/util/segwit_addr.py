@@ -20,10 +20,7 @@
 
 """Reference implementation for Bech32 and segwit addresses."""
 
-<<<<<<< HEAD
 from math import convertbits
-=======
->>>>>>> Bech32 + P2SH Mining Address support
 
 CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 
