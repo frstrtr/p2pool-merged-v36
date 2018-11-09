@@ -26,7 +26,8 @@ Copy and paste the following commands into a bash shell in order to install p2po
 
 
 >wget https://pypi.python.org/packages/source/z/zope.interface/zope.interface-4.1.3.tar.gz#md5=9ae3d24c0c7415deb249dd1a132f0f79
-tar zxf zope.interface-4.1.3.tar.gz
+
+>tar zxf zope.interface-4.1.3.tar.gz
 
 >cd zope.interface-4.1.3/
 
