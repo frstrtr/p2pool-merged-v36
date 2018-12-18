@@ -18,7 +18,7 @@ Copy and paste the following commands into a bash shell in order to install p2po
 
 >sudo apt-get update
 
->sudo apt-get install pypy pypy-dev pypy-setuptools gcc build-essential git
+>sudo apt-get -y install pypy pypy-dev pypy-setuptools gcc build-essential git
 
 
 >wget https://bootstrap.pypa.io/ez_setup.py -O - | sudo pypy
