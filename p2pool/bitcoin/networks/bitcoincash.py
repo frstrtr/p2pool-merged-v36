@@ -24,9 +24,9 @@ POW_FUNC = data.hash256
 BLOCK_PERIOD = 600 # s
 SYMBOL = 'BCH'
 CONF_FILE_FUNC = lambda: os.path.join(os.path.join(os.environ['APPDATA'], 'Bitcoin') if platform.system() == 'Windows' else os.path.expanduser('~/Library/Application Support/Bitcoin/') if platform.system() == 'Darwin' else os.path.expanduser('~/.bitcoin'), 'bitcoin.conf')
-BLOCK_EXPLORER_URL_PREFIX = 'https://blockchair.com/bitcoin-cash/block/'
-ADDRESS_EXPLORER_URL_PREFIX = 'https://blockchair.com/bitcoin-cash/address/'
-TX_EXPLORER_URL_PREFIX = 'https://blockchair.com/bitcoin-cash/transaction/'
+BLOCK_EXPLORER_URL_PREFIX = 'https://explorer.bitcoin.com/bch/block/'
+ADDRESS_EXPLORER_URL_PREFIX = 'https://explorer.bitcoin.com/bch/address/'
+TX_EXPLORER_URL_PREFIX = 'https://explorer.bitcoin.com/bch/tx/'
 SANE_TARGET_RANGE = (2**256//2**32//100000000 - 1, 2**256//2**32 - 1)
 DUMB_SCRYPT_DIFF = 1
 DUST_THRESHOLD = 0.001e8
