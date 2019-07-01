@@ -55,8 +55,6 @@ Copy and paste the following commands into a bash shell in order to install p2po
 
 >cd p2pool
 
->git checkout 1mb_segwit
-
 
 You'll also need to install and run your bitcoind or altcoind of choice, and edit ~/.bitcoin/bitcoin.conf (or the corresponding file for litecoin or whatever other coin you intend to mine) with your bitcoind's RPC username and password. Launch your bitcoind or altcoind, and after it has finished downloading blocks and syncing, go to your p2pool directory and run
 
@@ -73,8 +71,6 @@ If you wish to use the original forrestv btc mainnet instead of jtoomimnet, then
 >git clone https://github.com/jtoomim/p2pool.git
 
 >cd p2pool
-
->git checkout 1mb_segwit
 
 
 above with
@@ -101,10 +97,17 @@ P2pool communicates with miners via the stratum protocol. For BTC, configure you
 >Password: x
 
 
-For Litecoin, replace 9332 with 9327. For Bitcoin Cash, use 9348. For Dash, use 7903.
 
+Mining to Legacy (P2PKH), SegWit/MultiSig (P2SH) and Bech32 addresses are supported for the following coins with the specified address prefixes:
 
-The mining address must be a regular P2PKH address. Segwit, multisig, and bech32 addresses are not supported. That means an address starting with a 1 for Bitcoin or Bitcoin Cash or an L for Litecoin. If you use an address that p2pool cannot understand, then p2pool will mine to that node's default address instead.
+|Coin		|P2PKH	|P2SH	|Bech32				|
+|---------------|-------|-------|-------------------------------|
+|Bitcoin	|`1...`	|`3...`	|`bc1...`			|
+|Bitcoin Cash*	|`1...`	| (test)|`bitcoincash:q...` or `q...`	| 
+|Litecoin	|`L...`	|`M...`	|`ltc1...`			|
+* Bitcoin Cash uses cashaddr instead of Bech32
+
+**Only Legacy addresses (P2PKH) are supported for coins not mentioned above. If you use an address that p2pool cannot understand, then p2pool will mine to that node's default address instead.**
 
 
 If you wish to modify the mining difficulty, you may add something like "address+4096" after your mining address to set the pseudoshare difficulty to 4096, or "address/65536" to set the actual share difficulty to 65536 or the p2pool minimum share difficulty, whichever is higher. Pseudoshares only affect hashrate statistics, whereas actual shares affect revenue variance and efficiency.
