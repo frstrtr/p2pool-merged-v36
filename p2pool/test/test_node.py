@@ -107,6 +107,7 @@ class dashd(object): # can be used as p2p factory, p2p protocol, or rpc jsonrpc 
             "curtime" : 1351659940,
             "bits" : "21008000",
             "height" : len(self.blocks),
+            "coinbase_payload" : "",
         }
 
 @apply
