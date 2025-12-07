@@ -16,4 +16,4 @@ PERSIST = False
 WORKER_PORT = 17903
 BOOTSTRAP_ADDRS = 'p2pool.dashninja.pl test.p2pool.masternode.io test.p2pool.dash.siampm.com'.split(' ')
 ANNOUNCE_CHANNEL = ''
-VERSION_CHECK = lambda v: True
+VERSION_CHECK = lambda v: v >= 200000

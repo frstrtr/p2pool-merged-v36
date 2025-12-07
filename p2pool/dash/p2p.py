@@ -97,7 +97,9 @@ class Protocol(p2protocol.Protocol):
                 28: 'quorum_recovered_sig',
                 29: 'clsig',
                 30: 'islock',
-                31: 'isdlock'
+                31: 'isdlock',
+                32: 'dsq',
+                33: 'platform_ban'
             })),
             ('hash', pack.IntType(256)),
         ]))),
