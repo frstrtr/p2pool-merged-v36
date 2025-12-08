@@ -146,7 +146,11 @@ ssh user0@192.168.86.244 'tail -f ~/p2pool-dash/p2pool.log'
 ### Test CPU Mining
 ```bash
 cd /home/user0/Github/cpuminer-multi
-./cpuminer -a x11 -o stratum+tcp://192.168.86.244:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
+# Limited to 4 threads to reduce CPU heat
+./cpuminer -t 4 -a x11 -o stratum+tcp://192.168.86.244:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
+
+# For full speed (28 threads, may overheat):
+# ./cpuminer -a x11 -o stratum+tcp://192.168.86.244:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
 ```
 
 ## Code References
@@ -166,9 +170,10 @@ cd /home/user0/Github/cpuminer-multi
 
 ### Mining Performance
 - **Miner**: cpuminer-multi 1.3.7 with X11 algorithm
-- **Hashrate**: ~1.1 MH/s (28 CPU threads)
-  - High-performance cores: ~45 kH/s each
-  - Standard cores: ~35 kH/s each
+- **Threads**: 4 (limited from 28 to reduce CPU heat)
+- **Hashrate**: ~180 kH/s (4 CPU threads)
+  - Per-thread: ~45 kH/s each
+- **Previous Test**: ~1.1 MH/s (28 threads) - caused excessive CPU heat
 - **Stratum Difficulty**: 0.999985 (set by p2pool)
 - **Share Difficulty**: 0.000244
 - **Connection**: Successful, work being received and mined
