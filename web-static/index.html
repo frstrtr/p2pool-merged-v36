@@ -46,6 +46,8 @@
                 d3.select('#efficiency').text(local_stats.efficiency != null ? d3.format('.4p')(local_stats.efficiency) : '???')
                 d3.select('#uptime').text(format_dt(local_stats.uptime));
                 d3.select('#block_value').text(local_stats.block_value);
+                d3.select('#block_value_payments').text(local_stats.block_value_payments || 0);
+                d3.select('#block_value_miner').text(local_stats.block_value_miner || local_stats.block_value);
                 
                 d3.select('#warnings').selectAll().data(local_stats.warnings).enter().append('p')
                     .text(function(w){ return 'Warning: ' + w })
@@ -135,7 +137,7 @@
         <p>Local rate: <span id="local_rate"></span> (<span id="local_doa"></span> DOA) Expected time to share: <span id="time_to_share"></span></p>
         <p>Shares: <span id="shares_total"></span> total (<span id="shares_orphan"></span> orphaned, <span id="shares_dead"></span> dead) Efficiency: <span id="efficiency"></span></p>
         <p>Payout if a block were found NOW: <span id="payout_totamount"></span> <span class="symbol"></span> to <a id="payout_addrs"></a>. Expected after mining for 24 hours:  <span id="expected_payout_amount"></span> <span class="symbol"></span> per block.</p>
-        <p>Current block value: <span id="block_value"></span> <span class="symbol"></span> Expected time to block: <span id="time_to_block"></span></p>
+        <p>Current block value: <span id="block_value"></span> <span class="symbol"></span> (Masternode+Treasury: <span id="block_value_payments"></span>, Miner: <span id="block_value_miner"></span> <span class="symbol"></span>) Expected time to block: <span id="time_to_block"></span></p>
         <div id="warnings"></div>
         
         <h2>Share explorer</h2>

@@ -72,11 +72,13 @@ def getwork(dashd, net, use_getblocktemplate=True):
 
     for obj in payment_objects:
         g={}
-        if 'payee' in obj and obj['payee']:  # Skip empty payee addresses
-            g['payee'] = str(obj['payee'])
-            g['amount'] = obj['amount']
-            if g['amount'] > 0:
-                payment_amount += g['amount']
+        # Always count the amount towards payment_amount, even if payee is empty
+        if 'amount' in obj and obj['amount'] > 0:
+            payment_amount += obj['amount']
+            # Only add to packed_payments if there's a valid payee address
+            if 'payee' in obj and obj['payee']:
+                g['payee'] = str(obj['payee'])
+                g['amount'] = obj['amount']
                 packed_payments.append(g)
 
     coinbase_payload = None

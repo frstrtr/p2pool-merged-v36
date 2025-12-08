@@ -305,18 +305,17 @@ class Node(object):
                         break
     
     def get_current_txouts(self):
-	#i = 210240
-	real_subsidy = self.dashd_work.value['subsidy']
-	#while i <= self.dashd_work.value['height']:
-		#real_subsidy = real_subsidy*92.9/100
-		#i = i + 210240
         # Use value from getblocktemplate's result.
-        if self.dashd_work.value['payment_amount'] >= 0 :
-            real_pay = real_subsidy - self.dashd_work.value['payment_amount']
+        real_subsidy = self.dashd_work.value['subsidy']
+        payment_amount = self.dashd_work.value.get('payment_amount', -1)
+        
+        if payment_amount >= 0:
+            real_pay = real_subsidy - payment_amount
             return p2pool_data.get_expected_payouts(self.tracker, self.best_share_var.value, self.dashd_work.value['bits'].target, real_pay, self.net)
-            
-	if self.dashd_work.value['height'] > 158000+((576*30)* 17):
-		real_pay = (real_subsidy)*40/100
+        
+        # Fallback to legacy percentage-based calculation if payment_amount not available
+        if self.dashd_work.value['height'] > 158000+((576*30)* 17):
+            real_pay = (real_subsidy)*40/100
         elif self.dashd_work.value['height'] > 158000+((576*30)* 15):
             real_pay = (real_subsidy)*42.5/100
         elif self.dashd_work.value['height'] > 158000+((576*30)* 13):
