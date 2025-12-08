@@ -559,6 +559,9 @@ def run():
     worker_group.add_argument('-f', '--fee', metavar='FEE_PERCENTAGE',
         help='''charge workers mining to their own dash address (by setting their miner's username to a dash address) this percentage fee to mine on your p2pool instance. Amount displayed at http://127.0.0.1:WORKER_PORT/fee (default: 0)''',
         type=float, action='store', default=0, dest='worker_fee')
+    worker_group.add_argument('-s', '--share-rate', metavar='SECONDS_PER_SHARE',
+        help='Auto-adjust stratum mining difficulty on each connection to target this many seconds per pseudoshare (default: 10)',
+        type=float, action='store', default=10., dest='share_rate')
     
     dashd_group = parser.add_argument_group('dashd interface')
     dashd_group.add_argument('--dashd-config-path', metavar='DASHD_CONFIG_PATH',
@@ -713,6 +716,31 @@ def run():
             ).addBoth(lambda x: None)
     if not args.no_bugreport:
         log.addObserver(ErrorReporter().emit)
+    
+    # Filter out benign OpenSSL import errors from Twisted's HTTP client
+    original_observer = log.theLogPublisher.observers[0] if log.theLogPublisher.observers else None
+    def filter_openssl_errors(eventDict):
+        # Check for OpenSSL ImportError in failure or isError events
+        if eventDict.get('isError'):
+            msg = eventDict.get('message', '')
+            why = eventDict.get('why', '')
+            failure = eventDict.get('failure')
+            
+            # Build text to check from all available sources
+            check_text = str(msg) + str(why)
+            if failure:
+                check_text += failure.getTraceback()
+            
+            # Suppress OpenSSL import errors from twisted.web
+            if 'No module named OpenSSL' in check_text:
+                return  # Suppress this error
+        
+        if original_observer:
+            original_observer(eventDict)
+    
+    if original_observer:
+        log.removeObserver(original_observer)
+        log.addObserver(filter_openssl_errors)
     
     reactor.callWhenRunning(main, args, net, datadir_path, merged_urls, worker_endpoint)
     reactor.run()
