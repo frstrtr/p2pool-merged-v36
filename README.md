@@ -31,7 +31,8 @@ The installation guide covers:
 
 * ✅ **ASICBOOST Support**: Full BIP320 version-rolling implementation
 * ✅ **Modern ASIC Compatible**: Works with Antminer D3/D5/D7
-* ✅ **Variable Difficulty**: Automatic stratum vardiff adjustment
+* ✅ **Enhanced Difficulty Control**: Support for +difficulty and /difficulty modifiers
+* ✅ **Variable Difficulty**: Configurable vardiff with --share-rate parameter
 * ✅ **Backward Compatible**: CPU/GPU miners still supported
 
 ### Modern Ubuntu/Debian (24.04+)
@@ -93,6 +94,28 @@ stratum+tcp://YOUR_IP:7903
 Username: Your Dash address  
 Password: anything
 
+### Advanced Username Options
+
+You can append difficulty modifiers to your Dash address:
+
+**Pseudoshare difficulty** (for vardiff tuning):
+```
+YOUR_ADDRESS+DIFFICULTY
+Example: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u+4096
+```
+
+**Actual share difficulty** (fixed minimum):
+```
+YOUR_ADDRESS/DIFFICULTY
+Example: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u/65536
+```
+
+**Worker names** (for monitoring):
+```
+YOUR_ADDRESS.worker_name
+Example: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u.antminer1
+```
+
 ## Configuration Modes
 
 ### Standalone Mode (Solo/Testing)
@@ -121,6 +144,7 @@ Common options:
 - `-a ADDRESS` - Your Dash payout address
 - `--dashd-rpc-port 9998` - Dash RPC port (default: 9998)
 - `--dashd-address 127.0.0.1` - Dash RPC address
+- `--share-rate SECONDS` - Target seconds per pseudoshare (default: 10)
 
 ## Troubleshooting
 
@@ -138,15 +162,23 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 
 **See [INSTALL.md](INSTALL.md) for complete troubleshooting guide.**
 
-## Recent Fixes (v23.0+)
+## Recent Updates
 
-Recent commits fixed critical issues:
+### v23.0+ Critical Fixes
 - ✅ Missing type classes in pack.py (ComposedWithContextualOptionalsType, ContextualOptionalType, BoolType)
 - ✅ Wrong module import (bitcoin → dash)
 - ✅ Block hash formatting (zero-padding)
 - ✅ Empty payee address handling
 - ✅ Removed defunct bootstrap nodes
 - ✅ Standalone mode support (PERSIST=False)
+
+### Enhanced Features (December 2025)
+- ✅ Enhanced difficulty control (+diff, /diff modifiers)
+- ✅ X11 DUMB_SCRYPT_DIFF constant for accurate difficulty display
+- ✅ Worker IP tracking infrastructure
+- ✅ Configurable vardiff with --share-rate parameter (default: 10 seconds)
+- ✅ Improved min_share_target bounds for better difficulty adjustment
+- ✅ Fixed Dash-specific got_response() signature compatibility
 
 ## Port Forwarding
 

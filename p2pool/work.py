@@ -51,6 +51,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.my_doa_share_hashes = set()
 
         self.address_throttle = 0
+        self.share_rate = args.share_rate  # Stratum vardiff target (seconds per pseudoshare)
 
         self.tracker_view = forest.TrackerView(self.node.tracker, forest.get_attributedelta_type(dict(forest.AttributeDelta.attrs,
             my_count=lambda share: 1 if share.hash in self.my_share_hashes else 0,
@@ -175,6 +176,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
         assert len(contents) % 2 == 1
 
         user, contents2 = contents[0], contents[1:]
+        
+        # Parse worker name (supports user.worker or user_worker format)
+        worker = ''
+        if '_' in user:
+            worker = user.split('_')[1]
+            user = user.split('_')[0]
+        elif '.' in user:
+            worker = user.split('.')[1]
+            user = user.split('.')[0]
 
         desired_pseudoshare_target = None
         desired_share_target = None
@@ -208,6 +218,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
             except: # XXX blah
                 if self.args.address != 'dynamic':
                     pubkey_hash = self.my_pubkey_hash
+        
+        # Append worker name to user for identification
+        if worker:
+            user = user + '.' + worker
 
         return user, pubkey_hash, desired_share_target, desired_pseudoshare_target
 
@@ -393,6 +407,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
             coinb2=packed_gentx[-coinbase_payload_data_size-4:],
             timestamp=self.current_work.value['time'],
             bits=self.current_work.value['bits'],
+            min_share_target=share_info['bits'].target,  # Minimum share difficulty
             share_target=target,
         )
 

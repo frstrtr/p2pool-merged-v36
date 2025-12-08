@@ -21,13 +21,14 @@ class StratumRPCMiningProvider(object):
         self.transport = transport
         
         self.username = None
+        self.worker_ip = transport.getPeer().host if transport else None  # Track worker IP
         self.handler_map = expiring_dict.ExpiringDict(300)
         
         self.watch_id = self.wb.new_work_event.watch(self._send_work)
         
         self.recent_shares = []
         self.target = None
-        self.share_rate = getattr(self.wb.net, 'STRATUM_SHARE_RATE', 10)  # From p2pool network config
+        self.share_rate = wb.share_rate  # From command-line or default (10 sec)
         self.fixed_target = False
         self.desired_pseudoshare_target = None
     
@@ -42,7 +43,7 @@ class StratumRPCMiningProvider(object):
     
     def rpc_authorize(self, username, password):
         if not hasattr(self, 'authorized'):  # authorize can be called many times in one connection
-            print '>>>Authorize: %s from %s' % (username, self.transport.getPeer().host)
+            print '>>>Authorize: %s from %s' % (username, self.worker_ip)
             self.authorized = username
         self.username = username.strip()
         
@@ -91,8 +92,8 @@ class StratumRPCMiningProvider(object):
             self.target = max(self.target, int(x['bits'].target))
         else:
             self.fixed_target = False
-            # Dash doesn't have min_share_target, just use share_target or keep current
-            self.target = x['share_target'] if self.target == None else self.target
+            # Use min_share_target as lower bound for difficulty adjustment
+            self.target = x['share_target'] if self.target == None else max(x['min_share_target'], self.target)
         
         jobid = str(random.randrange(2**128))
         self.other.svc_mining.rpc_set_difficulty(dash_data.target_to_difficulty(self.target)).addErrback(lambda err: None)
@@ -140,7 +141,9 @@ class StratumRPCMiningProvider(object):
             bits=x['bits'],
             nonce=pack.IntType(32).unpack(getwork._swap4(nonce.decode('hex'))),
         )
-        result = got_response(header, worker_name, coinb_nonce, self.target)
+        # Dash's got_response takes 3 args: (header, user, coinbase_nonce)
+        # Bitcoin's takes 4: (header, username, coinbase_nonce, pseudoshare_target)
+        result = got_response(header, worker_name, coinb_nonce)
         
         # Adjust difficulty on this stratum to target ~10sec/pseudoshare
         if not self.fixed_target:
@@ -154,8 +157,8 @@ class StratumRPCMiningProvider(object):
                 if newtarget != self.target:
                     print "Clipping target from %064x to %064x" % (self.target, newtarget)
                 self.target = newtarget
-                # Dash doesn't have min_share_target, ensure target doesn't go below share_target
-                self.target = max(x['share_target'], self.target)
+                # Ensure target doesn't go below minimum share target
+                self.target = max(x['min_share_target'], self.target)
                 self.recent_shares = [time.time()]
                 self._send_work()
         

@@ -114,6 +114,7 @@ class CachingWorkerBridge(object):
         self.COINBASE_NONCE_LENGTH = (inner.COINBASE_NONCE_LENGTH+1)//2
         self.new_work_event = inner.new_work_event
         self.preprocess_request = inner.preprocess_request
+        self.share_rate = inner.share_rate  # Pass through share_rate from inner bridge
         
         self._my_bits = (self._inner.COINBASE_NONCE_LENGTH - self.COINBASE_NONCE_LENGTH)*8
         

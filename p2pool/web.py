@@ -456,9 +456,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         
         current_txouts = node.get_current_txouts()
         my_current_payouts = 0.0
-        for add in wb.pubkeys.keys:
+        for pubkey_hash in wb.pubkeys.keys:
             my_current_payouts += current_txouts.get(
-                    add['address'], 0) * 1e-8
+                    pubkey_hash, 0) * 1e-8
         hd.datastreams['current_payout'].add_datum(t, my_current_payouts)
         miner_hash_rates, miner_dead_hash_rates = wb.get_local_rates()
         current_txouts_by_address = current_txouts
