@@ -123,8 +123,17 @@ class StratumRPCMiningProvider(object):
             # Start at a reasonable default difficulty that will quickly adjust via vardiff
             # Don't cap at min_share_target - that would prevent vardiff from going harder
             if self.target is None:
-                # First connection: start at difficulty 1 (easy), vardiff will adjust up
-                self.target = x['min_share_target']
+                # First connection: start at difficulty 100
+                # This is a balance between:
+                # - Not too low (diff 1 causes share flood from ASICs)
+                # - Not too high (diff 10000 makes slow miners wait too long)
+                # At 1.7 TH/s ASIC: ~0.25 sec/share (will ramp up quickly)
+                # At 100 MH/s GPU: ~4 sec/share (reasonable)
+                # Vardiff will adjust from here (up or down as needed)
+                initial_diff = 100
+                diff1_target = 0xFFFF * 2**208  # Standard bdiff difficulty 1 target
+                self.target = diff1_target // initial_diff
+                print 'STRATUM: New worker starting at difficulty %d' % initial_diff
         
         # For ASIC compatibility: periodically send extranonce updates
         # Even with empty extranonce, this helps ASICs reset their state
@@ -152,6 +161,10 @@ class StratumRPCMiningProvider(object):
             True, # clean_jobs
         ).addErrback(lambda err: None)
         self.handler_map[jobid] = x, got_response, job_target  # Store job_target with the job
+        
+        # Debug: log the job creation with its target
+        print 'DEBUG JOB: created job_id=%s target=%x (diff=%.2f)' % (
+            jobid, job_target, dash_data.target_to_difficulty(job_target))
     
     def rpc_submit(self, worker_name, job_id, extranonce2, ntime, nonce, version_bits=None, *args):
         # ASICBOOST: version_bits is the version mask that the miner used
@@ -181,6 +194,11 @@ class StratumRPCMiningProvider(object):
             raise ValueError('Stale job: %s' % job_id[:16])
         
         x, got_response, job_target = self.handler_map[job_id]  # Retrieve job_target
+        
+        # Debug: log the job_target being used for validation
+        print 'DEBUG SUBMIT: job_id=%s worker=%s job_target=%x (diff=%.2f)' % (
+            job_id, worker_name, job_target, dash_data.target_to_difficulty(job_target))
+        
         try:
             coinb_nonce = extranonce2.decode('hex')
         except Exception as e:
