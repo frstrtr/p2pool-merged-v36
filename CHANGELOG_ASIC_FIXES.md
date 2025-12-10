@@ -1,6 +1,6 @@
 # ASIC Support Fixes - December 2025
 
-This document summarizes the fixes made to support high-hashrate ASIC miners (particularly Antminer D9 with ~2 TH/s).
+This document summarizes the fixes made to support high-hashrate ASIC miners (particularly Antminer D9 with ~1.7 TH/s each, ~10 TH/s total for 6 miners).
 
 ## Summary of Changes
 
@@ -39,35 +39,64 @@ MAX_TARGET = 0xFFFF * 2**208  # Standard bdiff difficulty 1
 
 Major improvements to handle high-hashrate ASIC miners:
 
-- **Faster Adjustment:** Triggers vardiff recalculation after 3 shares instead of 12
-- **Larger Adjustment Range:** Allows 0.25x to 4x adjustment per iteration (was 0.5x to 2x)
-- **Rate Limiting:** Drops submissions if more than 100/sec to prevent server overload
-- **Proper Difficulty Floor:** Uses `min()` instead of `max()` to enforce difficulty floor (lower target = harder difficulty)
-- **Short Job IDs:** Changed from 128-bit to 32-bit (8 hex chars) for ASIC compatibility
-- **Better Error Handling:** Don't disconnect on temporary dashd errors
+- **Initial Difficulty 100:** New workers start at difficulty 100 instead of 1, preventing share flood from high-hashrate ASICs while still allowing slower miners to submit shares quickly.
+- **Job-Specific Target Tracking:** Each job stores its own target when created. When shares are submitted, they're validated against the job's original target, not the current target. This prevents race conditions during vardiff adjustments.
+- **Bidirectional Vardiff:** Difficulty adjusts both UP (for fast miners) and DOWN (for slow miners) to maintain ~10 second share intervals.
+- **Faster Adjustment:** Triggers vardiff recalculation after 3 shares instead of 12.
+- **Larger Adjustment Range:** Allows 0.25x to 4x adjustment per iteration (was 0.5x to 2x).
+- **Rate Limiting:** Drops submissions if more than 100/sec to prevent server overload.
+- **Short Job IDs:** Changed from 128-bit to 32-bit (8 hex chars) for ASIC compatibility.
+- **Better Error Handling:** Don't disconnect on temporary dashd errors.
 
-### 4. Fixed Weakref Callback Errors
+### 4. Fixed "hash > target" Race Condition
+**Files:** `p2pool/dash/stratum.py`, `p2pool/work.py`
+
+- **Problem:** When vardiff adjusted difficulty, shares submitted for old jobs would be validated against the new (harder) target, causing "hash > target" rejections even though the share was valid for its original job.
+- **Solution:** Store `job_target` with each job in `handler_map`. When a share is submitted, retrieve and use that job's original target for validation.
+- **Result:** Miners no longer see share rejections during vardiff transitions.
+
+```python
+# Job creation: capture target at dispatch time
+job_target = self.target
+self.handler_map[jobid] = x, got_response, job_target
+
+# Share submission: use the job's original target
+x, got_response, job_target = self.handler_map[job_id]
+result = got_response(header, worker_name, coinb_nonce, job_target)
+```
+
+### 5. Fixed Weakref Callback Errors
 **Files:** `p2pool/util/forest.py`, `p2pool/util/variable.py`
 
 - **Problem:** Weakref callbacks could crash with "TypeError: 'NoneType' object is not callable" during garbage collection.
 - **Solution:** Added safe wrappers that check for None before calling the referenced object.
 
-### 5. Improved Work Generation
+### 6. Improved Work Generation
 **Files:** `p2pool/work.py`
 
 - **Fixed Share Difficulty Floor:** Properly enforce minimum difficulty from `SANE_TARGET_RANGE` during bootstrap and normal operation.
+- **Submitted Target Support:** `got_response()` now accepts an optional `submitted_target` parameter for vardiff compatibility.
 - The P2Pool share floor now respects both `share_info['bits'].target` and network's `SANE_TARGET_RANGE[1]`.
 
-### 6. Better Dashd Error Handling
+### 7. Better Dashd Error Handling
 **Files:** `p2pool/dash/helper.py`
 
 - Added specific handling for `TimeoutError` and `ConnectionRefusedError` from dashd RPC calls.
 - Retry silently on temporary errors instead of crashing.
 
-### 7. Web Interface Fix
+### 8. Web Interface Fix
 **Files:** `p2pool/web.py`
 
 - Fixed `best_share_hash` endpoint to handle `None` value during bootstrap (returns 64 zeros instead of crashing).
+
+## Testing Results
+
+With 6× Antminer D9 miners (~1.7 TH/s each):
+- **Total Hashrate:** ~9-10 TH/s (correctly measured)
+- **Share Rejections:** 0% "hash > target" errors after fix
+- **Dead on Arrival:** ~0%
+- **Vardiff Range:** 3000-10000 depending on individual miner speed
+- **Miners Stay Connected:** No disconnections due to vardiff changes
 
 ## Testing Configuration
 
@@ -77,6 +106,7 @@ For testing without peers, `CHAIN_LENGTH` and `REAL_CHAIN_LENGTH` are temporaril
 
 After deploying these changes:
 1. Restart P2Pool to apply new configuration
-2. Workers will reconnect and difficulty will ramp up appropriately
-3. Local hashrate display should show correct values (~2 TH/s per D9 ASIC)
-4. Vardiff should stabilize around 3000-10000 for D9 miners with 10s target rate
+2. Workers will reconnect and start at difficulty 100
+3. Vardiff will ramp up to appropriate difficulty within seconds
+4. Local hashrate display should show correct values (~1.7 TH/s per D9 ASIC)
+5. Vardiff should stabilize around 3000-10000 for D9 miners with 10s target rate

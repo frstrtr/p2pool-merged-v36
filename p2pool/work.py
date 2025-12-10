@@ -427,6 +427,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # This is needed for vardiff - stratum adjusts target after get_work() returns
             effective_target = submitted_target if submitted_target is not None else target
             
+            # Debug: trace target values for share validation
+            print 'DEBUG SHARE: user=%s submitted_target=%s effective_target=%x target=%x' % (
+                user,
+                '%x' % submitted_target if submitted_target is not None else 'None',
+                effective_target,
+                target
+            )
+            
             assert len(coinbase_nonce) == self.COINBASE_NONCE_LENGTH
             new_packed_gentx = packed_gentx[:-coinbase_payload_data_size-self.COINBASE_NONCE_LENGTH-4] + coinbase_nonce + packed_gentx[-coinbase_payload_data_size-4:] if coinbase_nonce != '\0'*self.COINBASE_NONCE_LENGTH else packed_gentx
             new_gentx = dash_data.tx_type.unpack(new_packed_gentx) if coinbase_nonce != '\0'*self.COINBASE_NONCE_LENGTH else gentx
