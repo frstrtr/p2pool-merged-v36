@@ -562,6 +562,18 @@
                             <td>Session Storage</td>
                             <td>10,000 max, 1hr TTL</td>
                         </tr>
+                        <tr>
+                            <td>Max Connections/IP</td>
+                            <td id="max_conn_per_ip">50</td>
+                        </tr>
+                        <tr>
+                            <td>Ban Duration</td>
+                            <td>1 hour</td>
+                        </tr>
+                        <tr>
+                            <td>Ban Threshold</td>
+                            <td>10 violations</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -593,6 +605,16 @@
                     <div class="security-label">Rate Limit Usage</div>
                     <div class="security-value" id="rate_limit_pct">-</div>
                     <div class="security-unit">of max capacity</div>
+                </div>
+                <div class="security-card">
+                    <div class="security-label">Banned IPs</div>
+                    <div class="security-value" id="banned_ips">0</div>
+                    <div class="security-unit">active bans</div>
+                </div>
+                <div class="security-card">
+                    <div class="security-label">Banned Workers</div>
+                    <div class="security-value" id="banned_workers">0</div>
+                    <div class="security-unit">active bans</div>
                 </div>
             </div>
             <div class="threat-info" id="threat-info" style="display: none;">
@@ -816,6 +838,32 @@
                     rateEl.attr('class', 'security-value elevated');
                 } else {
                     rateEl.attr('class', 'security-value normal');
+                }
+                
+                // Banned counts
+                var bannedIPs = secData.banned_ips_count || 0;
+                var bannedWorkers = secData.banned_workers_count || 0;
+                var bannedIPsEl = d3.select('#banned_ips');
+                var bannedWorkersEl = d3.select('#banned_workers');
+                
+                bannedIPsEl.text(bannedIPs);
+                bannedWorkersEl.text(bannedWorkers);
+                
+                if (bannedIPs > 0) {
+                    bannedIPsEl.attr('class', 'security-value elevated');
+                } else {
+                    bannedIPsEl.attr('class', 'security-value normal');
+                }
+                
+                if (bannedWorkers > 0) {
+                    bannedWorkersEl.attr('class', 'security-value elevated');
+                } else {
+                    bannedWorkersEl.attr('class', 'security-value normal');
+                }
+                
+                // Update limits display
+                if (secData.limits) {
+                    d3.select('#max_conn_per_ip').text(secData.limits.max_connections_per_ip || 50);
                 }
                 
                 // Threat level badge
