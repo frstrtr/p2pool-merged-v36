@@ -538,9 +538,145 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     ))
         except Exception as e:
             log.err(e, 'Error getting recent blocks:')
+        
+        # Calculate luck for each block
+        # Luck = expected_time / actual_time * 100%
+        # We need pool hashrate at time of each block to calculate expected time
+        if len(blocks) >= 1:
+            # Sort by timestamp (oldest first for calculation)
+            blocks_sorted = sorted(blocks, key=lambda x: x['ts'])
+            
+            for i, block in enumerate(blocks_sorted):
+                if i == 0:
+                    # First block: can't calculate luck without previous reference
+                    # Use time since pool start or estimate from share chain
+                    block['luck'] = None
+                    block['time_to_find'] = None
+                    block['expected_time'] = None
+                else:
+                    # Time between this block and previous block
+                    prev_block = blocks_sorted[i - 1]
+                    actual_time = block['ts'] - prev_block['ts']
+                    block['time_to_find'] = actual_time
+                    
+                    # Get pool hashrate around the time of this block
+                    # Use current pool stats as approximation
+                    try:
+                        lookbehind = min(height, 3600 // node.net.SHARE_PERIOD)
+                        pool_hashrate = p2pool_data.get_pool_attempts_per_second(
+                            node.tracker, node.best_share_var.value, lookbehind)
+                        stale_prop = p2pool_data.get_average_stale_prop(
+                            node.tracker, node.best_share_var.value, lookbehind)
+                        effective_hashrate = pool_hashrate / (1 - stale_prop) if stale_prop < 1 else pool_hashrate
+                        
+                        # Expected time = difficulty * 2^32 / hashrate
+                        block_difficulty = bitcoin_data.target_to_difficulty(
+                            node.tracker.items[node.best_share_var.value].header['bits'].target)
+                        expected_time = (block_difficulty * 2**32) / effective_hashrate if effective_hashrate > 0 else 0
+                        
+                        block['expected_time'] = expected_time
+                        if actual_time > 0 and expected_time > 0:
+                            block['luck'] = (expected_time / actual_time) * 100
+                        else:
+                            block['luck'] = None
+                    except Exception:
+                        block['luck'] = None
+                        block['expected_time'] = None
+            
+            # Restore original order (newest first)
+            blocks = sorted(blocks_sorted, key=lambda x: x['ts'], reverse=True)
+            
+            # Calculate overall luck stats
+            valid_luck = [b['luck'] for b in blocks if b['luck'] is not None]
+            if valid_luck:
+                avg_luck = sum(valid_luck) / len(valid_luck)
+                # Add summary to first item or create metadata
+                if blocks:
+                    blocks[0]['pool_avg_luck'] = avg_luck
+                    blocks[0]['blocks_for_luck'] = len(valid_luck)
+        
         defer.returnValue(blocks)
     
+    @defer.inlineCallbacks
+    def get_luck_stats():
+        """Get pool luck statistics based on blocks found."""
+        blocks = yield get_recent_blocks()
+        
+        if not blocks:
+            defer.returnValue(dict(
+                blocks_found=0,
+                luck_available=False,
+                message="No blocks found yet"
+            ))
+        
+        # Calculate luck statistics
+        valid_blocks = [b for b in blocks if b.get('luck') is not None]
+        
+        if len(valid_blocks) < 1:
+            # Only one block, can't calculate luck
+            defer.returnValue(dict(
+                blocks_found=len(blocks),
+                luck_available=False,
+                message="Need at least 2 blocks to calculate luck"
+            ))
+        
+        luck_values = [b['luck'] for b in valid_blocks]
+        times_to_find = [b['time_to_find'] for b in valid_blocks if b.get('time_to_find')]
+        
+        # Current expected time to block
+        try:
+            lookbehind = min(node.tracker.get_height(node.best_share_var.value), 3600 // node.net.SHARE_PERIOD)
+            pool_hashrate = p2pool_data.get_pool_attempts_per_second(
+                node.tracker, node.best_share_var.value, lookbehind)
+            stale_prop = p2pool_data.get_average_stale_prop(
+                node.tracker, node.best_share_var.value, lookbehind)
+            effective_hashrate = pool_hashrate / (1 - stale_prop) if stale_prop < 1 else pool_hashrate
+            
+            block_difficulty = bitcoin_data.target_to_difficulty(
+                wb.current_work.value['bits'].target)
+            current_expected_time = (block_difficulty * 2**32) / effective_hashrate if effective_hashrate > 0 else 0
+        except Exception:
+            current_expected_time = None
+        
+        # Time since last block
+        if blocks:
+            newest_block = max(blocks, key=lambda x: x['ts'])
+            time_since_last = time.time() - newest_block['ts']
+        else:
+            time_since_last = None
+        
+        defer.returnValue(dict(
+            blocks_found=len(blocks),
+            blocks_with_luck=len(valid_blocks),
+            luck_available=True,
+            
+            # Luck statistics
+            average_luck=sum(luck_values) / len(luck_values),
+            min_luck=min(luck_values),
+            max_luck=max(luck_values),
+            
+            # Timing statistics  
+            avg_time_between_blocks=sum(times_to_find) / len(times_to_find) if times_to_find else None,
+            min_time_between_blocks=min(times_to_find) if times_to_find else None,
+            max_time_between_blocks=max(times_to_find) if times_to_find else None,
+            
+            # Current state
+            current_expected_time=current_expected_time,
+            time_since_last_block=time_since_last,
+            current_luck_trend=(current_expected_time / time_since_last * 100) if (current_expected_time and time_since_last and time_since_last > 0) else None,
+            
+            # Individual block luck (newest first)
+            blocks=[dict(
+                number=b.get('number'),
+                ts=b['ts'],
+                luck=b.get('luck'),
+                time_to_find=b.get('time_to_find'),
+                status=b.get('status'),
+            ) for b in sorted(blocks, key=lambda x: x['ts'], reverse=True)]
+        ))
+    
     web_root.putChild('recent_blocks', WebInterface(get_recent_blocks))
+    web_root.putChild('luck_stats', WebInterface(get_luck_stats))
     web_root.putChild('uptime', WebInterface(lambda: time.time() - start_time))
     web_root.putChild('stale_rates', WebInterface(lambda: p2pool_data.get_stale_counts(node.tracker, node.best_share_var.value, decent_height(), rates=True)))
     

@@ -764,6 +764,7 @@
                 <div class="section-header">
                     <h2>🏆 Recent Blocks</h2>
                     <span class="badge" id="blocks_count">0</span>
+                    <span class="badge" id="pool_luck_badge" style="margin-left: 10px; background: var(--success);">Luck: -</span>
                 </div>
                 <table id="blocks">
                     <thead>
@@ -771,6 +772,7 @@
                             <th>Time</th>
                             <th>Height</th>
                             <th>Block Hash</th>
+                            <th>Luck</th>
                             <th>Status</th>
                         </tr>
                     </thead>
@@ -945,7 +947,7 @@
                 d3.select('#blocks_loading').style('display', 'none');
                 if (!blocks || blocks.length === 0) {
                     d3.select('#blocks tbody').append('tr').append('td')
-                        .attr('colspan', '4')
+                        .attr('colspan', '5')
                         .style('text-align', 'center')
                         .style('color', 'var(--text-muted)')
                         .text('No blocks found yet');
@@ -953,6 +955,20 @@
                 }
                 
                 d3.select('#blocks_count').text(blocks.length);
+                
+                // Update pool average luck badge
+                if (blocks[0] && blocks[0].pool_avg_luck) {
+                    var avgLuck = blocks[0].pool_avg_luck;
+                    var luckBadge = d3.select('#pool_luck_badge');
+                    luckBadge.text('Avg Luck: ' + d3.format('.0f')(avgLuck) + '%');
+                    if (avgLuck >= 100) {
+                        luckBadge.style('background', 'var(--success)');
+                    } else if (avgLuck >= 75) {
+                        luckBadge.style('background', 'var(--warning)');
+                    } else {
+                        luckBadge.style('background', 'var(--danger)');
+                    }
+                }
                 
                 var tr = d3.select('#blocks tbody').selectAll('tr').data(blocks).enter().append('tr');
                 tr.append('td').text(function(b) { return format_time_short(b.ts); });
@@ -962,6 +978,21 @@
                     .attr('href', function(b) { return currency_info.block_explorer_url_prefix + b.hash; })
                     .attr('target', '_blank')
                     .text(function(b) { return b.hash.substr(0, 16) + '...' + b.hash.substr(-8); });
+                tr.append('td')
+                    .attr('class', function(b) {
+                        if (!b.luck) return '';
+                        if (b.luck >= 100) return 'status-confirmed';
+                        if (b.luck >= 75) return 'status-pending';
+                        return 'status-orphaned';
+                    })
+                    .text(function(b) {
+                        if (!b.luck) return '-';
+                        return d3.format('.0f')(b.luck) + '%';
+                    })
+                    .attr('title', function(b) {
+                        if (!b.time_to_find) return '';
+                        return 'Found in ' + format_dt(b.time_to_find) + (b.expected_time ? ' (expected: ' + format_dt(b.expected_time) + ')' : '');
+                    });
                 tr.append('td')
                     .attr('class', function(b) {
                         if (b.status === 'confirmed') return 'status-confirmed';
