@@ -78,16 +78,9 @@
             }
             
             function update_stats() {
-                d3.json('../stratum_stats', function(error, data) {
-                    // Handle various error conditions
-                    if (error) {
-                        var errMsg = 'Network error';
-                        if (error.status) errMsg = 'HTTP ' + error.status;
-                        if (error.statusText) errMsg += ': ' + error.statusText;
-                        d3.select('#error-msg').style('display', 'block')
-                            .text('Error loading stratum stats: ' + errMsg);
-                        return;
-                    }
+                // d3.v2 uses single callback argument (data), not (error, data)
+                d3.json('../stratum_stats', function(data) {
+                    // Handle error conditions
                     if (!data) {
                         d3.select('#error-msg').style('display', 'block')
                             .text('Error: No data received from server');
