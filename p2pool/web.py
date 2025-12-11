@@ -403,6 +403,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             # Format worker stats for JSON
             formatted_workers = {}
             for worker_name, wstats in worker_stats.items():
+                # Get aggregate connection stats (Option A: Aggregate Worker Stats)
+                conn_aggregate = pool_stats.get_worker_aggregate_stats(worker_name)
+                
                 formatted_workers[worker_name] = {
                     'shares': wstats.get('shares', 0),
                     'accepted': wstats.get('accepted', 0),
@@ -410,6 +413,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     'hash_rate': wstats.get('hash_rate', 0),
                     'last_seen': wstats.get('last_seen', 0),
                     'first_seen': wstats.get('first_seen', 0),
+                    # Connection aggregate stats
+                    'connections': conn_aggregate.get('connection_count', 0) if conn_aggregate else 0,
+                    'active_connections': conn_aggregate.get('active_connections', 0) if conn_aggregate else 0,
+                    'backup_connections': conn_aggregate.get('backup_connections', 0) if conn_aggregate else 0,
+                    'connection_difficulties': conn_aggregate.get('difficulties', []) if conn_aggregate else [],
                 }
             
             return {
