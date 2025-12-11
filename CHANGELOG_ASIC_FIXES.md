@@ -314,15 +314,39 @@ Enhanced logging with:
 
 ### Performance Protection Summary
 
-The new difficulty-related features include multiple safeguards to prevent pool overload:
+The new difficulty-related features include multiple safeguards to prevent pool overload and protect miners:
 
 | Safeguard | Description |
 |-----------|-------------|
-| MIN_DIFFICULTY_FLOOR | Absolute minimum difficulty (0.001 by default) |
+| MIN_DIFFICULTY_FLOOR | Absolute minimum difficulty (0.001) - prevents share flooding |
+| MAX_DIFFICULTY_CEILING | Maximum difficulty (1,000,000) - prevents miner timeout from impossibly high diff |
 | MAX_SUBMISSIONS_PER_SECOND | Global rate limit (1000/sec default) |
 | Dynamic minimum adjustment | When submission rate > 50% of max, minimum difficulty increases |
 | Per-connection rate limiting | Drop shares if > 100/sec from single connection |
 | Vardiff continues operating | Even with suggest_difficulty, vardiff adjusts based on actual performance |
+
+### 21. Stratum Statistics Web Page (NEW)
+**Files:** `web-static/stratum.html`, `web-static/index.html`
+
+New dedicated web page for stratum statistics accessible from main index:
+
+**Features:**
+- Pool overview (connections, workers, accept/reject rates)
+- Per-worker statistics table with hash rates
+- Protocol extensions status display
+- Pool safeguards documentation
+- Auto-refresh every 10 seconds
+
+**Access:** `http://localhost:7903/static/stratum.html`
+
+### Web UI Pages
+
+| Page | URL | Description |
+|------|-----|-------------|
+| Main | `/static/index.html` | Pool overview, payouts, blocks |
+| Graphs | `/static/graphs.html` | Hash rate graphs |
+| **Stratum Stats** | `/static/stratum.html` | **NEW** - Worker stats, protocol extensions |
+| Share Explorer | `/static/share.html` | Individual share details |
 
 ### Web API Endpoints
 
