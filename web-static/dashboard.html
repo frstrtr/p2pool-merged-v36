@@ -419,6 +419,30 @@
             .two-col { grid-template-columns: 1fr; }
         }
         
+        /* Value + Graph Row Layout */
+        .value-graph-row {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .value-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .value-cards .stat-card {
+            margin: 0;
+        }
+        
+        @media (max-width: 900px) {
+            .value-graph-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        
         /* Hashrate Graph Section */
         .graph-section {
             background: var(--card-bg);
@@ -574,6 +598,62 @@
             stroke-width: 2;
             stroke-dasharray: 5,3;
         }
+        
+        /* Compact graph styles */
+        .graph-section.compact {
+            margin-bottom: 0;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        .graph-section.compact .graph-header {
+            margin-bottom: 8px;
+        }
+        
+        .graph-section.compact .graph-header h2 {
+            font-size: 1rem;
+        }
+        
+        .graph-section.compact .time-selector {
+            padding: 2px;
+        }
+        
+        .graph-section.compact .time-btn {
+            padding: 4px 8px;
+            font-size: 0.75rem;
+        }
+        
+        .graph-legend.compact {
+            gap: 12px;
+            margin-bottom: 6px;
+            font-size: 0.75rem;
+        }
+        
+        .graph-legend.compact .legend-color {
+            width: 10px;
+            height: 10px;
+        }
+        
+        .graph-container.compact {
+            height: 140px;
+            flex: 1;
+            min-height: 120px;
+        }
+        
+        .graph-stats.compact {
+            gap: 15px;
+            margin-top: 8px;
+        }
+        
+        .graph-stats.compact .graph-stat-label {
+            font-size: 0.65rem;
+        }
+        
+        .graph-stats.compact .graph-stat-value {
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
@@ -630,19 +710,51 @@
                 <div class="stat-sub">Out: <span id="peers_out">-</span> | In: <span id="peers_in">-</span></div>
                 <div class="stat-detail">Uptime: <span id="uptime">-</span></div>
             </div>
-            
-            <div class="stat-card">
-                <h3><span class="icon">💰</span> Block Value</h3>
-                <div class="stat-value warning"><span id="block_value_miner">-</span> <small class="symbol-small">DASH</small></div>
-                <div class="stat-sub">Total: <span id="block_value">-</span> (MN/Treas: <span id="block_value_payments">-</span>)</div>
-                <div class="stat-detail">Expected Block: <span id="time_to_block">-</span></div>
+        </div>
+        
+        <!-- Block Value, Payout and Graph Row -->
+        <div class="value-graph-row">
+            <div class="value-cards">
+                <div class="stat-card">
+                    <h3><span class="icon">💰</span> Block Value</h3>
+                    <div class="stat-value warning"><span id="block_value_miner">-</span> <small class="symbol-small">DASH</small></div>
+                    <div class="stat-sub">Total: <span id="block_value">-</span> (MN/Treas: <span id="block_value_payments">-</span>)</div>
+                    <div class="stat-detail">Expected Block: <span id="time_to_block">-</span></div>
+                </div>
+                
+                <div class="stat-card">
+                    <h3><span class="icon">💎</span> Your Payout</h3>
+                    <div class="stat-value success"><span id="payout_totamount">-</span> <small class="symbol-small">DASH</small></div>
+                    <div class="stat-sub">If block found now</div>
+                    <div class="stat-detail">Expected 24h: <span id="expected_payout_amount">-</span> <span class="symbol-small">DASH</span></div>
+                </div>
             </div>
             
-            <div class="stat-card">
-                <h3><span class="icon">💎</span> Your Payout</h3>
-                <div class="stat-value success"><span id="payout_totamount">-</span> <small class="symbol-small">DASH</small></div>
-                <div class="stat-sub">If block found now</div>
-                <div class="stat-detail">Expected 24h: <span id="expected_payout_amount">-</span> <span class="symbol-small">DASH</span></div>
+            <!-- Pool Hashrate Graph (compact) -->
+            <div class="graph-section compact">
+                <div class="graph-header">
+                    <h2>📈 Pool Hashrate</h2>
+                    <div class="time-selector">
+                        <button class="time-btn active" data-period="hour" onclick="selectGraphPeriod('hour')">1H</button>
+                        <button class="time-btn" data-period="day" onclick="selectGraphPeriod('day')">1D</button>
+                        <button class="time-btn" data-period="week" onclick="selectGraphPeriod('week')">1W</button>
+                        <button class="time-btn" data-period="month" onclick="selectGraphPeriod('month')">1M</button>
+                        <button class="time-btn" data-period="year" onclick="selectGraphPeriod('year')">1Y</button>
+                    </div>
+                </div>
+                <div class="graph-legend compact">
+                    <div class="legend-item"><span class="legend-color" style="background: #008de4;"></span><span>Good</span></div>
+                    <div class="legend-item"><span class="legend-color" style="background: #ff6b6b;"></span><span>DOA</span></div>
+                </div>
+                <div class="graph-container compact" id="hashrate-graph">
+                    <div class="graph-tooltip" id="graph-tooltip"></div>
+                </div>
+                <div class="graph-stats compact">
+                    <div class="graph-stat"><div class="graph-stat-label">Current</div><div class="graph-stat-value" id="graph-current">-</div></div>
+                    <div class="graph-stat"><div class="graph-stat-label">Average</div><div class="graph-stat-value" id="graph-average">-</div></div>
+                    <div class="graph-stat"><div class="graph-stat-label">Peak</div><div class="graph-stat-value" id="graph-peak">-</div></div>
+                    <div class="graph-stat"><div class="graph-stat-label">DOA</div><div class="graph-stat-value" id="graph-doa">-</div></div>
+                </div>
             </div>
         </div>
         
@@ -683,51 +795,6 @@
                     <tbody></tbody>
                 </table>
                 <div class="loading" id="payouts_loading">Loading payouts</div>
-            </div>
-        </div>
-        
-        <!-- Pool Hashrate Graph -->
-        <div class="graph-section">
-            <div class="graph-header">
-                <h2>📈 Pool Hashrate History</h2>
-                <div class="time-selector">
-                    <button class="time-btn active" data-period="hour" onclick="selectGraphPeriod('hour')">1 Hour</button>
-                    <button class="time-btn" data-period="day" onclick="selectGraphPeriod('day')">1 Day</button>
-                    <button class="time-btn" data-period="week" onclick="selectGraphPeriod('week')">1 Week</button>
-                    <button class="time-btn" data-period="month" onclick="selectGraphPeriod('month')">1 Month</button>
-                    <button class="time-btn" data-period="year" onclick="selectGraphPeriod('year')">1 Year</button>
-                </div>
-            </div>
-            <div class="graph-legend">
-                <div class="legend-item">
-                    <span class="legend-color" style="background: #008de4;"></span>
-                    <span>Hashrate (Good)</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: #ff6b6b;"></span>
-                    <span>DOA/Orphan Rate</span>
-                </div>
-            </div>
-            <div class="graph-container" id="hashrate-graph">
-                <div class="graph-tooltip" id="graph-tooltip"></div>
-            </div>
-            <div class="graph-stats">
-                <div class="graph-stat">
-                    <div class="graph-stat-label">Current</div>
-                    <div class="graph-stat-value" id="graph-current">-</div>
-                </div>
-                <div class="graph-stat">
-                    <div class="graph-stat-label">Average</div>
-                    <div class="graph-stat-value" id="graph-average">-</div>
-                </div>
-                <div class="graph-stat">
-                    <div class="graph-stat-label">Peak</div>
-                    <div class="graph-stat-value" id="graph-peak">-</div>
-                </div>
-                <div class="graph-stat">
-                    <div class="graph-stat-label">DOA Avg</div>
-                    <div class="graph-stat-value" id="graph-doa">-</div>
-                </div>
             </div>
         </div>
         
@@ -1036,11 +1103,15 @@
             // Clear previous
             d3.select('#hashrate-graph svg').remove();
             
-            var margin = {top: 20, right: 30, bottom: 40, left: 70};
+            // Check if compact mode
+            var isCompact = container.classList.contains('compact');
+            var margin = isCompact 
+                ? {top: 10, right: 20, bottom: 25, left: 50}
+                : {top: 20, right: 30, bottom: 40, left: 70};
             var width = container.offsetWidth - margin.left - margin.right;
-            var height = 260 - margin.top - margin.bottom;
+            var height = (isCompact ? container.offsetHeight : 260) - margin.top - margin.bottom;
             
-            if (width < 100) return; // Container not ready
+            if (width < 100 || height < 50) return; // Container not ready
             
             var svg = d3.select('#hashrate-graph')
                 .append('svg')
