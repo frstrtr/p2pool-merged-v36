@@ -611,7 +611,7 @@ def run():
         os.makedirs(datadir_path)
     
     # Initialize security config and handle web password
-    from p2pool import security_config
+    from p2pool.util import security_config
     sec_config = security_config.security_config
     sec_config.set_datadir(datadir_path)
     

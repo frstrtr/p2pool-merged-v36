@@ -14,8 +14,9 @@ from twisted.web import resource, static
 
 import p2pool
 from dash import data as bitcoin_data
-from . import data as p2pool_data, p2p, security_config
+from . import data as p2pool_data, p2p
 from util import deferral, deferred_resource, graph, math, memory, pack, variable
+from util import security_config
 
 
 # ==============================================================================

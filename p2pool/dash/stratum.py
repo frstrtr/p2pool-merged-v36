@@ -8,7 +8,7 @@ from twisted.python import log
 
 from p2pool.dash import data as dash_data, getwork
 from p2pool.util import expiring_dict, jsonrpc, pack
-from p2pool import security_config
+from p2pool.util import security_config
 
 
 def clip(num, bot, top):
