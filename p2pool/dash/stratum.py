@@ -134,7 +134,7 @@ class PoolStatistics(object):
         now = time.time()
         cutoff = now - self.global_submission_window
         recent = [(t, d) for t, d in self.global_submissions if t > cutoff]
-        if len(recent) < 2:
+        if len(recent) == 0:
             return 0.0
         return len(recent) / self.global_submission_window
     
