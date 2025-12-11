@@ -306,6 +306,22 @@
             color: var(--success);
         }
         
+        /* Block status styles */
+        .status-confirmed {
+            color: var(--success);
+            font-weight: 600;
+        }
+        
+        .status-orphaned {
+            color: var(--danger);
+            font-weight: 600;
+        }
+        
+        .status-pending {
+            color: var(--warning);
+            font-weight: 600;
+        }
+        
         /* Shares Explorer */
         .shares-section {
             background: var(--card-bg);
@@ -487,6 +503,7 @@
                             <th>Time</th>
                             <th>Height</th>
                             <th>Block Hash</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -660,7 +677,7 @@
                 d3.select('#blocks_loading').style('display', 'none');
                 if (!blocks || blocks.length === 0) {
                     d3.select('#blocks tbody').append('tr').append('td')
-                        .attr('colspan', '3')
+                        .attr('colspan', '4')
                         .style('text-align', 'center')
                         .style('color', 'var(--text-muted)')
                         .text('No blocks found yet');
@@ -677,6 +694,17 @@
                     .attr('href', function(b) { return currency_info.block_explorer_url_prefix + b.hash; })
                     .attr('target', '_blank')
                     .text(function(b) { return b.hash.substr(0, 16) + '...' + b.hash.substr(-8); });
+                tr.append('td')
+                    .attr('class', function(b) {
+                        if (b.status === 'confirmed') return 'status-confirmed';
+                        if (b.status === 'orphaned') return 'status-orphaned';
+                        return 'status-pending';
+                    })
+                    .text(function(b) {
+                        if (b.status === 'confirmed') return '✓ Confirmed';
+                        if (b.status === 'orphaned') return '✗ Orphaned';
+                        return '⏳ Pending';
+                    });
             });
         }
         

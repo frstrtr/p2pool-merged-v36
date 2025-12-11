@@ -265,9 +265,47 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root.putChild('payout_addrs', WebInterface(
         lambda: [bitcoin_data.pubkey_hash_to_address(pubkey_hash, node.net.PARENT) for pubkey_hash in wb.pubkeys.keys]))
     
+    # Cache for block status to avoid repeated RPC calls
+    block_status_cache = {}  # {block_hash: {'status': 'confirmed'|'orphaned'|'pending', 'checked': timestamp}}
+    BLOCK_CACHE_TTL = 300  # 5 minutes cache for block status
+    
+    @defer.inlineCallbacks
+    def get_block_status(block_hash):
+        """Check if a block is confirmed, orphaned, or pending."""
+        now = time.time()
+        
+        # Check cache first
+        if block_hash in block_status_cache:
+            cached = block_status_cache[block_hash]
+            # If confirmed/orphaned, cache forever; if pending, cache for TTL
+            if cached['status'] in ('confirmed', 'orphaned'):
+                defer.returnValue(cached['status'])
+            elif now - cached['checked'] < BLOCK_CACHE_TTL:
+                defer.returnValue(cached['status'])
+        
+        try:
+            block_info = yield wb.dashd.rpc_getblock(block_hash)
+            confirmations = block_info.get('confirmations', 0)
+            chainlock = block_info.get('chainlock', False)
+            
+            if chainlock or confirmations >= 6:
+                status = 'confirmed'
+            elif confirmations >= 0:
+                status = 'pending'  # Not yet confirmed, but not orphaned
+            else:
+                status = 'orphaned'  # Negative confirmations = orphaned
+            
+            block_status_cache[block_hash] = {'status': status, 'checked': now}
+            defer.returnValue(status)
+        except Exception:
+            # Block not found in node = orphaned
+            block_status_cache[block_hash] = {'status': 'orphaned', 'checked': now}
+            defer.returnValue('orphaned')
+    
+    @defer.inlineCallbacks
     def get_recent_blocks():
         if node.best_share_var.value is None:
-            return []
+            defer.returnValue([])
         
         blocks = []
         try:
@@ -276,16 +314,21 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 if s.pow_hash <= s.header['bits'].target:
                     block_hash = '%064x' % s.header_hash
                     block_number = p2pool_data.parse_bip0034(s.share_data['coinbase'])[0]
+                    
+                    # Check block status
+                    status = yield get_block_status(block_hash)
+                    
                     blocks.append(dict(
                         ts=s.timestamp,
                         hash=block_hash,
                         number=block_number,
                         share='%064x' % s.hash,
                         explorer_url=node.net.PARENT.BLOCK_EXPLORER_URL_PREFIX + block_hash,
+                        status=status,
                     ))
         except Exception as e:
             log.err(e, 'Error getting recent blocks:')
-        return blocks
+        defer.returnValue(blocks)
     
     web_root.putChild('recent_blocks', WebInterface(get_recent_blocks))
     web_root.putChild('uptime', WebInterface(lambda: time.time() - start_time))
