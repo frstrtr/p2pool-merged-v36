@@ -573,7 +573,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     hashrate_samples = []
     MAX_HASHRATE_SAMPLES = 10000  # Keep last N samples (roughly 1 week at 1 sample/minute)
     SAMPLE_INTERVAL = 30  # Minimum seconds between samples to avoid excessive storage
-    last_sample_time = 0
+    sample_state = {'last_sample_time': 0}  # Use dict to allow modification in nested function
     
     # Load existing hashrate samples
     if os.path.exists(hashrate_samples_file):
@@ -601,12 +601,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     
     def record_hashrate_sample(force=False):
         """Record current pool hashrate sample. Called on each share submission."""
-        global last_sample_time
-        
         now = time.time()
         
         # Rate limit sampling unless forced
-        if not force and (now - last_sample_time) < SAMPLE_INTERVAL:
+        if not force and (now - sample_state['last_sample_time']) < SAMPLE_INTERVAL:
             return
         
         try:
@@ -637,7 +635,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             }
             
             hashrate_samples.append(sample)
-            last_sample_time = now
+            sample_state['last_sample_time'] = now
             
             # Prune old samples
             if len(hashrate_samples) > MAX_HASHRATE_SAMPLES:
