@@ -167,6 +167,58 @@ class PoolStatistics(object):
         current = self.ip_connections.get(ip, 0)
         return current < self.MAX_CONNECTIONS_PER_IP
     
+    def get_worker_connections(self, worker_name):
+        """Get all active connections for a worker name (Option A: Aggregate Worker Stats)"""
+        connections = []
+        for conn_id, conn in self.connections.items():
+            if hasattr(conn, 'username') and conn.username == worker_name:
+                connections.append(conn)
+        return connections
+    
+    def update_worker_last_share_time(self, worker_name, share_time=None):
+        """Update last_share_time for ALL connections of a worker (Option C: Session Linkage)
+        
+        When one connection submits a share, all connections for that worker
+        get their timeout timer reset. This prevents timeout vardiff adjustments
+        on backup/redundant connections.
+        """
+        if share_time is None:
+            share_time = time.time()
+        
+        for conn_id, conn in self.connections.items():
+            if hasattr(conn, 'username') and conn.username == worker_name:
+                conn.last_share_time = share_time
+    
+    def get_worker_aggregate_stats(self, worker_name):
+        """Get aggregated stats across all connections for a worker (Option A)"""
+        connections = self.get_worker_connections(worker_name)
+        if not connections:
+            return None
+        
+        aggregate = {
+            'connection_count': len(connections),
+            'total_shares_submitted': 0,
+            'total_shares_accepted': 0,
+            'total_shares_rejected': 0,
+            'difficulties': [],
+            'active_connections': 0,  # Connections that have submitted shares
+            'backup_connections': 0,  # Connections with no shares (backup/redundant)
+        }
+        
+        for conn in connections:
+            aggregate['total_shares_submitted'] += conn.shares_submitted
+            aggregate['total_shares_accepted'] += conn.shares_accepted
+            aggregate['total_shares_rejected'] += conn.shares_rejected
+            if conn.shares_submitted > 0:
+                aggregate['active_connections'] += 1
+            else:
+                aggregate['backup_connections'] += 1
+            if hasattr(conn, 'target') and conn.target:
+                from p2pool.dash import data as dash_data
+                aggregate['difficulties'].append(dash_data.target_to_difficulty(conn.target))
+        
+        return aggregate
+    
     def get_ban_stats(self):
         """Get current ban statistics with detailed info for UI"""
         now = time.time()
@@ -941,6 +993,11 @@ class StratumRPCMiningProvider(object):
         self.shares_submitted += 1
         self.last_share_time = now
         current_diff = dash_data.target_to_difficulty(job_target)
+        
+        # ==== Option C: Session Linkage ====
+        # Update last_share_time for ALL connections of this worker
+        # This prevents timeout vardiff on backup/redundant connections
+        pool_stats.update_worker_last_share_time(worker_name, now)
         
         if result:
             self.shares_accepted += 1
