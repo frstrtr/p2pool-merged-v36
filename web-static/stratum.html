@@ -79,19 +79,33 @@
             
             function update_stats() {
                 d3.json('../stratum_stats', function(error, data) {
-                    if (error || data.error) {
+                    // Handle various error conditions
+                    if (error) {
+                        var errMsg = 'Network error';
+                        if (error.status) errMsg = 'HTTP ' + error.status;
+                        if (error.statusText) errMsg += ': ' + error.statusText;
                         d3.select('#error-msg').style('display', 'block')
-                            .text('Error loading stratum stats: ' + (data ? data.error : error));
+                            .text('Error loading stratum stats: ' + errMsg);
+                        return;
+                    }
+                    if (!data) {
+                        d3.select('#error-msg').style('display', 'block')
+                            .text('Error: No data received from server');
+                        return;
+                    }
+                    if (data.error) {
+                        d3.select('#error-msg').style('display', 'block')
+                            .text('Server error: ' + data.error);
                         return;
                     }
                     d3.select('#error-msg').style('display', 'none');
                     
-                    var pool = data.pool;
-                    var workers = data.workers;
+                    var pool = data.pool || {};
+                    var workers = data.workers || {};
                     
                     // Update pool stats
                     d3.select('#connections').text(pool.connections || 0);
-                    d3.select('#workers').text(pool.workers || 0);
+                    d3.select('#workers').text(Object.keys(workers).length || pool.workers || 0);
                     d3.select('#total_accepted').text(d3.format(',')(pool.total_accepted || 0));
                     d3.select('#total_rejected').text(d3.format(',')(pool.total_rejected || 0));
                     d3.select('#submission_rate').text(d3.format('.1f')(pool.submission_rate || 0));
