@@ -16,6 +16,89 @@ from dash import data as bitcoin_data
 from . import data as p2pool_data, p2p
 from util import deferral, deferred_resource, graph, math, memory, pack, variable
 
+
+# ==============================================================================
+# WEB RATE LIMITING
+# ==============================================================================
+
+class WebRateLimiter(object):
+    """
+    Rate limiter for web API endpoints to prevent DDoS impact on mining.
+    Uses a sliding window approach per IP address.
+    """
+    def __init__(self, requests_per_minute=60, burst_limit=10):
+        self.requests_per_minute = requests_per_minute
+        self.burst_limit = burst_limit
+        self.ip_requests = {}  # {ip: [(timestamp, ...), ...]}
+        self.cleanup_interval = 60  # Cleanup old entries every 60 seconds
+        self.last_cleanup = time.time()
+    
+    def check_rate_limit(self, ip):
+        """
+        Check if IP is within rate limits.
+        Returns (allowed, retry_after) tuple.
+        """
+        now = time.time()
+        
+        # Periodic cleanup of old entries
+        if now - self.last_cleanup > self.cleanup_interval:
+            self._cleanup()
+            self.last_cleanup = now
+        
+        if ip not in self.ip_requests:
+            self.ip_requests[ip] = []
+        
+        # Remove requests older than 1 minute
+        cutoff = now - 60
+        self.ip_requests[ip] = [t for t in self.ip_requests[ip] if t > cutoff]
+        
+        # Check burst (requests in last second)
+        burst_cutoff = now - 1
+        recent_burst = len([t for t in self.ip_requests[ip] if t > burst_cutoff])
+        if recent_burst >= self.burst_limit:
+            return (False, 1)
+        
+        # Check minute rate
+        if len(self.ip_requests[ip]) >= self.requests_per_minute:
+            oldest = min(self.ip_requests[ip])
+            retry_after = int(60 - (now - oldest)) + 1
+            return (False, retry_after)
+        
+        # Allow request
+        self.ip_requests[ip].append(now)
+        return (True, 0)
+    
+    def _cleanup(self):
+        """Remove stale entries"""
+        now = time.time()
+        cutoff = now - 120  # Keep 2 minutes of history
+        for ip in list(self.ip_requests.keys()):
+            self.ip_requests[ip] = [t for t in self.ip_requests[ip] if t > cutoff]
+            if not self.ip_requests[ip]:
+                del self.ip_requests[ip]
+    
+    def get_stats(self):
+        """Get rate limiter statistics"""
+        now = time.time()
+        cutoff = now - 60
+        active_ips = 0
+        total_requests = 0
+        for ip, times in self.ip_requests.items():
+            recent = [t for t in times if t > cutoff]
+            if recent:
+                active_ips += 1
+                total_requests += len(recent)
+        return {
+            'active_ips': active_ips,
+            'requests_last_minute': total_requests,
+            'limit_per_minute': self.requests_per_minute,
+            'burst_limit': self.burst_limit,
+        }
+
+# Global rate limiter for web endpoints
+web_rate_limiter = WebRateLimiter(requests_per_minute=120, burst_limit=20)
+
+
 def _atomic_read(filename):
     try:
         with open(filename, 'rb') as f:
@@ -188,15 +271,30 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         )
     
     class WebInterface(deferred_resource.DeferredResource):
-        def __init__(self, func, mime_type='application/json', args=()):
+        def __init__(self, func, mime_type='application/json', args=(), rate_limit=True):
             deferred_resource.DeferredResource.__init__(self)
             self.func, self.mime_type, self.args = func, mime_type, args
+            self.rate_limit = rate_limit
         
         def getChild(self, child, request):
-            return WebInterface(self.func, self.mime_type, self.args + (child,))
+            return WebInterface(self.func, self.mime_type, self.args + (child,), self.rate_limit)
         
         @defer.inlineCallbacks
         def render_GET(self, request):
+            # Apply rate limiting
+            if self.rate_limit:
+                client_ip = request.getClientIP()
+                allowed, retry_after = web_rate_limiter.check_rate_limit(client_ip)
+                if not allowed:
+                    request.setResponseCode(429)
+                    request.setHeader('Content-Type', 'application/json')
+                    request.setHeader('Retry-After', str(retry_after))
+                    defer.returnValue(json.dumps({
+                        'error': 'Rate limit exceeded',
+                        'retry_after': retry_after,
+                    }))
+                    return
+            
             request.setHeader('Content-Type', self.mime_type)
             request.setHeader('Access-Control-Allow-Origin', '*')
             res = yield self.func(*self.args)
@@ -258,6 +356,24 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             return {'error': str(e)}
     
     web_root.putChild('stratum_security', WebInterface(get_stratum_security))
+    
+    # ==== Ban stats endpoint ====
+    def get_ban_stats():
+        """Get current ban statistics"""
+        try:
+            from p2pool.dash.stratum import pool_stats
+            return pool_stats.get_ban_stats()
+        except Exception as e:
+            return {'error': str(e)}
+    
+    web_root.putChild('ban_stats', WebInterface(get_ban_stats))
+    
+    # ==== Web rate limiter stats endpoint ====
+    def get_web_rate_stats():
+        """Get web rate limiter statistics"""
+        return web_rate_limiter.get_stats()
+    
+    web_root.putChild('web_rate_stats', WebInterface(get_web_rate_stats, rate_limit=False))
     
     web_root.putChild('peer_addresses', WebInterface(lambda: ' '.join('%s%s' % (peer.transport.getPeer().host, ':'+str(peer.transport.getPeer().port) if peer.transport.getPeer().port != node.net.P2P_PORT else '') for peer in node.p2p_node.peers.itervalues())))
     web_root.putChild('peer_txpool_sizes', WebInterface(lambda: dict(('%s:%i' % (peer.transport.getPeer().host, peer.transport.getPeer().port), peer.remembered_txs_size) for peer in node.p2p_node.peers.itervalues())))

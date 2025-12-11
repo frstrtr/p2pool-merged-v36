@@ -63,24 +63,114 @@ class PoolStatistics(object):
         self.MIN_DIFFICULTY_FLOOR = 0.001  # Absolute minimum difficulty (pool protection)
         self.MAX_DIFFICULTY_CEILING = 1000000  # Maximum difficulty (miner protection - prevents never finding shares)
         self.MAX_SUBMISSIONS_PER_SECOND = 1000  # Global rate limit
+        self.MAX_CONNECTIONS_PER_IP = 50  # Per-IP connection limit
+        
+        # Banning system for misbehaving miners
+        self.banned_ips = {}  # {ip: ban_expire_time}
+        self.banned_workers = {}  # {worker_name: ban_expire_time}
+        self.ip_violations = {}  # {ip: [(timestamp, reason), ...]}
+        self.BAN_DURATION = 3600  # 1 hour ban
+        self.BAN_THRESHOLD = 10  # violations before ban
+        
+        # Per-IP connection tracking
+        self.ip_connections = {}  # {ip: count}
         
         # Performance metrics
         self.total_shares_accepted = 0
         self.total_shares_rejected = 0
         self.startup_time = time.time()
     
-    def register_connection(self, conn_id, connection):
+    def register_connection(self, conn_id, connection, ip=None):
         """Register a new stratum connection"""
         self.connections[conn_id] = connection
         self.connection_count = len(self.connections)
+        
+        # Track per-IP connections
+        if ip:
+            self.ip_connections[ip] = self.ip_connections.get(ip, 0) + 1
+        
         return self.connection_count < self.MAX_CONNECTIONS
     
-    def unregister_connection(self, conn_id):
+    def unregister_connection(self, conn_id, ip=None):
         """Unregister a stratum connection"""
         if conn_id in self.connections:
             del self.connections[conn_id]
         self.connection_count = len(self.connections)
+        
+        # Update per-IP count
+        if ip and ip in self.ip_connections:
+            self.ip_connections[ip] = max(0, self.ip_connections[ip] - 1)
+            if self.ip_connections[ip] == 0:
+                del self.ip_connections[ip]
     
+    def is_ip_banned(self, ip):
+        """Check if an IP is banned"""
+        if ip in self.banned_ips:
+            if time.time() < self.banned_ips[ip]:
+                return True
+            else:
+                del self.banned_ips[ip]  # Ban expired
+        return False
+    
+    def is_worker_banned(self, worker_name):
+        """Check if a worker is banned"""
+        if worker_name in self.banned_workers:
+            if time.time() < self.banned_workers[worker_name]:
+                return True
+            else:
+                del self.banned_workers[worker_name]  # Ban expired
+        return False
+    
+    def record_violation(self, ip, reason):
+        """Record a violation for an IP, ban if threshold exceeded"""
+        now = time.time()
+        if ip not in self.ip_violations:
+            self.ip_violations[ip] = []
+        
+        # Add violation
+        self.ip_violations[ip].append((now, reason))
+        
+        # Prune old violations (older than 10 minutes)
+        self.ip_violations[ip] = [(t, r) for t, r in self.ip_violations[ip] if t > now - 600]
+        
+        # Check if should ban
+        if len(self.ip_violations[ip]) >= self.BAN_THRESHOLD:
+            self.ban_ip(ip, reason)
+            return True
+        return False
+    
+    def ban_ip(self, ip, reason):
+        """Ban an IP address"""
+        if ip == '127.0.0.1':
+            return  # Never ban localhost
+        self.banned_ips[ip] = time.time() + self.BAN_DURATION
+        print 'BANNED IP %s for %d seconds. Reason: %s' % (ip, self.BAN_DURATION, reason)
+    
+    def ban_worker(self, worker_name, reason):
+        """Ban a worker name"""
+        self.banned_workers[worker_name] = time.time() + self.BAN_DURATION
+        print 'BANNED WORKER %s for %d seconds. Reason: %s' % (worker_name, self.BAN_DURATION, reason)
+    
+    def check_ip_connection_limit(self, ip):
+        """Check if IP has exceeded connection limit"""
+        current = self.ip_connections.get(ip, 0)
+        return current < self.MAX_CONNECTIONS_PER_IP
+    
+    def get_ban_stats(self):
+        """Get current ban statistics"""
+        now = time.time()
+        # Clean expired bans
+        self.banned_ips = {k: v for k, v in self.banned_ips.items() if v > now}
+        self.banned_workers = {k: v for k, v in self.banned_workers.items() if v > now}
+        
+        return {
+            'banned_ips': len(self.banned_ips),
+            'banned_workers': len(self.banned_workers),
+            'banned_ip_list': list(self.banned_ips.keys()),
+            'banned_worker_list': list(self.banned_workers.keys()),
+            'ip_connections': dict(self.ip_connections),
+        }
+
     def record_share(self, worker_name, difficulty, accepted=True):
         """Record a share submission for statistics"""
         now = time.time()
@@ -296,6 +386,12 @@ class PoolStatistics(object):
             threat_level = max(threat_level, 1)
             threat_reasons.append('%d worker(s) with high submission rate' % len(suspicious_workers))
         
+        # Add ban count to threat assessment
+        active_bans = len([v for v in self.banned_ips.values() if v > now])
+        if active_bans > 0:
+            threat_level = max(threat_level, 1)
+            threat_reasons.append('%d IP(s) currently banned' % active_bans)
+        
         return {
             'rate_10s': rate_10s,
             'rate_60s': rate_60s,
@@ -305,13 +401,15 @@ class PoolStatistics(object):
             'suspicious_workers': suspicious_workers,
             'threat_level': threat_level,  # 0=normal, 1=elevated, 2=warning, 3=critical
             'threat_reasons': threat_reasons,
+            'banned_ips_count': active_bans,
+            'banned_workers_count': len([v for v in self.banned_workers.values() if v > now]),
             'limits': {
                 'max_submissions_per_sec': self.MAX_SUBMISSIONS_PER_SECOND,
                 'max_connections': self.MAX_CONNECTIONS,
                 'min_difficulty': self.MIN_DIFFICULTY_FLOOR,
+                'max_connections_per_ip': self.MAX_CONNECTIONS_PER_IP,
             }
         }
-
 
 # Global pool statistics instance
 pool_stats = PoolStatistics.get_instance()
@@ -327,6 +425,22 @@ class StratumRPCMiningProvider(object):
         self.username = None
         self.worker_ip = transport.getPeer().host if transport else None  # Track worker IP
         self.handler_map = expiring_dict.ExpiringDict(300)
+        
+        # ==== Check if IP is banned ====
+        if self.worker_ip and pool_stats.is_ip_banned(self.worker_ip):
+            print 'Rejected connection from banned IP: %s' % self.worker_ip
+            if transport:
+                transport.loseConnection()
+            return
+        
+        # ==== Check per-IP connection limit ====
+        if self.worker_ip and not pool_stats.check_ip_connection_limit(self.worker_ip):
+            print 'Rejected connection from %s: too many connections (%d)' % (
+                self.worker_ip, pool_stats.ip_connections.get(self.worker_ip, 0))
+            pool_stats.record_violation(self.worker_ip, 'connection_flood')
+            if transport:
+                transport.loseConnection()
+            return
         
         # Extranonce support for ASICs
         self.extranonce_subscribe = False
@@ -355,7 +469,7 @@ class StratumRPCMiningProvider(object):
         
         # ==== NEW: Connection tracking ====
         self.conn_id = id(self)
-        pool_stats.register_connection(self.conn_id, self)
+        pool_stats.register_connection(self.conn_id, self, self.worker_ip)
         
         # ==== NEW: Per-connection statistics ====
         self.shares_submitted = 0
@@ -668,6 +782,15 @@ class StratumRPCMiningProvider(object):
         t0 = time.time()  # Benchmarking start
         worker_name = worker_name.strip()
         
+        # ==== Check if worker is banned ====
+        if pool_stats.is_worker_banned(worker_name):
+            return False
+        
+        # ==== Check if IP is banned ====
+        if self.worker_ip and pool_stats.is_ip_banned(self.worker_ip):
+            self.transport.loseConnection()
+            return False
+        
         # Rate limiting: drop submissions if coming too fast (more than 100/sec)
         # This prevents server overload when difficulty is too low
         now = time.time()
@@ -679,6 +802,9 @@ class StratumRPCMiningProvider(object):
         if time_since_last < 0.01:  # More than 100 submissions/sec
             self._rapid_submit_count += 1
             if self._rapid_submit_count > 10:
+                # Record violation for rate abuse
+                if self.worker_ip:
+                    pool_stats.record_violation(self.worker_ip, 'rate_abuse')
                 # Drop submission silently to reduce load, but still return True
                 # to avoid miner reconnecting
                 return True
@@ -890,8 +1016,8 @@ class StratumRPCMiningProvider(object):
             'worker_ip': self.worker_ip,
         })
         
-        # Unregister connection
-        pool_stats.unregister_connection(self.conn_id)
+        # Unregister connection (with IP for per-IP tracking)
+        pool_stats.unregister_connection(self.conn_id, self.worker_ip)
         
         # Log disconnect with statistics
         session_duration = time.time() - self.connection_time
