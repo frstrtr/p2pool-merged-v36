@@ -112,6 +112,18 @@
                     tr.append('td').text(function(block){return block.number});
                     tr.append('td').append('a').text(function(block){return block.hash}).attr('href', function(block){return currency_info.block_explorer_url_prefix + block.hash});
                     tr.append('td').append('a').text('→').attr('href', function(block){return 'share.html#' + block.share});
+                    tr.append('td')
+                        .style('color', function(block){
+                            if (block.status === 'confirmed') return '#28a745';
+                            if (block.status === 'orphaned') return '#dc3545';
+                            return '#ffc107';
+                        })
+                        .style('font-weight', 'bold')
+                        .text(function(block){
+                            if (block.status === 'confirmed') return '✓ Confirmed';
+                            if (block.status === 'orphaned') return '✗ Orphaned';
+                            return '⏳ Pending';
+                        });
                 });
             });
             
@@ -155,7 +167,7 @@
         <h2>Blocks found recently:</h2>
         <p>Note that blocks may have been orphaned from the P2Pool chain and so not be here.</p>
         <table border="1" id="blocks">
-            <tr><th>time</th><th>number</th><th>hash/explorer link</th><th>share</th></tr>
+            <tr><th>time</th><th>number</th><th>hash/explorer link</th><th>share</th><th>status</th></tr>
         </table>
         
         <h2>Payouts if a block were found NOW:</h2>
