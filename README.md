@@ -134,7 +134,8 @@ PERSIST = True  # Connect to P2Pool network
 - **Delete old sharechain data**: `data/dash/shares.*` and `data/dash/graph_db`
 - Old shares are incompatible due to `_script` field changes
 - All nodes in the P2Pool network must update together
-- Incompatible shares from outdated peers are automatically rejected with clear warnings
+- **Protection**: Incompatible shares are validated and rejected BEFORE entering sharechain
+- Outdated peers receive clear upgrade instructions in logs
 
 **For detailed configuration, see [INSTALL.md](INSTALL.md).**
 
@@ -193,7 +194,7 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 - ✅ **Packed object compatibility**: Fixed share verification for _script field handling
 - ✅ **Mainnet ready**: Full support for masternode/platform/superblock payment structures
 - ✅ **Solo mining support**: Removed peer connection requirement - works standalone with PERSIST=True
-- ✅ **Graceful incompatibility handling**: Clear warnings for outdated peer nodes with upgrade instructions
+- ✅ **Incompatible share protection**: Pre-validation prevents outdated shares from entering sharechain
 
 ## Port Forwarding
 
