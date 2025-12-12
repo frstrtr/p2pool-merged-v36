@@ -807,8 +807,10 @@ class StratumRPCMiningProvider(object):
         return True
     
     def _send_work(self):
+        print 'STRATUM: _send_work called for %s (username=%s)' % (self.worker_ip, self.username)
         try:
             x, got_response = self.wb.get_work(*self.wb.preprocess_request('' if self.username is None else self.username))
+            print 'STRATUM: _send_work got work for %s' % self.worker_ip
         except Exception as e:
             # Don't disconnect for temporary errors like "lost contact with dashd"
             # Just log and skip this work update - miner will keep working on old job
@@ -817,7 +819,7 @@ class StratumRPCMiningProvider(object):
                 # Temporary error - don't spam logs, just skip
                 print 'STRATUM: _send_work skipped - %s' % error_msg
             else:
-                print 'STRATUM: _send_work error - %s' % error_msg
+                print 'STRATUM: _send_work error for %s - %s' % (self.worker_ip, error_msg)
                 log.err(None, 'Error getting work for stratum:')
             return
         
