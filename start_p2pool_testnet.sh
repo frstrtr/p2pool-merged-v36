@@ -10,7 +10,7 @@ LOG_FILE="$SCRIPT_DIR/p2pool_testnet.log"
 pkill -f "pypy.*run_p2pool.*dash_testnet" 2>/dev/null
 
 # Testnet address (generate one with: dash-cli -testnet getnewaddress)
-TESTNET_ADDRESS="yYqSqdwoTeRsKpwXaLM3anmAjfeeanyvLy"
+TESTNET_ADDRESS="yZkx49ksZKSmFK6caVA2dAK61JsQJqceD8"
 
 echo "Starting P2Pool in TESTNET mode..."
 echo "Log file: $LOG_FILE"
