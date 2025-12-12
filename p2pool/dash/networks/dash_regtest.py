@@ -8,7 +8,7 @@ from p2pool.util import pack
 
 
 P2P_PREFIX = 'fcf8c4fc'.decode('hex')  # Regtest P2P magic
-P2P_PORT = 19899  # Regtest P2P port (different from testnet)
+P2P_PORT = 19999  # Regtest P2P port (same as testnet)
 ADDRESS_VERSION = 140  # Same as testnet (y prefix)
 SCRIPT_ADDRESS_VERSION = 19
 RPC_PORT = 19998  # Same as our config
