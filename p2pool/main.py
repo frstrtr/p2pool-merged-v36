@@ -272,7 +272,9 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                     addrs.update(dict((tuple(k), v) for k, v in json.loads(f.read())))
             except:
                 print >>sys.stderr, 'error parsing addrs'
-        for addr_df in map(parse, net.BOOTSTRAP_ADDRS):
+        # Skip bootstrap in solo mode (PERSIST=False) - no sharechain to sync
+        bootstrap_addrs = net.BOOTSTRAP_ADDRS if net.PERSIST else []
+        for addr_df in map(parse, bootstrap_addrs):
             try:
                 addr = yield addr_df
                 if addr not in addrs:
