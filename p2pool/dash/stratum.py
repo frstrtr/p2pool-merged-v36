@@ -837,8 +837,8 @@ class StratumRPCMiningProvider(object):
                     print 'STRATUM: Worker starting at suggested difficulty %.4f' % initial_diff
                 else:
                     # Check for network-specific default difficulty (e.g., regtest uses lower diff)
-                    if hasattr(self.node.net, 'STRATUM_DEFAULT_DIFFICULTY'):
-                        initial_diff = self.node.net.STRATUM_DEFAULT_DIFFICULTY
+                    if hasattr(self.wb.net, 'STRATUM_DEFAULT_DIFFICULTY'):
+                        initial_diff = self.wb.net.STRATUM_DEFAULT_DIFFICULTY
                         print 'STRATUM: New worker starting at network default difficulty %.4f' % initial_diff
                     else:
                         # Default: start at difficulty 100
