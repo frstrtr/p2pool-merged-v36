@@ -80,15 +80,15 @@ def getwork(dashd, net, use_getblocktemplate=True):
             g['amount'] = obj['amount']
             # Use 'payee' if available (regular masternode address)
             # For script-only payments (like platform OP_RETURN), encode the script
-            # with prefix "script:" so it survives serialization
+            # with '!' prefix so it survives serialization (minimal overhead)
             if 'payee' in obj and obj['payee']:
                 # Regular payment with address
                 g['payee'] = str(obj['payee'])
                 packed_payments.append(g)
             elif 'script' in obj and obj['script']:
                 # Script-only payment (e.g., platform OP_RETURN with empty payee)
-                # Encode script as "script:<hex>" so it can be decoded on receiving end
-                g['payee'] = 'script:' + obj['script']
+                # Encode script as "!<hex>" - '!' prefix not in base58, minimal overhead
+                g['payee'] = '!' + obj['script']
                 packed_payments.append(g)
 
     coinbase_payload = None

@@ -191,12 +191,12 @@ class Share(object):
         if payments is not None:
             for obj in payments:
                 # Determine script from payee field
-                # Format 1: "script:<hex>" - direct script encoding (for platform OP_RETURN etc)
+                # Format 1: "!<hex>" - direct script encoding (for platform OP_RETURN etc)
                 # Format 2: Regular address string - convert to script
                 payee = obj.get('payee')
-                if payee and payee.startswith('script:'):
-                    # Direct script encoded as hex after "script:" prefix
-                    pm_script = payee[7:].decode('hex')
+                if payee and payee.startswith('!'):
+                    # Direct script encoded as hex after "!" prefix (not in base58 alphabet)
+                    pm_script = payee[1:].decode('hex')
                 elif payee:
                     # Regular address - convert to script
                     pm_script = dash_data.address_to_script2(payee, net.PARENT)
