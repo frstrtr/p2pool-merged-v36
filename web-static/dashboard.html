@@ -421,26 +421,38 @@
             .two-col { grid-template-columns: 1fr; }
         }
         
-        /* Value + Graph Row Layout */
-        .value-graph-row {
+        /* New Main Layout: 1/4 + 3/4 columns */
+        .main-layout {
             display: grid;
-            grid-template-columns: 280px 1fr;
+            grid-template-columns: 1fr 3fr;
             gap: 20px;
             margin-bottom: 30px;
         }
         
-        .value-cards {
+        .left-column {
             display: flex;
             flex-direction: column;
             gap: 15px;
         }
         
-        .value-cards .stat-card {
-            margin: 0;
+        .right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .right-column .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 0;
         }
         
         @media (max-width: 900px) {
-            .value-graph-row {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+            .right-column .stats-grid {
                 grid-template-columns: 1fr;
             }
         }
@@ -784,40 +796,17 @@
         <div class="last-update" id="last-update">Last update: loading...</div>
         <div class="warnings" id="warnings"></div>
         
-        <!-- Pool Statistics -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <h3><span class="icon">🌐</span> Pool Hash Rate</h3>
-                <div class="stat-value primary" id="pool_rate">-</div>
-                <div class="stat-sub">DOA+Orphan: <span id="pool_stale">-</span></div>
-                <div class="stat-detail">Share Difficulty: <span id="difficulty">-</span></div>
-            </div>
-            
-            <div class="stat-card">
-                <h3><span class="icon">⛏️</span> Local Hash Rate</h3>
-                <div class="stat-value success" id="local_rate">-</div>
-                <div class="stat-sub">DOA: <span id="local_doa">-</span></div>
-                <div class="stat-detail">Expected Share: <span id="time_to_share">-</span></div>
-            </div>
-            
-            <div class="stat-card">
-                <h3><span class="icon">📊</span> Shares</h3>
-                <div class="stat-value" id="shares_total">-</div>
-                <div class="stat-sub">Orphan: <span id="shares_orphan">-</span> | Dead: <span id="shares_dead">-</span></div>
-                <div class="stat-detail">Efficiency: <span id="efficiency">-</span></div>
-            </div>
-            
-            <div class="stat-card">
-                <h3><span class="icon">🔗</span> Network</h3>
-                <div class="stat-value" id="peers_total">-</div>
-                <div class="stat-sub">Out: <span id="peers_out">-</span> | In: <span id="peers_in">-</span></div>
-                <div class="stat-detail">Uptime: <span id="uptime">-</span></div>
-            </div>
-        </div>
-        
-        <!-- Block Value, Payout and Graph Row -->
-        <div class="value-graph-row">
-            <div class="value-cards">
+        <!-- New Layout: Left Column (1/4) + Right Column (3/4) -->
+        <div class="main-layout">
+            <!-- Left Column: Pool Hash Rate, Block Value, Your Payout -->
+            <div class="left-column">
+                <div class="stat-card">
+                    <h3><span class="icon">🌐</span> Pool Hash Rate</h3>
+                    <div class="stat-value primary" id="pool_rate">-</div>
+                    <div class="stat-sub">DOA+Orphan: <span id="pool_stale">-</span></div>
+                    <div class="stat-detail">Share Difficulty: <span id="difficulty">-</span></div>
+                </div>
+                
                 <div class="stat-card">
                     <h3><span class="icon">💰</span> Block Value</h3>
                     <div class="stat-value warning"><span id="block_value_miner">-</span> <small class="symbol-small">DASH</small></div>
@@ -833,29 +822,56 @@
                 </div>
             </div>
             
-            <!-- Pool Hashrate Graph (compact) -->
-            <div class="graph-section compact">
-                <div class="graph-header">
-                    <h2>📈 Pool Hashrate</h2>
-                    <div class="time-selector">
-                        <button class="time-btn active" data-period="hour" onclick="selectGraphPeriod('hour')">1H</button>
-                        <button class="time-btn" data-period="day" onclick="selectGraphPeriod('day')">1D</button>
-                        <button class="time-btn" data-period="week" onclick="selectGraphPeriod('week')">1W</button>
-                        <button class="time-btn" data-period="month" onclick="selectGraphPeriod('month')">1M</button>
-                        <button class="time-btn" data-period="year" onclick="selectGraphPeriod('year')">1Y</button>
-                        <button class="time-btn fullscreen-btn" onclick="toggleGraphFullscreen()" title="Fullscreen">⛶</button>
+            <!-- Right Column: Top stats row + Graph -->
+            <div class="right-column">
+                <!-- Top Stats Row -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3><span class="icon">⛏️</span> Local Hash Rate</h3>
+                        <div class="stat-value success" id="local_rate">-</div>
+                        <div class="stat-sub">DOA: <span id="local_doa">-</span></div>
+                        <div class="stat-detail">Expected Share: <span id="time_to_share">-</span></div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <h3><span class="icon">📊</span> Shares</h3>
+                        <div class="stat-value" id="shares_total">-</div>
+                        <div class="stat-sub">Orphan: <span id="shares_orphan">-</span> | Dead: <span id="shares_dead">-</span></div>
+                        <div class="stat-detail">Efficiency: <span id="efficiency">-</span></div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <h3><span class="icon">🔗</span> Network</h3>
+                        <div class="stat-value" id="peers_total">-</div>
+                        <div class="stat-sub">Out: <span id="peers_out">-</span> | In: <span id="peers_in">-</span></div>
+                        <div class="stat-detail">Uptime: <span id="uptime">-</span></div>
                     </div>
                 </div>
-                <div class="graph-legend compact">
-                    <div class="legend-item" data-series="good" onclick="toggleSeries('good', this)" title="Click to toggle Good hashrate"><span class="legend-color" style="background: #008de4;"></span><span>Good</span></div>
-                    <div class="legend-item" data-series="doa" onclick="toggleSeries('doa', this)" title="Click to toggle DOA hashrate"><span class="legend-color" style="background: #ff6b6b;"></span><span>DOA</span></div>
-                </div>
-                <div class="graph-container compact" id="hashrate-graph"></div>
-                <div class="graph-stats compact">
-                    <div class="graph-stat"><div class="graph-stat-label">Current</div><div class="graph-stat-value" id="graph-current">-</div></div>
-                    <div class="graph-stat"><div class="graph-stat-label">Average</div><div class="graph-stat-value" id="graph-average">-</div></div>
-                    <div class="graph-stat"><div class="graph-stat-label">Peak</div><div class="graph-stat-value" id="graph-peak">-</div></div>
-                    <div class="graph-stat"><div class="graph-stat-label">DOA</div><div class="graph-stat-value" id="graph-doa">-</div></div>
+                
+                <!-- Pool Hashrate Graph (compact) -->
+                <div class="graph-section compact">
+                    <div class="graph-header">
+                        <h2>📈 Pool Hashrate</h2>
+                        <div class="time-selector">
+                            <button class="time-btn active" data-period="hour" onclick="selectGraphPeriod('hour')">1H</button>
+                            <button class="time-btn" data-period="day" onclick="selectGraphPeriod('day')">1D</button>
+                            <button class="time-btn" data-period="week" onclick="selectGraphPeriod('week')">1W</button>
+                            <button class="time-btn" data-period="month" onclick="selectGraphPeriod('month')">1M</button>
+                            <button class="time-btn" data-period="year" onclick="selectGraphPeriod('year')">1Y</button>
+                            <button class="time-btn fullscreen-btn" onclick="toggleGraphFullscreen()" title="Fullscreen">⛶</button>
+                        </div>
+                    </div>
+                    <div class="graph-legend compact">
+                        <div class="legend-item" data-series="good" onclick="toggleSeries('good', this)" title="Click to toggle Good hashrate"><span class="legend-color" style="background: #008de4;"></span><span>Good</span></div>
+                        <div class="legend-item" data-series="doa" onclick="toggleSeries('doa', this)" title="Click to toggle DOA hashrate"><span class="legend-color" style="background: #ff6b6b;"></span><span>DOA</span></div>
+                    </div>
+                    <div class="graph-container compact" id="hashrate-graph"></div>
+                    <div class="graph-stats compact">
+                        <div class="graph-stat"><div class="graph-stat-label">Current</div><div class="graph-stat-value" id="graph-current">-</div></div>
+                        <div class="graph-stat"><div class="graph-stat-label">Average</div><div class="graph-stat-value" id="graph-average">-</div></div>
+                        <div class="graph-stat"><div class="graph-stat-label">Peak</div><div class="graph-stat-value" id="graph-peak">-</div></div>
+                        <div class="graph-stat"><div class="graph-stat-label">DOA</div><div class="graph-stat-value" id="graph-doa">-</div></div>
+                    </div>
                 </div>
             </div>
         </div>
