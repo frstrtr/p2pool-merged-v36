@@ -601,7 +601,7 @@ class ClientFactory(protocol.ClientFactory):
                 elif host in self.node.bans and self.node.bans[host] > time.time():
                     pass
                 else:
-                    #print 'Trying to connect to', host, port
+                    print 'Trying to connect to', host, port
                     reactor.connectTCP(host, port, self, timeout=5)
         except:
             log.err()
