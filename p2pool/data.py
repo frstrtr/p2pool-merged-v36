@@ -500,6 +500,23 @@ class OkayTracker(forest.Tracker):
             raise AssertionError()
         try:
             share.check(self)
+        except ValueError as e:
+            error_msg = str(e)
+            if 'gentx doesn\'t match hash_link' in error_msg:
+                peer_info = (' from peer %s:%d' % share.peer_addr) if share.peer_addr else ''
+                print >>sys.stderr, '\n' + '='*80
+                print >>sys.stderr, 'INCOMPATIBLE SHARE RECEIVED%s' % peer_info
+                print >>sys.stderr, 'Share hash: %064x' % share.hash
+                print >>sys.stderr, 'This peer is running OUTDATED P2Pool code!'
+                print >>sys.stderr, 'They need to:'
+                print >>sys.stderr, '  1. git pull (get latest code with _script field fix)'
+                print >>sys.stderr, '  2. rm -f data/dash/shares.* data/dash/graph_db'
+                print >>sys.stderr, '  3. Restart P2Pool with fresh sharechain'
+                print >>sys.stderr, 'Rejecting incompatible share and continuing...'
+                print >>sys.stderr, '='*80 + '\n'
+            else:
+                log.err(None, 'Share check failed: %064x -> %064x: %s' % (share.hash, share.previous_hash if share.previous_hash is not None else 0, error_msg))
+            return False
         except:
             log.err(None, 'Share check failed: %064x -> %064x' % (share.hash, share.previous_hash if share.previous_hash is not None else 0))
             return False
