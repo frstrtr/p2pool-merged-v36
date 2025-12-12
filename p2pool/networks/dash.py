@@ -15,9 +15,9 @@ MIN_TARGET = 0
 # Use standard bdiff difficulty 1 target (0x00000000FFFF00...) for ~1.0 minimum difficulty
 # Old value 2**256//2**20 - 1 gave difficulty ~0.000244 which is way too easy
 MAX_TARGET = 0xFFFF * 2**208  # Standard bdiff difficulty 1 target
-PERSIST = False
+PERSIST = True
 WORKER_PORT = 7903
-BOOTSTRAP_ADDRS = 'dash01.p2poolmining.us dash02.p2poolmining.us dash03.p2poolmining.us crypto.office-on-the.net dash04.p2poolmining.us'.split(' ')
+BOOTSTRAP_ADDRS = 'rov.p2p-spb.xyz'.split(' ')
 ANNOUNCE_CHANNEL = '#p2pool-dash'
 VERSION_CHECK = lambda v: v >= 200000
 

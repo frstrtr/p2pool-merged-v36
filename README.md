@@ -130,6 +130,11 @@ Edit `p2pool/networks/dash.py`:
 PERSIST = True  # Connect to P2Pool network
 ```
 
+**⚠️ IMPORTANT**: When upgrading to the latest version with Dash Platform support:
+- **Delete old sharechain data**: `data/dash/shares.*` and `data/dash/graph_db`
+- Old shares are incompatible due to `_script` field changes
+- All nodes in the P2Pool network must update together
+
 **For detailed configuration, see [INSTALL.md](INSTALL.md).**
 
 ## Command Line Options
@@ -183,6 +188,9 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 - ✅ **Hashrate sampling** for precise luck statistics
 - ✅ **Telegram notifications** for block announcements
 - ✅ **Block status tracking** (confirmed/orphaned/pending)
+- ✅ **Dash Platform support** (v20+): Handles OP_RETURN platform payments (22.5% block subsidy)
+- ✅ **Packed object compatibility**: Fixed share verification for _script field handling
+- ✅ **Mainnet ready**: Full support for masternode/platform/superblock payment structures
 
 ## Port Forwarding
 
