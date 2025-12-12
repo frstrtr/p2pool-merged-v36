@@ -245,12 +245,9 @@ def check_block_chainlock(dashd, block_hash, net):
                 defer.returnValue(False)
                 
         except jsonrpc.Error_for_code(-5):
-            # Block not found in local node - this is normal if:
-            # 1. Mining solo without P2Pool peers (no peer blocks in local chain)
-            # 2. Block was actually orphaned
-            # Since we can't distinguish, just silently skip the check
+            # Block not found in local node - possibly orphaned
             if delay == 2:  # Only log once on first check
-                pass  # Silently skip - this is normal in solo mode
+                print 'CHAINLOCK CHECK: Block %s not found in local node' % block_hash_str
             defer.returnValue(False)
         except Exception as e:
             print 'CHAINLOCK CHECK: Error checking block: %s' % e
