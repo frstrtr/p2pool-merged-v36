@@ -34,6 +34,25 @@ class P2PNode(p2p.Node):
                 #print 'Got duplicate share, ignoring. Hash: %s' % (p2pool_data.format_hash(share.hash),)
                 continue
             
+            # Validate share before adding to tracker - reject incompatible shares
+            try:
+                share.check(self.node.tracker)
+            except ValueError as e:
+                if 'gentx doesn\'t match hash_link' in str(e):
+                    peer_info = (' from peer %s:%d' % peer.addr) if peer is not None else ''
+                    print >>sys.stderr, '\n' + '='*80
+                    print >>sys.stderr, 'REJECTED INCOMPATIBLE SHARE%s' % peer_info
+                    print >>sys.stderr, 'Share hash: %064x' % share.hash
+                    print >>sys.stderr, 'Peer is running OUTDATED P2Pool - needs to update and flush sharechain'
+                    print >>sys.stderr, 'Share NOT added to tracker.'
+                    print >>sys.stderr, '='*80 + '\n'
+                else:
+                    print >>sys.stderr, 'Share validation failed: %s' % str(e)
+                continue
+            except Exception as e:
+                print >>sys.stderr, 'Share validation failed with unexpected error: %s' % str(e)
+                continue
+            
             new_count += 1
             
             #print 'Received share %s from %r' % (p2pool_data.format_hash(share.hash), share.peer_addr)
