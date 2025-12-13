@@ -144,8 +144,9 @@ class Protocol(p2protocol.Protocol):
     def handle_version(self, version, services, addr_to, addr_from, nonce, sub_version, mode, best_share_hash):
         if self.other_version is not None:
             raise PeerMisbehavingError('more than one version message')
-        if version < 1700:
-            raise PeerMisbehavingError('peer too old')
+        minimum_version = getattr(self.node.net, 'MINIMUM_PROTOCOL_VERSION', 1700)
+        if version < minimum_version:
+            raise PeerMisbehavingError('peer too old (version %d < %d)' % (version, minimum_version))
         
         self.other_version = version
         self.other_sub_version = sub_version[:512]
