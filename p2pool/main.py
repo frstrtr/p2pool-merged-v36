@@ -353,10 +353,8 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         print '    ...success!'
         print
         
-        # Initialize Telegram notifier for block announcements
-        telegram_notifier = TelegramNotifier(datadir_path, net.NAME)
-        
         # Hook block recording for accurate luck calculation and Telegram notifications
+        # (telegram_notifier already initialized earlier for error reporting)
         @defer.inlineCallbacks
         def on_verified_share(share):
             """Record block finds with hashrate data and send Telegram notification."""
@@ -779,15 +777,16 @@ def run():
     deferral.RobustLoopingCall(logfile.reopen).start(5)
     
     class ErrorReporter(object):
-        def __init__(self):
+        def __init__(self, telegram_notifier):
             self.last_sent = None
+            self.telegram = telegram_notifier
         
         def emit(self, eventDict):
             if not eventDict["isError"]:
                 return
             
-            if self.last_sent is not None and time.time() < self.last_sent + 5:
-                return
+            if self.last_sent is not None and time.time() < self.last_sent + 30:
+                return  # Rate limit to once per 30 seconds
             self.last_sent = time.time()
             
             if 'failure' in eventDict:
@@ -796,19 +795,19 @@ def run():
             else:
                 text = " ".join([str(m) for m in eventDict["message"]]) + "\n"
             
-            try:
-                from twisted.web import client
-                client.getPage(
-                    url='http://u.forre.st/p2pool_error.cgi',
-                    method='POST',
-                    postdata=p2pool.__version__ + ' ' + net.NAME + '\n' + text,
-                    timeout=15,
-                ).addBoth(lambda x: None)
-            except ImportError:
-                # OpenSSL not available - can't submit error reports (requires SSL for redirects)
-                pass
+            # Add version and network info
+            error_header = 'P2Pool %s (%s)\n\n' % (p2pool.__version__, net.NAME)
+            error_text = error_header + text
+            
+            # Send to Telegram if configured (non-blocking)
+            if self.telegram and self.telegram.is_configured():
+                self.telegram.send_error_notification(error_text, error_type='Error')
+    
+    # Initialize Telegram notifier early for error reporting
+    telegram_notifier = TelegramNotifier(datadir_path, net.NAME)
+    
     if not args.no_bugreport:
-        log.addObserver(ErrorReporter().emit)
+        log.addObserver(ErrorReporter(telegram_notifier).emit)
     
     # Filter out benign OpenSSL import errors and DNS lookup failures from Twisted
     original_observer = log.theLogPublisher.observers[0] if log.theLogPublisher.observers else None
