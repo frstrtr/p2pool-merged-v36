@@ -1088,6 +1088,9 @@
         function loadBlocks() {
             d3.json('../recent_blocks', function(blocks) {
                 d3.select('#blocks_loading').style('display', 'none');
+                // Clear existing rows before adding new data
+                d3.select('#blocks tbody').selectAll('tr').remove();
+                
                 if (!blocks || blocks.length === 0) {
                     d3.select('#blocks tbody').append('tr').append('td')
                         .attr('colspan', '5')
@@ -1680,6 +1683,7 @@
             } else {
                 autoRefreshInterval = setInterval(function() {
                     loadStats();
+                    loadBlocks();
                     loadHashrateGraph();
                     document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
                 }, 30000);
