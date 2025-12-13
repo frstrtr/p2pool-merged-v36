@@ -17,6 +17,7 @@ WORKER_PORT = 17903
 BOOTSTRAP_ADDRS = 'p2pool.dashninja.pl test.p2pool.masternode.io test.p2pool.dash.siampm.com'.split(' ')
 ANNOUNCE_CHANNEL = ''
 VERSION_CHECK = lambda v: v >= 200000
+MINIMUM_PROTOCOL_VERSION = 1700  # Protocol v1700: '!' prefix for script payments
 
 # ==== Stratum Vardiff Configuration ====
 # Testnet can use more aggressive settings for faster testing
