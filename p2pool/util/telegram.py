@@ -51,7 +51,8 @@ class TelegramNotifier(object):
                 "bot_token": "",
                 "chat_id": "",
                 "enabled": False,
-                "_comment": "Get bot_token from @BotFather, chat_id from @userinfobot or group ID"
+                "error_notifications": False,
+                "_comment": "Get bot_token from @BotFather, chat_id from @userinfobot or group ID. Set error_notifications=true to receive error reports."
             }
             try:
                 with open(self.config_file, 'wb') as f:
@@ -184,6 +185,40 @@ class TelegramNotifier(object):
         else:
             print 'Telegram: Failed to send block announcement'
         
+        defer.returnValue(result)
+    
+    @defer.inlineCallbacks
+    def send_error_notification(self, error_text, error_type='Error'):
+        """
+        Send error notification to Telegram.
+        
+        Args:
+            error_text: Error traceback or message
+            error_type: Type of error (e.g., 'Error', 'Warning', 'Critical')
+        """
+        if not self.is_configured():
+            defer.returnValue(False)
+        
+        # Check if error notifications are enabled (default: disabled for privacy)
+        if not self.config.get('error_notifications', False):
+            defer.returnValue(False)
+        
+        # Truncate very long error messages
+        max_length = 4000  # Telegram message limit is 4096
+        if len(error_text) > max_length:
+            error_text = error_text[:max_length] + '\n\n... (truncated)'
+        
+        # Build message
+        icon = u"\U000026A0" if error_type == 'Warning' else u"\U0001F6A8"
+        message_lines = [
+            u"%s <b>P2Pool %s</b>" % (icon, error_type),
+            "",
+            u"<pre>%s</pre>" % error_text.replace('<', '&lt;').replace('>', '&gt;'),
+        ]
+        
+        message = "\n".join(message_lines)
+        
+        result = yield self.send_message(message, parse_mode='HTML')
         defer.returnValue(result)
     
     def reload_config(self):
