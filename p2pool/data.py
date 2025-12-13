@@ -194,14 +194,15 @@ class Share(object):
                 # Format 1: "!<hex>" - direct script encoding (for platform OP_RETURN etc)
                 # Format 2: Regular address string - convert to script
                 payee = obj.get('payee')
-                if payee and payee.startswith('!'):
+                if not payee:
+                    continue  # Skip payments without valid payee
+                # Check if it's a script-encoded payment (starts with '!')
+                if isinstance(payee, str) and payee.startswith('!'):
                     # Direct script encoded as hex after "!" prefix (not in base58 alphabet)
                     pm_script = payee[1:].decode('hex')
-                elif payee:
+                else:
                     # Regular address - convert to script
                     pm_script = dash_data.address_to_script2(payee, net.PARENT)
-                else:
-                    continue  # Skip payments without valid payee
                 pm_payout = obj.get('amount', 0)
                 if pm_payout > 0:
                     payments_tx += [dict(value=pm_payout, script=pm_script)]
