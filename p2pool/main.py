@@ -74,7 +74,7 @@ class keypool():
 
 
 @defer.inlineCallbacks
-def main(args, net, datadir_path, merged_urls, worker_endpoint):
+def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifier=None):
     try:
         print 'p2pool (version %s)' % (p2pool.__version__,)
         print
@@ -388,7 +388,7 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                     pass
                 
                 # Send Telegram notification (don't block on this)
-                if telegram_notifier.is_configured():
+                if telegram_notifier is not None and telegram_notifier.is_configured():
                     try:
                         yield telegram_notifier.announce_block_found(
                             net_name=net.NAME,
@@ -838,5 +838,5 @@ def run():
         log.removeObserver(original_observer)
         log.addObserver(filter_openssl_errors)
     
-    reactor.callWhenRunning(main, args, net, datadir_path, merged_urls, worker_endpoint)
+    reactor.callWhenRunning(main, args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifier)
     reactor.run()
