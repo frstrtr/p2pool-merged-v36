@@ -593,10 +593,10 @@ def run():
         help='use Windows IOCP API in order to avoid errors due to large number of sockets being open',
         action='store_true', default=False, dest='iocp')
     parser.add_argument('--irc-announce',
-        help='announce any blocks found on irc://irc.freenode.net/#p2pool',
+        help='[DEPRECATED] use Telegram instead (configure telegram_config.json)',
         action='store_true', default=False, dest='irc_announce')
     parser.add_argument('--no-bugreport',
-        help='disable submitting caught exceptions to the author',
+        help='disable error reporting (errors sent to Telegram if configured with error_notifications=true)',
         action='store_true', default=False, dest='no_bugreport')
     
     p2pool_group = parser.add_argument_group('p2pool interface')
