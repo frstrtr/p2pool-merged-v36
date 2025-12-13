@@ -32,7 +32,12 @@ This document summarizes the fixes made to support high-hashrate ASIC miners (pa
   - ✅ Superblock/treasury payments (every 16616 blocks)
   - ✅ DIP3/DIP4 coinbase payloads
 
-**Result:** First mainnet block mined successfully at height 2387691 with correct platform payments! 🎉
+**Result:** First successful mainnet block mined with correct platform payments! 🎉
+
+- **Block #2387690** - First accepted P2Pool-Dash mainnet block
+  - Hash: `000000000000000d3a4d8da8dc189ceaec6f442e825cd8922fa492c920a799eb`
+  - Explorer: https://chainz.cryptoid.info/dash/block.dws?000000000000000d3a4d8da8dc189ceaec6f442e825cd8922fa492c920a799eb
+  - Earlier blocks were orphaned due to missing platform payment handling
 
 ```python
 # Example getblocktemplate masternode payments:
