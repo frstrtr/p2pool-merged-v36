@@ -20,6 +20,7 @@ WORKER_PORT = 7903
 BOOTSTRAP_ADDRS = 'rov.p2p-spb.xyz'.split(' ')
 ANNOUNCE_CHANNEL = '#p2pool-dash'
 VERSION_CHECK = lambda v: v >= 200000
+MINIMUM_PROTOCOL_VERSION = 1700  # Protocol v1700: '!' prefix for script payments
 
 # ==== Stratum Vardiff Configuration ====
 # These parameters are tuned for ASIC miners with stable hashrates
