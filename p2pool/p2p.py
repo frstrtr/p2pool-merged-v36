@@ -754,6 +754,13 @@ class Node(object):
     
     
     def got_addr(self, (host, port), services, timestamp):
+        # Don't store our own external IP to avoid self-connection attempts
+        if self.external_ip is not None:
+            external_host = self.external_ip.split(':')[0] if ':' in self.external_ip else self.external_ip
+            external_port = int(self.external_ip.split(':')[1]) if ':' in self.external_ip else self.port
+            if host == external_host and port == external_port:
+                return
+        
         if (host, port) in self.addr_store:
             old_services, old_first_seen, old_last_seen = self.addr_store[host, port]
             self.addr_store[host, port] = services, old_first_seen, max(old_last_seen, timestamp)
