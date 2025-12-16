@@ -84,6 +84,10 @@ class PoolStatistics(object):
         self.total_shares_accepted = 0
         self.total_shares_rejected = 0
         self.startup_time = time.time()
+        
+        # Threat detection thresholds (set by network config via StratumServerFactory)
+        self.connection_worker_elevated = 4.0  # Default: >4 connections per worker = elevated
+        self.connection_worker_warning = 6.0   # Default: >6 connections per worker = warning
     
     def register_connection(self, conn_id, connection, ip=None):
         """Register a new stratum connection"""
@@ -399,6 +403,21 @@ class PoolStatistics(object):
             return self.worker_stats.get(worker_name)
         return self.worker_stats
     
+    def get_ip_worker_stats(self):
+        """Calculate per-IP worker diversity for threat detection"""
+        ip_workers = {}  # {ip: set(worker_names)}
+        
+        for conn_id, conn in self.connections.items():
+            if hasattr(conn, 'worker_ip') and hasattr(conn, 'username'):
+                ip = conn.worker_ip
+                worker = conn.username
+                if ip not in ip_workers:
+                    ip_workers[ip] = set()
+                ip_workers[ip].add(worker)
+        
+        # Convert sets to counts for JSON serialization
+        return {ip: len(workers) for ip, workers in ip_workers.items()}
+    
     def get_pool_stats(self):
         """Get overall pool statistics"""
         now = time.time()
@@ -414,6 +433,11 @@ class PoolStatistics(object):
             'submission_rate': rate,
             'uptime': now - self.startup_time,
             'ip_connections': dict(self.ip_connections),
+            'ip_workers': self.get_ip_worker_stats(),  # Add worker diversity per IP
+            'threat_thresholds': {  # Include thresholds for web UI
+                'connection_worker_elevated': self.connection_worker_elevated,
+                'connection_worker_warning': self.connection_worker_warning,
+            },
         }
     
     def get_security_stats(self):
@@ -1269,8 +1293,13 @@ class StratumProtocol(jsonrpc.LineBasedPeer):
 class StratumServerFactory(protocol.ServerFactory):
     protocol = StratumProtocol
     
-    def __init__(self, wb):
+    def __init__(self, wb, net=None):
         self.wb = wb
+        self.net = net
+        # Store threat detection thresholds from network config
+        if net:
+            pool_stats.connection_worker_elevated = getattr(net, 'CONNECTION_WORKER_ELEVATED', 4.0)
+            pool_stats.connection_worker_warning = getattr(net, 'CONNECTION_WORKER_WARNING', 6.0)
     
     def get_pool_stats(self):
         """Get global pool statistics"""
