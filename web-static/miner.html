@@ -299,6 +299,79 @@
             color: var(--danger);
         }
         
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--darker);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        thead {
+            background: var(--dark);
+        }
+        
+        th {
+            padding: 12px 15px;
+            text-align: left;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+            border-bottom: 2px solid var(--border);
+        }
+        
+        td {
+            padding: 12px 15px;
+            font-size: 0.85rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+        
+        tr:hover {
+            background: rgba(0, 141, 228, 0.1);
+        }
+        
+        .hash-link {
+            color: var(--primary);
+            text-decoration: none;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+        }
+        
+        .hash-link:hover {
+            text-decoration: underline;
+        }
+        
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-confirmed {
+            background: rgba(40, 167, 69, 0.2);
+            color: var(--success);
+        }
+        
+        .status-pending {
+            background: rgba(255, 193, 7, 0.2);
+            color: var(--warning);
+        }
+        
+        .status-orphaned {
+            background: rgba(220, 53, 69, 0.2);
+            color: var(--danger);
+        }
+        
         /* Footer */
         footer {
             background: var(--card-bg);
@@ -427,6 +500,63 @@
             <div class="chart-container">
                 <div id="payout_chart"></div>
             </div>
+            
+            <!-- Blocks Found & Payouts -->
+            <div class="section-header">
+                <h2>Blocks Found & Rewards</h2>
+            </div>
+            
+            <!-- Payout Summary Stats -->
+            <div class="stats-grid" style="margin-bottom: 20px;">
+                <div class="stat-card">
+                    <h3>Blocks Found</h3>
+                    <div class="stat-value success" id="blocks_found">0</div>
+                    <div class="stat-label">Total blocks mined</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Rewards</h3>
+                    <div class="stat-value" id="total_rewards">0 DASH</div>
+                    <div class="stat-label">Estimated total earned</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Confirmed Rewards</h3>
+                    <div class="stat-value success" id="confirmed_rewards">0 DASH</div>
+                    <div class="stat-label">Confirmed payouts</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Pending Rewards</h3>
+                    <div class="stat-value warning" id="pending_rewards">0 DASH</div>
+                    <div class="stat-label">Awaiting confirmation</div>
+                </div>
+            </div>
+            
+            <!-- Blocks Table -->
+            <div class="chart-container">
+                <h3>Recent Blocks</h3>
+                <div id="blocks_loading" class="loading" style="padding: 20px;">
+                    <div class="loading-spinner"></div>
+                    <div>Loading blocks data...</div>
+                </div>
+                <div id="blocks_container" style="display: none;">
+                    <table id="blocks_table" style="width: 100%; margin-top: 15px;">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Block Height</th>
+                                <th>Block Hash</th>
+                                <th>Block Reward</th>
+                                <th>Est. Payout</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="blocks_tbody">
+                        </tbody>
+                    </table>
+                    <div id="no_blocks" style="display: none; text-align: center; padding: 20px; color: #8888a0;">
+                        No blocks found by this miner yet
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -519,6 +649,84 @@
                 
                 // Load graph data
                 loadGraphs();
+                
+                // Load payouts data
+                loadPayouts();
+            });
+        }
+        
+        function loadPayouts() {
+            d3.json('../miner_payouts/' + minerAddress, function(payouts) {
+                document.getElementById('blocks_loading').style.display = 'none';
+                
+                if (!payouts || payouts.error) {
+                    document.getElementById('blocks_container').style.display = 'block';
+                    document.getElementById('no_blocks').style.display = 'block';
+                    return;
+                }
+                
+                // Update summary stats
+                document.getElementById('blocks_found').textContent = payouts.blocks_found || 0;
+                document.getElementById('total_rewards').textContent = d3.format('.4f')(payouts.total_estimated_rewards || 0) + ' DASH';
+                document.getElementById('confirmed_rewards').textContent = d3.format('.4f')(payouts.confirmed_rewards || 0) + ' DASH';
+                document.getElementById('pending_rewards').textContent = d3.format('.4f')(payouts.pending_rewards || 0) + ' DASH';
+                
+                // Render blocks table
+                if (!payouts.blocks || payouts.blocks.length === 0) {
+                    document.getElementById('blocks_container').style.display = 'block';
+                    document.getElementById('no_blocks').style.display = 'block';
+                    return;
+                }
+                
+                document.getElementById('blocks_container').style.display = 'block';
+                const tbody = document.getElementById('blocks_tbody');
+                tbody.innerHTML = '';
+                
+                payouts.blocks.forEach(function(block) {
+                    const tr = document.createElement('tr');
+                    
+                    // Time
+                    const tdTime = document.createElement('td');
+                    const date = new Date(block.timestamp * 1000);
+                    tdTime.textContent = date.toLocaleString();
+                    tr.appendChild(tdTime);
+                    
+                    // Block Height
+                    const tdHeight = document.createElement('td');
+                    tdHeight.textContent = block.block_height || 'N/A';
+                    tr.appendChild(tdHeight);
+                    
+                    // Block Hash (link to explorer)
+                    const tdHash = document.createElement('td');
+                    const hashLink = document.createElement('a');
+                    hashLink.className = 'hash-link';
+                    hashLink.href = block.explorer_url || '#';
+                    hashLink.target = '_blank';
+                    hashLink.textContent = block.block_hash.substring(0, 16) + '...';
+                    tdHash.appendChild(hashLink);
+                    tr.appendChild(tdHash);
+                    
+                    // Block Reward
+                    const tdReward = document.createElement('td');
+                    tdReward.textContent = block.block_reward > 0 ? d3.format('.4f')(block.block_reward) + ' DASH' : 'Pending...';
+                    tr.appendChild(tdReward);
+                    
+                    // Estimated Payout
+                    const tdPayout = document.createElement('td');
+                    tdPayout.textContent = block.estimated_payout > 0 ? d3.format('.4f')(block.estimated_payout) + ' DASH' : 'Calculating...';
+                    tr.appendChild(tdPayout);
+                    
+                    // Status
+                    const tdStatus = document.createElement('td');
+                    const statusBadge = document.createElement('span');
+                    statusBadge.className = 'status-badge status-' + block.status;
+                    statusBadge.textContent = block.status === 'confirmed' ? '✓ Confirmed' : 
+                                             (block.status === 'pending' ? '⏳ Pending' : '✗ Orphaned');
+                    tdStatus.appendChild(statusBadge);
+                    tr.appendChild(tdStatus);
+                    
+                    tbody.appendChild(tr);
+                });
             });
         }
         
