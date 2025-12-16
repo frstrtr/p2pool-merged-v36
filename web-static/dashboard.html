@@ -308,6 +308,32 @@
             text-decoration: underline;
         }
         
+        /* Scrollable blocks table */
+        .blocks-table-scroll {
+            max-height: 500px;
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+        
+        .blocks-table-scroll::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        .blocks-table-scroll::-webkit-scrollbar-track {
+            background: var(--darker);
+            border-radius: 4px;
+        }
+        
+        .blocks-table-scroll::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+        
+        .blocks-table-scroll::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+        
         .amount {
             font-family: 'Monaco', 'Consolas', monospace;
             font-weight: 600;
@@ -950,21 +976,23 @@
                         <span class="badge" id="luck_thirty_days" style="background: var(--primary);" title="30-day average luck">30d: -</span>
                     </div>
                 </div>
-                <table id="blocks">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Height</th>
-                            <th>Block Hash</th>
-                            <th>Luck</th>
-                            <th title="Time to find block (expected/actual)">Round</th>
-                            <th title="Network difficulty target">Net Diff</th>
-                            <th title="Actual hash difficulty">Hash Diff</th>
-                            <th title="Block status">✓</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+                <div class="blocks-table-scroll">
+                    <table id="blocks">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Height</th>
+                                <th>Block Hash</th>
+                                <th>Luck</th>
+                                <th title="Time to find block (expected/actual)">Round</th>
+                                <th title="Network difficulty target">Net Diff</th>
+                                <th title="Actual hash difficulty">Hash Diff</th>
+                                <th title="Block status">✓</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
                 <div class="loading" id="blocks_loading">Loading blocks</div>
                 <button id="blocks_show_more" style="display: none; width: 100%; padding: 10px; margin-top: 10px; background: var(--card-bg); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px;">Show 5 more...</button>
             </div>
