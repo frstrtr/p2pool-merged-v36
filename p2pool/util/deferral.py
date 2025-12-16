@@ -190,7 +190,7 @@ class DeferredCacher(object):
                 if fail.check(RetrySilentlyException):
                     return
                 print
-                print 'Error when requesting noncached value:'
+                print 'Error when requesting noncached value for key: %r' % (key,)
                 fail.printTraceback()
                 print
             self.func(key).addCallback(cb).addErrback(eb)
