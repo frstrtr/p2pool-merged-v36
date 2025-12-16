@@ -587,6 +587,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         
         # Try to get block reward from dashd (async, will update later if not available now)
         @defer.inlineCallbacks
+        @defer.inlineCallbacks
         def fetch_block_reward():
             try:
                 block_info = yield wb.dashd.rpc_getblock(block_hash)
@@ -601,7 +602,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         save_block_history()
                         print 'Updated block %s reward: %.8f DASH' % (block_hash[:16], reward)
             except Exception as e:
-                log.err(e, 'Error fetching block reward:')
+                print 'Error fetching block reward for block %s: %s' % (block_hash[:16], str(e))
+                log.err(e, 'Error fetching block reward for block %s:' % block_hash[:16])
         
         block_history[block_hash] = {
             'ts': ts,
