@@ -2536,7 +2536,7 @@
                     style: { fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif' },
                     marginTop: 20,
                     marginRight: 60,
-                    marginBottom: 60,
+                    marginBottom: 90,  // Increased to accommodate legend without overlapping X-axis
                     marginLeft: 80,
                     panning: { enabled: true, type: 'x' },
                     panKey: 'shift',
@@ -2666,8 +2666,17 @@
                 },
                 legend: { 
                     enabled: true,
-                    itemStyle: { color: '#e0e0e0', fontSize: '12px' },
-                    itemHoverStyle: { color: '#008de4' }
+                    align: 'center',
+                    verticalAlign: 'bottom',
+                    y: -10,  // Move legend up from bottom to avoid X-axis labels
+                    floating: false,
+                    itemStyle: { 
+                        color: '#e0e0e0', 
+                        fontSize: '13px',
+                        fontWeight: '500'
+                    },
+                    itemHoverStyle: { color: '#008de4' },
+                    itemDistance: 20  // More space between legend items
                 },
                 plotOptions: {
                     area: {
