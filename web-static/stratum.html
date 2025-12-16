@@ -991,12 +991,25 @@
                 
                 // Update IP Connections table
                 var ipConns = pool.ip_connections || {};
+                var ipWorkers = pool.ip_workers || {};  // Number of unique workers per IP
+                var thresholds = pool.threat_thresholds || {
+                    connection_worker_elevated: 4.0,
+                    connection_worker_warning: 6.0
+                };
                 var ipTbody = d3.select('#ip-connections-table tbody');
                 ipTbody.selectAll('tr').remove();
                 
                 var ipList = [];
                 for (var ip in ipConns) {
-                    ipList.push({ip: ip, count: ipConns[ip]});
+                    var connCount = ipConns[ip];
+                    var workerCount = ipWorkers[ip] || 1;  // Default to 1 if not available
+                    var connPerWorker = connCount / workerCount;
+                    ipList.push({
+                        ip: ip, 
+                        count: connCount, 
+                        workers: workerCount,
+                        ratio: connPerWorker
+                    });
                 }
                 ipList.sort(function(a, b) { return b.count - a.count; });
                 
@@ -1005,16 +1018,19 @@
                     ipList.forEach(function(item) {
                         var tr = ipTbody.append('tr');
                         tr.append('td').text(item.ip);
-                        tr.append('td').text(item.count);
+                        tr.append('td').text(item.count + ' (' + item.workers + ' workers)');
                         
-                        // Status based on connection count
+                        // Status based on connection/worker ratio using network-configured thresholds
+                        // Normal: ~1 connection per worker (legitimate multi-rig miners)
+                        // Elevated: >threshold (configurable, default 4)
+                        // Warning: >warning threshold (configurable, default 6)
                         var statusTd = tr.append('td');
-                        if (item.count > 10) {
-                            statusTd.html('<span class="status-badge danger">⚠ High</span>');
-                        } else if (item.count > 5) {
-                            statusTd.html('<span class="status-badge warning">Elevated</span>');
+                        if (item.ratio > thresholds.connection_worker_warning) {
+                            statusTd.html('<span class="status-badge danger">⚠ High (' + item.ratio.toFixed(1) + ' conn/worker)</span>');
+                        } else if (item.ratio > thresholds.connection_worker_elevated) {
+                            statusTd.html('<span class="status-badge warning">Elevated (' + item.ratio.toFixed(1) + ' conn/worker)</span>');
                         } else {
-                            statusTd.html('<span class="status-badge success">Normal</span>');
+                            statusTd.html('<span class="status-badge success">Normal (' + item.ratio.toFixed(1) + ' conn/worker)</span>');
                         }
                     });
                 } else {

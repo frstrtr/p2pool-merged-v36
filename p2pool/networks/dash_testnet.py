@@ -33,3 +33,7 @@ VARDIFF_QUICKUP_DIVISOR = 4     # Adjust up if time < target_time / divisor
 VARDIFF_MIN_ADJUST = 0.25       # Minimum adjustment multiplier
 VARDIFF_MAX_ADJUST = 4.0        # Maximum adjustment multiplier
 
+# ==== Connection Threat Detection ====
+CONNECTION_WORKER_ELEVATED = 4.0   # Elevated threat: >4 connections per worker
+CONNECTION_WORKER_WARNING = 6.0     # Warning threat: >6 connections per worker
+

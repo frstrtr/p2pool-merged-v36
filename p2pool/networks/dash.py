@@ -38,3 +38,11 @@ VARDIFF_QUICKUP_DIVISOR = 3     # Adjust up if time < target_time / divisor
 VARDIFF_MIN_ADJUST = 0.5        # Minimum adjustment multiplier (halve difficulty)
 VARDIFF_MAX_ADJUST = 2.0        # Maximum adjustment multiplier (double difficulty)
 
+# ==== Connection Threat Detection ====
+# Detect suspicious connection patterns per IP address
+# These thresholds define connection/worker ratios that trigger threat alerts
+
+# Normal: Legitimate multi-rig miners (e.g., 4 machines = 4 workers = 4 connections)
+CONNECTION_WORKER_ELEVATED = 4.0   # Elevated threat: >4 connections per worker
+CONNECTION_WORKER_WARNING = 6.0     # Warning threat: >6 connections per worker
+

@@ -32,3 +32,8 @@ VARDIFF_QUICKUP_DIVISOR = 4
 
 VARDIFF_MIN_ADJUST = 0.25
 VARDIFF_MAX_ADJUST = 4.0
+
+# ==== Connection Threat Detection ====
+CONNECTION_WORKER_ELEVATED = 4.0   # Elevated threat: >4 connections per worker
+CONNECTION_WORKER_WARNING = 6.0     # Warning threat: >6 connections per worker
+

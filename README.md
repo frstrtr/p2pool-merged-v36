@@ -249,6 +249,26 @@ To enable Telegram block announcements:
 }
 ```
 
+### Connection Threat Detection
+
+The Stratum interface includes intelligent threat detection that monitors connection patterns per IP address. The system calculates a **connection-to-worker ratio** to distinguish between:
+
+- **Normal**: Legitimate multi-rig miners (e.g., 7 connections running 7 unique workers = 1:1 ratio)
+- **Elevated**: Suspicious patterns (e.g., 10 connections but only 2 workers = 5:1 ratio)
+- **High**: Likely attack or misconfiguration (e.g., 20 connections with 3 workers = 6.7:1 ratio)
+
+#### Configuration
+
+Thresholds are configurable per network in `p2pool/networks/*.py`:
+
+```python
+# Default values (dash.py)
+CONNECTION_WORKER_ELEVATED = 4.0   # Flag if >4 connections per worker
+CONNECTION_WORKER_WARNING = 6.0     # Flag as high if >6 connections per worker
+```
+
+This ensures legitimate miners running multiple machines from the same IP are not incorrectly flagged as threats, while still detecting actual connection flooding attempts.
+
 Official wiki :
 -------------------------
 https://en.bitcoin.it/wiki/P2Pool
