@@ -476,6 +476,73 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     
     web_root.putChild('miner_stats', WebInterface(get_miner_stats))
     
+    # ==== Individual miner payouts endpoint ====
+    @defer.inlineCallbacks
+    def get_miner_payouts(address):
+        """Get payout history for a specific miner address"""
+        if not address:
+            defer.returnValue({'error': 'No address provided'})
+            return
+        
+        miner_blocks = []
+        total_rewards = 0
+        confirmed_rewards = 0
+        pending_rewards = 0
+        
+        # Find all blocks mined by this address
+        for block_hash, block_data in block_history.items():
+            if block_data.get('miner') == address:
+                status = yield get_block_status(block_hash)
+                
+                # Get block reward (may not be available yet)
+                block_reward = block_data.get('block_reward', 0)
+                
+                # Calculate miner's share of the reward
+                # The miner gets their proportional share based on their shares in the window
+                current_txouts = node.get_current_txouts()
+                address_script = bitcoin_data.address_to_script2(address, node.net.PARENT)
+                
+                # For historical blocks, we need to estimate the payout
+                # In P2Pool, all miners with shares in the window get paid proportionally
+                # The block finder doesn't get extra reward in standard P2Pool
+                estimated_payout = 0
+                if address_script and block_reward > 0:
+                    # This is an approximation - actual payout depends on share distribution at block time
+                    estimated_payout = block_reward * 0.1  # Rough estimate, actual varies
+                
+                block_info = {
+                    'timestamp': block_data.get('ts', 0),
+                    'block_hash': block_hash,
+                    'block_height': block_data.get('block_height', 0),
+                    'block_reward': block_reward,
+                    'estimated_payout': estimated_payout,
+                    'status': status,
+                    'explorer_url': node.net.PARENT.BLOCK_EXPLORER_URL_PREFIX + block_hash,
+                }
+                
+                miner_blocks.append(block_info)
+                
+                if block_reward > 0:
+                    total_rewards += estimated_payout
+                    if status == 'confirmed':
+                        confirmed_rewards += estimated_payout
+                    elif status == 'pending':
+                        pending_rewards += estimated_payout
+        
+        # Sort by timestamp descending
+        miner_blocks.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        defer.returnValue({
+            'address': address,
+            'blocks_found': len(miner_blocks),
+            'total_estimated_rewards': total_rewards,
+            'confirmed_rewards': confirmed_rewards,
+            'pending_rewards': pending_rewards,
+            'blocks': miner_blocks[:50],  # Limit to 50 most recent
+        })
+    
+    web_root.putChild('miner_payouts', WebInterface(get_miner_payouts))
+    
     # ==== Security/DDoS monitoring endpoint ====
     def get_stratum_security():
         """Get stratum security and DDoS detection metrics"""
