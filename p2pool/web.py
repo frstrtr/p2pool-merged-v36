@@ -563,6 +563,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         stale_prop = None
         network_diff = None
         expected_time = None
+        block_reward = None
         
         try:
             height = node.tracker.get_height(node.best_share_var.value)
@@ -584,15 +585,36 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except Exception as e:
             log.err(e, 'Error calculating hashrate for block record:')
         
+        # Try to get block reward from dashd (async, will update later if not available now)
+        @defer.inlineCallbacks
+        def fetch_block_reward():
+            try:
+                block_info = yield wb.dashd.rpc_getblock(block_hash)
+                if block_info and 'tx' in block_info and len(block_info['tx']) > 0:
+                    # Get coinbase transaction
+                    coinbase_txid = block_info['tx'][0]
+                    tx_info = yield wb.dashd.rpc_getrawtransaction(coinbase_txid, 1)
+                    if tx_info and 'vout' in tx_info:
+                        # Sum all outputs (block reward + fees)
+                        reward = sum(vout['value'] for vout in tx_info['vout'])
+                        block_history[block_hash]['block_reward'] = reward
+                        save_block_history()
+                        print 'Updated block %s reward: %.8f DASH' % (block_hash[:16], reward)
+            except Exception as e:
+                log.err(e, 'Error fetching block reward:')
+        
         block_history[block_hash] = {
             'ts': ts,
             'block_height': block_height,
+            'hash': block_hash,
             'share_hash': share_hash,
             'miner': miner_address,
             'pool_hashrate': pool_hashrate,
             'stale_prop': stale_prop,
             'network_diff': network_diff,
             'expected_time': expected_time,
+            'block_reward': block_reward,  # Will be updated asynchronously
+            'status': 'pending',  # Will be updated by block status checker
         }
         
         print 'Recorded block %s at height %d with pool hashrate %.2f TH/s' % (
@@ -600,6 +622,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         
         # Save to disk
         save_block_history()
+        
+        # Fetch reward asynchronously
+        fetch_block_reward()
     
     def get_block_history_data(block_hash):
         """Get historical data for a block if available."""
@@ -816,15 +841,47 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 defer.returnValue('pending')
     
     @defer.inlineCallbacks
-    def get_recent_blocks():
-        if node.best_share_var.value is None:
-            defer.returnValue([])
+    def get_recent_blocks(limit=None):
+        """Get recent blocks from both persistent storage and sharechain.
         
-        blocks = []
+        Returns blocks from block_history.json (persistent) merged with 
+        current sharechain data. This ensures all historically found blocks
+        are displayed even after they leave sharechain memory.
+        
+        Args:
+            limit: Maximum number of blocks to return (default: all blocks)
+        """
+        # Start with all blocks from persistent storage
+        blocks_dict = {}  # Use dict to avoid duplicates, keyed by block_hash
+        
+        # Add all blocks from persistent history
+        for block_hash, hist_data in block_history.items():
+            if hist_data:
+                blocks_dict[block_hash] = {
+                    'ts': hist_data.get('ts', 0),
+                    'hash': block_hash,
+                    'number': hist_data.get('block_height', 0),
+                    'share': hist_data.get('share_hash', ''),
+                    'miner': hist_data.get('miner', ''),
+                    'pool_hashrate_at_find': hist_data.get('pool_hashrate'),
+                    'network_difficulty': hist_data.get('network_diff'),
+                    'block_reward': hist_data.get('block_reward'),
+                    'status': hist_data.get('status', 'unknown'),
+                    'explorer_url': node.net.PARENT.BLOCK_EXPLORER_URL_PREFIX + block_hash,
+                    'from_history': True,
+                }
+        
+        # Now merge/update with current sharechain data
+        if node.best_share_var.value is None:
+            # No sharechain, return only persistent data
+            blocks = sorted(blocks_dict.values(), key=lambda x: x['ts'], reverse=True)
+            if limit:
+                blocks = blocks[:limit]
+            defer.returnValue(blocks)
+        
         try:
             height = node.tracker.get_height(node.best_share_var.value)
-            if height < 1:
-                defer.returnValue([])
+            if height >= 1:
                 
             for s in node.tracker.get_chain(node.best_share_var.value, min(height, node.net.CHAIN_LENGTH)):
                 if s.pow_hash <= s.header['bits'].target:
@@ -838,29 +895,50 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     status = yield get_block_status(block_hash)
                     
                     # Calculate actual hash difficulty (based on the hash value itself)
-                    # This represents the real work done to find this specific hash
                     hash_int = int(block_hash, 16)
-                    # Calculate difficulty as: difficulty = max_target / hash_value
-                    # max_target for Bitcoin/Dash is 2^224 - 1 (difficulty 1)
                     max_target = 0x00000000FFFF0000000000000000000000000000000000000000000000000000
                     actual_hash_difficulty = float(max_target) / float(hash_int) if hash_int > 0 else 0
                     
                     # Get network difficulty at the time of this block
                     network_difficulty = bitcoin_data.target_to_difficulty(s.header['bits'].target)
                     
-                    blocks.append(dict(
-                        ts=s.timestamp,
-                        hash=block_hash,
-                        number=block_number,
-                        share='%064x' % s.hash,
-                        explorer_url=node.net.PARENT.BLOCK_EXPLORER_URL_PREFIX + block_hash,
-                        status=status,
-                        actual_hash_difficulty=actual_hash_difficulty,
-                        network_difficulty=network_difficulty,
-                    ))
+                    # Update or create block entry
+                    if block_hash in blocks_dict:
+                        # Update existing entry from history with fresh sharechain data
+                        blocks_dict[block_hash].update({
+                            'ts': s.timestamp,
+                            'number': block_number,
+                            'share': '%064x' % s.hash,
+                            'status': status,
+                            'actual_hash_difficulty': actual_hash_difficulty,
+                            'network_difficulty': network_difficulty,
+                            'from_history': False,  # Has fresh sharechain data
+                        })
+                        # Update persistent storage with latest status
+                        if block_hash in block_history:
+                            block_history[block_hash]['status'] = status
+                    else:
+                        # New block not in history yet
+                        blocks_dict[block_hash] = {
+                            'ts': s.timestamp,
+                            'hash': block_hash,
+                            'number': block_number,
+                            'share': '%064x' % s.hash,
+                            'explorer_url': node.net.PARENT.BLOCK_EXPLORER_URL_PREFIX + block_hash,
+                            'status': status,
+                            'actual_hash_difficulty': actual_hash_difficulty,
+                            'network_difficulty': network_difficulty,
+                            'from_history': False,
+                        }
         except Exception as e:
-            log.err(e, 'Error getting recent blocks:')
-            defer.returnValue([])
+            log.err(e, 'Error getting recent blocks from sharechain:')
+        
+        # Convert dict to list and sort by timestamp (newest first)
+        blocks = sorted(blocks_dict.values(), key=lambda x: x['ts'], reverse=True)
+        
+        # Apply limit if specified
+        if limit:
+            blocks = blocks[:limit]
         
         # Calculate luck for each block using AVERAGE hashrate between blocks
         # Luck = expected_time / actual_time * 100%
