@@ -269,6 +269,47 @@ CONNECTION_WORKER_WARNING = 6.0     # Flag as high if >6 connections per worker
 
 This ensures legitimate miners running multiple machines from the same IP are not incorrectly flagged as threats, while still detecting actual connection flooding attempts.
 
+### Persistent Block History
+
+P2Pool stores all found blocks in `data/dash/block_history.json` for permanent record-keeping. This allows the web interface to display complete historical data including:
+
+- Block height, hash, and timestamp
+- Network difficulty and block reward
+- Pool hashrate at the time of discovery
+- Block status (confirmed/orphaned/pending)
+- Luck calculation with time-weighted averages
+
+#### Populating Historical Blocks
+
+If you want to add previously mined blocks to the persistent history (e.g., after a fresh install), use the `populate_block_history.py` utility:
+
+```bash
+# Create a file with block heights (one per line)
+cat > historical_blocks.txt <<EOF
+2389670
+2389615
+2389577
+EOF
+
+# Populate block history from blockchain
+pypy populate_block_history.py \
+    --datadir data/dash \
+    --blocks-file historical_blocks.txt \
+    --dashd-rpc-username YOUR_RPC_USER \
+    --dashd-rpc-password YOUR_RPC_PASS
+```
+
+Or specify blocks directly:
+```bash
+pypy populate_block_history.py \
+    --datadir data/dash \
+    --blocks 2389670,2389615,2389577 \
+    --dashd-rpc-username YOUR_RPC_USER \
+    --dashd-rpc-password YOUR_RPC_PASS
+```
+
+The script will query dashd to fetch block rewards, timestamps, and difficulty, then merge this data into your block history. This ensures consistent graphs and statistics even for blocks found before the current p2pool installation.
+
 Official wiki :
 -------------------------
 https://en.bitcoin.it/wiki/P2Pool
