@@ -872,16 +872,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 }
         
         # Now merge/update with current sharechain data
-        if node.best_share_var.value is None:
-            # No sharechain, return only persistent data
-            blocks = sorted(blocks_dict.values(), key=lambda x: x['ts'], reverse=True)
-            if limit:
-                blocks = blocks[:limit]
-            defer.returnValue(blocks)
-        
-        try:
-            height = node.tracker.get_height(node.best_share_var.value)
-            if height >= 1:
+        if node.best_share_var.value is not None:
+            try:
+                height = node.tracker.get_height(node.best_share_var.value)
+                if height >= 1:
                 for s in node.tracker.get_chain(node.best_share_var.value, min(height, node.net.CHAIN_LENGTH)):
                     if s.pow_hash <= s.header['bits'].target:
                         block_hash = '%064x' % s.header_hash
@@ -929,8 +923,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                                 'network_difficulty': network_difficulty,
                                 'from_history': False,
                             }
-        except Exception as e:
-            log.err(e, 'Error getting recent blocks from sharechain:')
+            except Exception as e:
+                log.err(e, 'Error getting recent blocks from sharechain:')
         
         # Convert dict to list and sort by timestamp (newest first)
         blocks = sorted(blocks_dict.values(), key=lambda x: x['ts'], reverse=True)
