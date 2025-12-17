@@ -2683,7 +2683,7 @@
             
             // Display current worker count and unique miner count in fullscreen
             var fsWorkerCount = minerCount.length > 0 ? minerCount[minerCount.length - 1][1] : 0;
-            var fsUniqueMinerCount = uniqueMiners.length > 0 ? uniqueMiners[uniqueMiners.length - 1][1] : 0;
+            var fsUniqueMinerCount = uniqueMinerCount.length > 0 ? uniqueMinerCount[uniqueMinerCount.length - 1][1] : 0;
             document.getElementById('fs-graph-miners').textContent = fsWorkerCount + '/' + fsUniqueMinerCount;
             
             if (fsAvgLuck !== null) {
