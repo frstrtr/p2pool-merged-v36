@@ -12,15 +12,36 @@ TESTNET_ADDRESS="yZkx49ksZKSmFK6caVA2dAK61JsQJqceD8"
 
 # Function to gracefully stop existing testnet instances (SIGTERM)
 stop_graceful() {
+    local show_logs="${1:-false}"
+    
     echo "Checking for existing P2Pool testnet instances..."
     if pgrep -f "pypy.*run_p2pool.*testnet" > /dev/null; then
         echo "Gracefully stopping P2Pool testnet instance(s)..."
+        
+        # Show last few log lines before shutdown
+        if [ "$show_logs" = "true" ] && [ -f "$LOG_FILE" ]; then
+            echo ""
+            echo "=== Last 5 lines before shutdown ==="
+            tail -5 "$LOG_FILE"
+            echo "==================================="
+            echo ""
+        fi
+        
         pkill -TERM -f "pypy.*run_p2pool.*testnet"
         
         # Wait up to 10 seconds for graceful shutdown
         for i in {1..10}; do
             if ! pgrep -f "pypy.*run_p2pool.*testnet" > /dev/null; then
                 echo "P2Pool testnet stopped gracefully"
+                
+                # Show shutdown logs if requested
+                if [ "$show_logs" = "true" ] && [ -f "$LOG_FILE" ]; then
+                    echo ""
+                    echo "=== Shutdown logs ==="
+                    tail -10 "$LOG_FILE" | grep -A 10 "Graceful shutdown" || tail -10 "$LOG_FILE"
+                    echo "====================="
+                fi
+                
                 [ -f "$PID_FILE" ] && rm -f "$PID_FILE"
                 return 0
             fi
@@ -33,6 +54,8 @@ stop_graceful() {
             pkill -9 -f "pypy.*run_p2pool.*testnet"
             sleep 1
         fi
+    else
+        echo "No P2Pool testnet instance running"
     fi
     [ -f "$PID_FILE" ] && rm -f "$PID_FILE"
 }
@@ -77,7 +100,7 @@ case "$1" in
         fi
         ;;
     stop)
-        stop_graceful
+        stop_graceful "true"
         ;;
     kill)
         kill_force
