@@ -2186,7 +2186,7 @@
                 for (var i = 0; i < uniqueMinerCountData.length; i++) {
                     var timestamp = uniqueMinerCountData[i][0] * 1000;
                     var count = uniqueMinerCountData[i][1];
-                    if (timestamp >= startTime && timestamp <= endTime) {
+                    if (timestamp >= minTime && timestamp <= maxTime) {
                         uniqueMiners.push([timestamp, count]);
                     }
                 }
