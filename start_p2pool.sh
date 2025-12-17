@@ -10,16 +10,38 @@ PID_FILE="$SCRIPT_DIR/p2pool.pid"
 
 # Function to gracefully stop existing instances (SIGTERM)
 stop_graceful() {
+    local show_logs="${1:-false}"
+    
     echo "Checking for existing P2Pool instances..."
     if pgrep -f "pypy.*run_p2pool" > /dev/null; then
         echo "Gracefully stopping P2Pool instance(s)..."
+        
+        # Show last few log lines before shutdown
+        if [ "$show_logs" = "true" ] && [ -f "$LOG_FILE" ]; then
+            echo ""
+            echo "=== Last 5 lines before shutdown ==="
+            tail -5 "$LOG_FILE"
+            echo "==================================="
+            echo ""
+        fi
+        
         # Send SIGTERM for graceful shutdown (allows cleanup/archival)
         pkill -TERM -f "pypy.*run_p2pool"
         
-        # Wait up to 10 seconds for graceful shutdown
+        # Wait up to 10 seconds for graceful shutdown, showing log output
         for i in {1..10}; do
             if ! pgrep -f "pypy.*run_p2pool" > /dev/null; then
                 echo "P2Pool stopped gracefully"
+                
+                # Show shutdown logs if requested
+                if [ "$show_logs" = "true" ] && [ -f "$LOG_FILE" ]; then
+                    echo ""
+                    echo "=== Shutdown logs ==="
+                    # Show last 10 lines which should include shutdown messages
+                    tail -10 "$LOG_FILE" | grep -A 10 "Graceful shutdown" || tail -10 "$LOG_FILE"
+                    echo "====================="
+                fi
+                
                 [ -f "$PID_FILE" ] && rm -f "$PID_FILE"
                 return 0
             fi
@@ -32,6 +54,8 @@ stop_graceful() {
             pkill -9 -f "pypy.*run_p2pool"
             sleep 1
         fi
+    else
+        echo "No P2Pool instance running"
     fi
     # Clean up stale PID file
     [ -f "$PID_FILE" ] && rm -f "$PID_FILE"
@@ -99,7 +123,7 @@ for arg in "$@"; do
             exit 0
             ;;
         --stop)
-            stop_graceful
+            stop_graceful "true"
             exit 0
             ;;
         --kill|-k)
