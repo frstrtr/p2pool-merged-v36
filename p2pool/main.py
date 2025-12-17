@@ -229,10 +229,11 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifie
         print "    ...done loading %i shares (%i verified)!" % (len(shares), len(known_verified))
         print
         
-        
         print 'Initializing work...'
+        print '    Building share chain graph from %i shares...' % (len(shares),)
         
         node = p2pool_node.Node(factory, dashd, shares.values(), known_verified, net)
+        print '    ...share chain initialized!'
         yield node.start()
         
         for share_hash in shares:
