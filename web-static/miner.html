@@ -767,9 +767,11 @@
                     let dead_hashrate = 0;
                     
                     // Aggregate all workers for this address
+                    // Note: point[1][workerName] already contains the averaged hashrate value
+                    // Do NOT divide by point[2] - that's the sample count used for backend averaging
                     for (const workerName in point[1]) {
                         if (extractBaseAddress(workerName) === minerAddress) {
-                            hashrate += point[1][workerName] / (point[2] || 1);
+                            hashrate += point[1][workerName];
                         }
                     }
                     
@@ -777,15 +779,14 @@
                     if (dead_data && dead_data[i] && dead_data[i][1]) {
                         for (const workerName in dead_data[i][1]) {
                             if (extractBaseAddress(workerName) === minerAddress) {
-                                dead_hashrate += dead_data[i][1][workerName] / (dead_data[i][2] || 1);
+                                dead_hashrate += dead_data[i][1][workerName];
                             }
                         }
                     }
                     
-                    if (hashrate > 0) {
+                    if (hashrate > 0 || dead_hashrate > 0) {
                         hashrateData.push([timestamp, hashrate]);
-                        const doa_rate = hashrate > 0 ? (dead_hashrate / hashrate) * 100 : 0;
-                        doaData.push([timestamp, doa_rate]);
+                        doaData.push([timestamp, dead_hashrate]);
                     }
                 }
             }
@@ -819,29 +820,6 @@
                         }
                     },
                     min: 0
-                }, {
-                    // Secondary Y axis - DOA Rate
-                    title: { text: 'DOA Rate (%)', style: { color: '#ff6b6b' } },
-                    labels: {
-                        style: { color: '#ff6b6b' },
-                        formatter: function() {
-                            return this.value.toFixed(2) + '%';
-                        }
-                    },
-                    min: 0,
-                    max: 100,
-                    opposite: true,
-                    plotLines: [{
-                        value: 2,
-                        color: '#ffc107',
-                        width: 1,
-                        dashStyle: 'dash'
-                    }, {
-                        value: 5,
-                        color: '#dc3545',
-                        width: 1,
-                        dashStyle: 'dash'
-                    }]
                 }],
                 legend: {
                     enabled: true,
