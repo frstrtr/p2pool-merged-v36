@@ -195,11 +195,14 @@
             border: 1px solid var(--border);
             padding: 20px;
             transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            z-index: 1;
         }
         
         .miner-card:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            z-index: 10;
         }
         
         .miner-header {
@@ -284,8 +287,15 @@
             gap: 8px;
         }
         
+        .workers-table-container {
+            overflow-x: auto;
+            width: 100%;
+            margin: 0;
+        }
+        
         table {
             width: 100%;
+            min-width: 100%;
             border-collapse: collapse;
             background: var(--darker);
             border-radius: 8px;
@@ -336,6 +346,24 @@
         .worker-name {
             font-family: 'Courier New', monospace;
             color: var(--text);
+        }
+        
+        .workers-table-container::-webkit-scrollbar {
+            height: 6px;
+        }
+        
+        .workers-table-container::-webkit-scrollbar-track {
+            background: var(--darker);
+            border-radius: 3px;
+        }
+        
+        .workers-table-container::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        
+        .workers-table-container::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
         }
         
         /* Loading */
@@ -711,7 +739,8 @@
                         .attr('class', 'workers-header')
                         .html('👷 Workers (' + miner.workers.length + ')');
                     
-                    var table = workers_section.append('table');
+                    var table_container = workers_section.append('div').attr('class', 'workers-table-container');
+                    var table = table_container.append('table');
                     var thead = table.append('thead').append('tr');
                     thead.append('th').text('Worker Name');
                     thead.append('th').text('Hashrate');
