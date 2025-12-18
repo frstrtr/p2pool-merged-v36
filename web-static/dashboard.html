@@ -1095,10 +1095,10 @@
                         <thead>
                             <tr>
                                 <th>DASH Address / Worker</th>
-                                <th>Hashrate</th>
+                                <th>Current HR</th>
                                 <th>DOA Hashrate</th>
-                                <th>Share Difficulty</th>
-                                <th>Time to Share</th>
+                                <th>24h Avg HR</th>
+                                <th>DOA Rate</th>
                                 <th>Predicted Payout</th>
                             </tr>
                         </thead>
@@ -1381,9 +1381,9 @@
                     
                     // Miner totals
                     minerRow.append('td').text(format_hashrate(miner.totalHashrate));
-                    minerRow.append('td').text(format_hashrate(miner.totalDoa) + ' (' + d3.format('.1%')(miner.doa_percent) + ')');
-                    minerRow.append('td').attr('id', 'miner_diff_' + idx).text('...');
-                    minerRow.append('td').attr('id', 'miner_time_' + idx).text('...');
+                    minerRow.append('td').text(format_hashrate(miner.totalDoa));
+                    minerRow.append('td').attr('id', 'miner_avg24_' + idx).text('...');
+                    minerRow.append('td').text(d3.format('.2%')(miner.doa_percent));
                     minerRow.append('td').attr('id', 'miner_payout_' + idx).text('...');
                     
                     // Create worker rows (initially hidden if only 1 worker, shown if multiple)
@@ -1394,24 +1394,51 @@
                         
                         workerRow.append('td').text('↳ ' + worker.name);
                         workerRow.append('td').text(format_hashrate(worker.hashrate));
+                        workerRow.append('td').text(format_hashrate(worker.doa_hashrate));
+                        workerRow.append('td').attr('id', 'worker_avg24_' + idx + '_' + widx).text('...');
                         var doaPercent = worker.hashrate > 0 ? worker.doa_hashrate / worker.hashrate : 0;
-                        workerRow.append('td').text(format_hashrate(worker.doa_hashrate) + ' (' + d3.format('.1%')(doaPercent) + ')');
-                        workerRow.append('td').text('-');
-                        workerRow.append('td').text('-');
+                        workerRow.append('td').text(d3.format('.2%')(doaPercent));
                         workerRow.append('td').text('-');
                     });
                 });
                 
-                // Fetch global stats for share difficulty calculation and fill in remaining data
-                d3.json('../global_stats', function(global_stats) {
-                    if (!global_stats) return;
-                    
-                    display.forEach(function(miner, i) {
-                        var diff = global_stats.min_difficulty || 0;
-                        d3.select('#miner_diff_' + i).text(d3.format('.3r')(diff));
+                // Fetch 24h hashrate data for average calculation
+                d3.json('../web/graph_data/miner_hash_rates/last_day', function(graph_data) {
+                    // Calculate 24h average hashrates per worker
+                    var avg_24h = {};
+                    if (graph_data && graph_data.length > 0) {
+                        var worker_totals = {};
+                        var worker_counts = {};
                         
-                        var time_to_share = (diff * Math.pow(2, 32)) / miner.totalHashrate;
-                        d3.select('#miner_time_' + i).text(isFinite(time_to_share) ? format_dt(time_to_share) : '∞');
+                        graph_data.forEach(function(point) {
+                            if (point[1]) {
+                                for (var workerName in point[1]) {
+                                    if (!worker_totals[workerName]) {
+                                        worker_totals[workerName] = 0;
+                                        worker_counts[workerName] = 0;
+                                    }
+                                    worker_totals[workerName] += point[1][workerName];
+                                    worker_counts[workerName]++;
+                                }
+                            }
+                        });
+                        
+                        for (var workerName in worker_totals) {
+                            avg_24h[workerName] = worker_totals[workerName] / worker_counts[workerName];
+                        }
+                    }
+                    
+                    // Fill in 24h average and payout data
+                    display.forEach(function(miner, i) {
+                        // Calculate total 24h average for this miner
+                        var total_avg = 0;
+                        miner.workers.forEach(function(worker, widx) {
+                            var worker_avg = avg_24h[worker.name] || 0;
+                            total_avg += worker_avg;
+                            d3.select('#worker_avg24_' + i + '_' + widx).text(format_hashrate(worker_avg));
+                        });
+                        
+                        d3.select('#miner_avg24_' + i).text(format_hashrate(total_avg));
                         
                         // Payout for this miner
                         var payout = payouts[miner.address] || 0;
