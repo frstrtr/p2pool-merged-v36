@@ -472,9 +472,9 @@
                 </div>
             </div>
             
-            <!-- Hashrate Chart -->
+            <!-- Combined Hashrate & DOA Chart -->
             <div class="section-header">
-                <h2>Hashrate History</h2>
+                <h2>Hashrate & DOA History</h2>
                 <div class="period-selector">
                     <button class="period-btn active" onclick="changePeriod('hour')">1 Hour</button>
                     <button class="period-btn" onclick="changePeriod('day')">1 Day</button>
@@ -483,15 +483,7 @@
                 </div>
             </div>
             <div class="chart-container">
-                <div id="hashrate_chart"></div>
-            </div>
-            
-            <!-- DOA Rate Chart -->
-            <div class="section-header">
-                <h2>DOA Rate History</h2>
-            </div>
-            <div class="chart-container">
-                <div id="doa_chart"></div>
+                <div id="combined_chart"></div>
             </div>
             
             <!-- Payout Chart -->
@@ -798,12 +790,15 @@
                 }
             }
             
-            // Render hashrate chart
-            Highcharts.chart('hashrate_chart', {
+            // Render combined hashrate & DOA chart
+            Highcharts.chart('combined_chart', {
                 chart: {
-                    type: 'area',
+                    type: 'line',
                     backgroundColor: 'transparent',
-                    style: { fontFamily: 'inherit' }
+                    style: { fontFamily: 'inherit' },
+                    zoomType: 'x',
+                    panning: true,
+                    panKey: 'shift'
                 },
                 title: { text: null },
                 xAxis: {
@@ -813,51 +808,109 @@
                     tickColor: '#3a3a5a',
                     labels: { style: { color: '#8888a0' } }
                 },
-                yAxis: {
-                    title: { text: 'Hashrate', style: { color: '#8888a0' } },
+                yAxis: [{
+                    // Primary Y axis - Hashrate
+                    title: { text: 'Hashrate', style: { color: '#008de4' } },
                     gridLineColor: '#3a3a5a',
                     labels: {
-                        style: { color: '#8888a0' },
+                        style: { color: '#008de4' },
                         formatter: function() {
                             return format_hashrate(this.value);
                         }
                     },
                     min: 0
+                }, {
+                    // Secondary Y axis - DOA Rate
+                    title: { text: 'DOA Rate (%)', style: { color: '#ff6b6b' } },
+                    labels: {
+                        style: { color: '#ff6b6b' },
+                        formatter: function() {
+                            return this.value.toFixed(2) + '%';
+                        }
+                    },
+                    min: 0,
+                    max: 100,
+                    opposite: true,
+                    plotLines: [{
+                        value: 2,
+                        color: '#ffc107',
+                        width: 1,
+                        dashStyle: 'dash'
+                    }, {
+                        value: 5,
+                        color: '#dc3545',
+                        width: 1,
+                        dashStyle: 'dash'
+                    }]
+                }],
+                legend: {
+                    enabled: true,
+                    itemStyle: { color: '#8888a0' },
+                    itemHoverStyle: { color: '#e0e0e0' }
                 },
-                legend: { enabled: false },
                 tooltip: {
                     backgroundColor: '#16162a',
                     borderColor: '#3a3a5a',
                     style: { color: '#e0e0e0' },
-                    formatter: function() {
-                        return '<b>' + Highcharts.dateFormat('%Y-%m-%d %H:%M', this.x) + '</b><br/>' +
-                               'Hashrate: ' + format_hashrate(this.y);
-                    }
+                    shared: true,
+                    crosshairs: true
                 },
                 plotOptions: {
-                    area: {
-                        fillColor: {
-                            linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
-                            stops: [
-                                [0, 'rgba(0, 141, 228, 0.3)'],
-                                [1, 'rgba(0, 141, 228, 0.0)']
-                            ]
+                    series: {
+                        marker: {
+                            enabled: true,
+                            radius: 3
                         },
-                        lineColor: '#008de4',
-                        lineWidth: 2,
-                        marker: { enabled: false }
+                        states: {
+                            hover: {
+                                lineWidthPlus: 1
+                            }
+                        }
                     }
                 },
                 series: [{
                     name: 'Hashrate',
-                    data: hashrateData
+                    data: hashrateData,
+                    color: '#008de4',
+                    lineWidth: 2,
+                    yAxis: 0,
+                    tooltip: {
+                        valueSuffix: ' H/s',
+                        valueDecimals: 2,
+                        pointFormatter: function() {
+                            return '<span style="color:' + this.series.color + '">●</span> ' + 
+                                   this.series.name + ': <b>' + format_hashrate(this.y) + '</b><br/>';
+                        }
+                    }
+                }, {
+                    name: 'DOA Hashrate',
+                    data: doaData,
+                    color: '#ff6b6b',
+                    lineWidth: 2,
+                    yAxis: 0,
+                    tooltip: {
+                        valueSuffix: ' H/s',
+                        valueDecimals: 2,
+                        pointFormatter: function() {
+                            return '<span style="color:' + this.series.color + '">●</span> ' + 
+                                   this.series.name + ': <b>' + format_hashrate(this.y) + '</b><br/>';
+                        }
+                    },
+                    visible: doaData.length > 0
                 }],
-                credits: { enabled: false }
+                credits: { enabled: false },
+                exporting: {
+                    buttons: {
+                        contextButton: {
+                            menuItems: ['viewFullscreen', 'separator', 'downloadPNG', 'downloadJPEG', 'downloadPDF', 'downloadSVG']
+                        }
+                    }
+                }
             });
             
-            // Render DOA chart
-            if (doaData.length > 0) {
-                Highcharts.chart('doa_chart', {
+            // Keep old DOA chart code for compatibility but don't render
+            if (false && doaData.length > 0) {
+                Highcharts.chart('old_doa_chart', {
                     chart: {
                         type: 'line',
                         backgroundColor: 'transparent',
