@@ -183,10 +183,11 @@
         
         /* Miner Cards */
         .miners-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            display: flex;
+            flex-direction: column;
             gap: 20px;
             margin-bottom: 30px;
+            width: 100%;
         }
         
         .miner-card {
@@ -197,6 +198,8 @@
             transition: transform 0.2s, box-shadow 0.2s;
             position: relative;
             z-index: 1;
+            width: 100%;
+            box-sizing: border-box;
         }
         
         .miner-card:hover {
