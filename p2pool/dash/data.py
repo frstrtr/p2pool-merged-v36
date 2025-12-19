@@ -6,7 +6,7 @@ import warnings
 from Crypto.Hash import RIPEMD
 
 import p2pool
-from p2pool.util import math, pack
+from p2pool.util import math, pack, segwit_addr
 
 def hash256(data):
     return pack.IntType(256).unpack(hashlib.sha256(hashlib.sha256(data).digest()).digest())
@@ -268,11 +268,65 @@ def pubkey_hash_to_script_address(pubkey_hash, net):
 def pubkey_to_address(pubkey, net):
     return pubkey_hash_to_address(hash160(pubkey), net)
 
+# SegWit / Taproot address functions
+def pubkey_to_segwit_address(pubkey, net):
+    """Convert pubkey to native SegWit v0 address (P2WPKH)"""
+    if not hasattr(net, 'HRP'):
+        raise ValueError('Network does not support SegWit addresses')
+    pubkey_hash = hash160(pubkey)
+    return segwit_addr.encode(net.HRP, 0, pack.IntType(160).pack(pubkey_hash))
+
+def pubkey_to_taproot_address(pubkey, net):
+    """Convert pubkey to Taproot address (P2TR / SegWit v1)
+    
+    For Taproot, we need a 32-byte x-only public key.
+    If given a 33-byte compressed pubkey, we strip the first byte.
+    """
+    if not hasattr(net, 'HRP'):
+        raise ValueError('Network does not support Taproot addresses')
+    
+    # Handle compressed pubkey (33 bytes) - strip the prefix byte to get x-only
+    if len(pubkey) == 33 and (ord(pubkey[0]) == 0x02 or ord(pubkey[0]) == 0x03):
+        x_only_pubkey = pubkey[1:]
+    elif len(pubkey) == 32:
+        # Already x-only
+        x_only_pubkey = pubkey
+    else:
+        raise ValueError('Invalid pubkey length for Taproot: %d' % len(pubkey))
+    
+    return segwit_addr.encode(net.HRP, 1, x_only_pubkey)
+
+def script_hash_to_segwit_address(script_hash, net):
+    """Convert script hash to native SegWit v0 script address (P2WSH)"""
+    if not hasattr(net, 'HRP'):
+        raise ValueError('Network does not support SegWit addresses')
+    return segwit_addr.encode(net.HRP, 0, script_hash)
+
 def address_to_pubkey_hash(address, net):
-    x = human_address_type.unpack(base58_decode(address))
-    if x['version'] != net.ADDRESS_VERSION and x['version'] != net.SCRIPT_ADDRESS_VERSION:
-        raise ValueError('address not for this net!')
-    return x['pubkey_hash']
+    # Try base58 addresses first (legacy P2PKH / P2SH)
+    try:
+        x = human_address_type.unpack(base58_decode(address))
+        if x['version'] != net.ADDRESS_VERSION and x['version'] != net.SCRIPT_ADDRESS_VERSION:
+            raise ValueError('address not for this net!')
+        return x['pubkey_hash']
+    except:
+        pass
+    
+    # Try bech32/bech32m addresses (SegWit / Taproot)
+    if hasattr(net, 'HRP'):
+        try:
+            witver, witprog = segwit_addr.decode(net.HRP, address)
+            if witver is not None and witprog is not None:
+                # For P2WPKH (20 bytes) return as pubkey_hash
+                if witver == 0 and len(witprog) == 20:
+                    return pack.IntType(160).unpack(''.join(chr(b) for b in witprog))
+                # For P2TR (32 bytes) or P2WSH (32 bytes), we can't return a simple pubkey_hash
+                # This function is mainly used for legacy addresses
+                raise ValueError('SegWit script or Taproot address - use address_to_script2 instead')
+        except:
+            pass
+    
+    raise ValueError('invalid address')
 
 # transactions
 
@@ -288,14 +342,51 @@ def pubkey_hash_script_to_script2(pubkey_hash):
 
 # Create Script from Human Address
 def address_to_script2(address, net):
-    x = human_address_type.unpack(base58_decode(address))
-    if x['version'] == net.ADDRESS_VERSION:
-        return pubkey_hash_to_script2(x['pubkey_hash'])
-    if x['version'] == net.SCRIPT_ADDRESS_VERSION:
-        return pubkey_hash_script_to_script2(x['pubkey_hash'])
+    # Try base58 addresses first (legacy P2PKH / P2SH)
+    try:
+        x = human_address_type.unpack(base58_decode(address))
+        if x['version'] == net.ADDRESS_VERSION:
+            return pubkey_hash_to_script2(x['pubkey_hash'])
+        if x['version'] == net.SCRIPT_ADDRESS_VERSION:
+            return pubkey_hash_script_to_script2(x['pubkey_hash'])
+    except:
+        pass
+    
+    # Try bech32/bech32m addresses (SegWit / Taproot)
+    if hasattr(net, 'HRP'):
+        try:
+            witver, witprog = segwit_addr.decode(net.HRP, address)
+            if witver is not None and witprog is not None:
+                # Convert witprog list to bytes
+                witprog_bytes = ''.join(chr(b) for b in witprog)
+                
+                # SegWit v0 (P2WPKH: 20 bytes, P2WSH: 32 bytes)
+                if witver == 0:
+                    if len(witprog_bytes) == 20:
+                        # P2WPKH: OP_0 <20-byte-pubkey-hash>
+                        return '\x00\x14' + witprog_bytes
+                    elif len(witprog_bytes) == 32:
+                        # P2WSH: OP_0 <32-byte-script-hash>
+                        return '\x00\x20' + witprog_bytes
+                
+                # Taproot / SegWit v1 (P2TR: 32 bytes)
+                elif witver == 1:
+                    if len(witprog_bytes) == 32:
+                        # P2TR: OP_1 <32-byte-x-only-pubkey>
+                        return '\x51\x20' + witprog_bytes
+                
+                # Future SegWit versions (v2-v16)
+                elif witver >= 2 and witver <= 16:
+                    # OP_N <len> <data> where N = witver
+                    op_n = chr(0x50 + witver)  # OP_1=0x51, OP_2=0x52, ..., OP_16=0x60
+                    return op_n + chr(len(witprog_bytes)) + witprog_bytes
+        except:
+            pass
+    
     raise ValueError('address not for this net!')
 
 def script2_to_address(script2, net):
+    # Try P2PK (Pay to Public Key)
     try:
         pubkey = script2[1:-1]
         script2_test = pubkey_to_script2(pubkey)
@@ -305,6 +396,7 @@ def script2_to_address(script2, net):
         if script2_test == script2:
             return pubkey_to_address(pubkey, net)
     
+    # Try P2PKH (Pay to Public Key Hash)
     try:
         pubkey_hash = pack.IntType(160).unpack(script2[3:-2])
         script2_test2 = pubkey_hash_to_script2(pubkey_hash)
@@ -313,7 +405,8 @@ def script2_to_address(script2, net):
     else:
         if script2_test2 == script2:
             return pubkey_hash_to_address(pubkey_hash, net)
-
+    
+    # Try P2SH (Pay to Script Hash)
     try:
         pubkey_hash = pack.IntType(160).unpack(script2[2:-1])
         script2_test3 = pubkey_hash_script_to_script2(pubkey_hash)
@@ -322,6 +415,44 @@ def script2_to_address(script2, net):
     else:
         if script2_test3 == script2:
             return pubkey_hash_to_script_address(pubkey_hash, net)
+    
+    # Try SegWit / Taproot (if network supports it)
+    if hasattr(net, 'HRP') and len(script2) >= 2:
+        try:
+            # Check if it's a witness program: OP_0/OP_1..OP_16 followed by data
+            first_byte = ord(script2[0])
+            
+            # SegWit v0: OP_0 (0x00)
+            if first_byte == 0x00:
+                data_len = ord(script2[1])
+                if len(script2) == 2 + data_len:
+                    witprog = [ord(b) for b in script2[2:]]
+                    addr = segwit_addr.encode(net.HRP, 0, witprog)
+                    if addr:
+                        return addr
+            
+            # Taproot v1: OP_1 (0x51)
+            elif first_byte == 0x51:
+                data_len = ord(script2[1])
+                if len(script2) == 2 + data_len and data_len == 32:
+                    witprog = [ord(b) for b in script2[2:]]
+                    addr = segwit_addr.encode(net.HRP, 1, witprog)
+                    if addr:
+                        return addr
+            
+            # Future SegWit versions: OP_2..OP_16 (0x52..0x60)
+            elif first_byte >= 0x52 and first_byte <= 0x60:
+                witver = first_byte - 0x50
+                data_len = ord(script2[1])
+                if len(script2) == 2 + data_len:
+                    witprog = [ord(b) for b in script2[2:]]
+                    addr = segwit_addr.encode(net.HRP, witver, witprog)
+                    if addr:
+                        return addr
+        except:
+            pass
+    
+    return None
 
 
 def script2_to_human(script2, net):
