@@ -2302,8 +2302,10 @@
             var peak = Math.max.apply(null, values) || 0;
             
             // Calculate average luck from blocks within exact time range
+            // If no blocks in window, use current round luck
             var avgLuck = validLucks.length > 0 ? 
-                validLucks.reduce(function(a, b) { return a + b; }, 0) / validLucks.length : null;
+                validLucks.reduce(function(a, b) { return a + b; }, 0) / validLucks.length : 
+                (luckStats && luckStats.current_luck_trend ? luckStats.current_luck_trend : null);
             
             document.getElementById('graph-current').textContent = format_hashrate(current);
             document.getElementById('graph-average').textContent = format_hashrate(avg);
@@ -2851,8 +2853,10 @@
             var doaPercent = avg > 0 ? ((doaAvg / (avg + doaAvg)) * 100).toFixed(2) : '0.00';
             
             // Calculate average luck for fullscreen
+            // If no blocks in window, use current round luck
             var fsAvgLuck = validLucks.length > 0 ? 
-                validLucks.reduce(function(a, b) { return a + b; }, 0) / validLucks.length : null;
+                validLucks.reduce(function(a, b) { return a + b; }, 0) / validLucks.length : 
+                (luckStats && luckStats.current_luck_trend ? luckStats.current_luck_trend : null);
             
             document.getElementById('fs-graph-current').textContent = format_hashrate(current);
             document.getElementById('fs-graph-average').textContent = format_hashrate(avg);
