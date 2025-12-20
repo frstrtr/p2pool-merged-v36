@@ -948,14 +948,32 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except:
             pass
         
-        # Get ALL blocks with network difficulty (including before time window)
+        # Get ALL blocks with network difficulty from both sources
         all_blocks = []
+        
+        # 1. Get blocks from persistent storage (block_history)
         for block_hash, block_data in block_history.items():
             if block_data.get('network_diff') is not None:
                 all_blocks.append({
                     'ts': block_data['ts'],
                     'network_diff': block_data['network_diff']
                 })
+        
+        # 2. Get blocks from sharechain (the blocks currently displayed on dashboard)
+        if node.best_share_var.value is not None:
+            try:
+                height = node.tracker.get_height(node.best_share_var.value)
+                if height >= 1:
+                    for s in node.tracker.get_chain(node.best_share_var.value, min(height, node.net.CHAIN_LENGTH)):
+                        if s.pow_hash <= s.header['bits'].target:
+                            # This is a found block
+                            network_diff = bitcoin_data.target_to_difficulty(s.header['bits'].target)
+                            all_blocks.append({
+                                'ts': s.timestamp,
+                                'network_diff': network_diff
+                            })
+            except Exception as e:
+                pass
         
         # Sort by timestamp
         all_blocks.sort(key=lambda x: x['ts'])
