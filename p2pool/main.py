@@ -431,8 +431,21 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifie
         startup_archive_done = [False]  # Mutable flag to track if startup archival happened
         
         def rebuild_share_storage():
-            """Force complete rebuild of share storage files (removes archived shares from disk)"""
+            """Force complete rebuild of share storage files (removes archived shares from disk).
+            
+            WARNING: Only call during shutdown or when no mining is active!
+            If rebuild fails, shares will be automatically recovered from network peers.
+            """
             import glob
+            
+            try:
+                import fcntl
+                use_locking = True
+            except ImportError:
+                # Windows doesn't have fcntl
+                use_locking = False
+            
+            print 'Starting share storage rebuild...'
             
             current_height = node.tracker.get_height(node.best_share_var.value) if node.best_share_var.value else 0
             save_height = min(current_height, 2*net.CHAIN_LENGTH)
@@ -441,7 +454,6 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifie
             # This includes main chain + orphans/side chains
             shares_to_keep = []
             for share_hash, share in node.tracker.items.iteritems():
-                # Check if share is within reasonable depth from best share
                 try:
                     height = node.tracker.get_height(share_hash)
                     if height >= current_height - save_height:
@@ -450,26 +462,57 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifie
                     # If we can't get height, it's disconnected - skip it
                     pass
             
-            # Delete all existing pickle files
+            print 'Rebuilding with %d shares (from %d in tracker)' % (len(shares_to_keep), len(node.tracker.items))
+            
+            # Check if any files are locked (mining active)
             pickle_pattern = os.path.join(datadir_path, net.NAME, 'shares.*')
             pickle_files = glob.glob(pickle_pattern)
-            for pickle_file in pickle_files:
-                try:
-                    os.remove(pickle_file)
-                except Exception as e:
-                    print 'Warning: Failed to remove %s: %s' % (pickle_file, e)
             
-            # Clear ShareStore internal state
-            ss.known.clear()
-            ss.known_desired.clear()
+            if use_locking:
+                lock_handles = []
+                for pickle_file in pickle_files:
+                    try:
+                        fh = open(pickle_file, 'rb')
+                        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        lock_handles.append(fh)
+                    except IOError:
+                        print 'ERROR: Cannot rebuild - file is locked (mining operations active?)'
+                        for fh in lock_handles:
+                            fh.close()
+                        return False
             
-            # Rebuild with all active shares (main chain + recent orphans)
-            for share in shares_to_keep:
-                ss.add_share(share)
-                if share.hash in node.tracker.verified.items:
-                    ss.add_verified_hash(share.hash)
-            
-            print 'Rebuilt storage with %d shares (from %d in tracker)' % (len(shares_to_keep), len(node.tracker.items))
+            try:
+                # Delete all existing pickle files
+                for pickle_file in pickle_files:
+                    try:
+                        os.remove(pickle_file)
+                    except Exception as e:
+                        print 'Warning: Failed to remove %s: %s' % (pickle_file, e)
+                
+                # Clear ShareStore internal state
+                ss.known.clear()
+                ss.known_desired.clear()
+                
+                # Rebuild with all active shares (main chain + recent orphans)
+                for share in shares_to_keep:
+                    ss.add_share(share)
+                    if share.hash in node.tracker.verified.items:
+                        ss.add_verified_hash(share.hash)
+                
+                new_files, _ = ss.get_filenames_and_next()
+                print 'Rebuild complete: %d shares written to %d files' % (len(shares_to_keep), len(new_files))
+                print 'Storage compacted: %d files -> %d files' % (len(pickle_files), len(new_files))
+                return True
+                
+            except Exception as e:
+                print 'Rebuild failed:', str(e)
+                print 'Shares will be automatically recovered from network peers on next restart'
+                return False
+            finally:
+                # Release locks
+                if use_locking:
+                    for fh in lock_handles:
+                        fh.close()
         
         def persist_shares():
             """Save current shares to disk without archiving"""
@@ -518,11 +561,19 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifie
         
         # Register graceful shutdown handler
         def shutdown_handler():
-            """Archive shares on graceful shutdown"""
+            """Archive shares and optionally compact storage on graceful shutdown"""
             print 'Graceful shutdown: archiving shares...'
             try:
                 save_shares()  # Final save and archive
                 print 'Shutdown archival complete'
+                
+                # Compact storage if requested
+                if args.compact_on_shutdown:
+                    print 'Compacting share storage...'
+                    if rebuild_share_storage():
+                        print 'Share storage compaction successful'
+                    else:
+                        print 'Share storage compaction skipped or failed'
             except Exception as e:
                 print 'Warning: Shutdown archival failed: %s' % str(e)
         
@@ -976,6 +1027,10 @@ def run():
     dashd_group.add_argument('--dashd-p2p-port', metavar='DASHD_P2P_PORT',
         help='''connect to P2P interface at this port (default: %s <read from dash.conf if password not provided>)''' % ', '.join('%s:%i' % (name, net.PARENT.P2P_PORT) for name, net in sorted(realnets.items())),
         type=int, action='store', default=None, dest='dashd_p2p_port')
+    
+    parser.add_argument('--compact-on-shutdown',
+        help='compact share storage on graceful shutdown (removes archived shares, saves disk space)',
+        action='store_true', default=False, dest='compact_on_shutdown')
     
     dashd_group.add_argument(metavar='DASHD_RPCUSERPASS',
         help='dashd RPC interface username, then password, space-separated (only one being provided will cause the username to default to being empty, and none will cause P2Pool to read them from dash.conf)',

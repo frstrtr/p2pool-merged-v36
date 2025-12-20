@@ -760,7 +760,20 @@ class ShareStore(object):
         self.known = known # filename -> (set of share hashes, set of verified hashes)
         self.known_desired = dict((k, (set(a), set(b))) for k, (a, b) in known.iteritems())
     
-    def _add_line(self, line):
+    def _add_line(self, line, critical=False):
+        """Write a line to share storage.
+        
+        Args:
+            line: The data line to write
+            critical: If True, fsync immediately (for found blocks)
+        """
+        try:
+            import fcntl
+            use_locking = True
+        except ImportError:
+            # Windows doesn't have fcntl
+            use_locking = False
+        
         filenames, next = self.get_filenames_and_next()
         if filenames and os.path.getsize(filenames[-1]) < 10e6:
             filename = filenames[-1]
@@ -768,16 +781,34 @@ class ShareStore(object):
             filename = next
         
         with open(filename, 'ab') as f:
+            # Lock file during write to prevent rebuild race
+            if use_locking:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            
             f.write(line + '\n')
+            f.flush()
+            
+            # Force to disk immediately for critical data (found blocks)
+            if critical:
+                os.fsync(f.fileno())
+            
+            if use_locking:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         
         return filename
     
     def add_share(self, share):
+        # Detect if this is a found block (critical data requiring immediate fsync)
+        is_block = share.pow_hash <= share.header['bits'].target
+        
         for filename, (share_hashes, verified_hashes) in self.known.iteritems():
             if share.hash in share_hashes:
                 break
         else:
-            filename = self._add_line("%i %s" % (5, share_type.pack(share.as_share()).encode('hex')))
+            filename = self._add_line(
+                "%i %s" % (5, share_type.pack(share.as_share()).encode('hex')),
+                critical=is_block  # Force immediate disk write for found blocks
+            )
             share_hashes, verified_hashes = self.known.setdefault(filename, (set(), set()))
             share_hashes.add(share.hash)
         share_hashes, verified_hashes = self.known_desired.setdefault(filename, (set(), set()))
