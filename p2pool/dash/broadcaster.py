@@ -78,6 +78,9 @@ class DashNetworkBroadcaster(object):
         self.dashd_refresh_interval = 1800  # 30 minutes between dashd refreshes
         self.bootstrapped = False
         
+        # Shutdown flag
+        self.stopping = False
+        
         # Statistics
         self.stats = {
             'blocks_sent': 0,
@@ -651,6 +654,10 @@ class DashNetworkBroadcaster(object):
         
         Note: Local dashd is already connected via main.py's connect_p2p()
         """
+        # Don't connect during shutdown
+        if self.stopping:
+            return
+            
         # Skip if this is local dashd (already connected)
         if addr == self.local_dashd_addr:
             print 'Broadcaster: Skipping connection to local dashd (already connected)'
@@ -674,6 +681,10 @@ class DashNetworkBroadcaster(object):
             original_gotConnection = getattr(factory, 'gotConnection', None)
             
             def gotConnection_wrapper(protocol):
+                # Ignore connections during shutdown
+                if self.stopping:
+                    return
+                    
                 connection_time = time.time() - connection_start_time
                 
                 # Log with current attempt count (before reset)
@@ -1099,21 +1110,37 @@ class DashNetworkBroadcaster(object):
         """Stop the broadcaster (cleanup)"""
         print 'Broadcaster: Stopping broadcaster...'
         
+        # Set stopping flag to prevent new connections
+        self.stopping = True
+        
         # Stop loops
         if hasattr(self, 'refresh_loop') and self.refresh_loop.running:
             self.refresh_loop.stop()
+            print 'Broadcaster: Refresh loop stopped'
         
         if hasattr(self, 'save_loop') and self.save_loop.running:
             self.save_loop.stop()
+            print 'Broadcaster: Save loop stopped'
         
         # Save database
+        print 'Broadcaster: Saving peer database...'
         self._save_peer_database()
         
-        # Disconnect non-protected peers
+        # Disconnect ALL peers (including protected during shutdown)
+        peer_count = len(self.connections)
+        print 'Broadcaster: Disconnecting %d peers...' % peer_count
         for addr in list(self.connections.keys()):
-            if not self.connections[addr].get('protected', False):
-                self._disconnect_peer(addr)
+            try:
+                conn = self.connections[addr]
+                if conn.get('factory'):
+                    conn['factory'].stopTrying()
+                if conn.get('connector'):
+                    conn['connector'].disconnect()
+            except Exception as e:
+                pass  # Ignore errors during shutdown
         
+        self.connections.clear()
+        print 'Broadcaster: All connections closed'
         print 'Broadcaster: Stopped'
     
     @defer.inlineCallbacks
