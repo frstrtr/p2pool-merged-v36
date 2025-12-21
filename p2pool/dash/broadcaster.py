@@ -24,6 +24,20 @@ from . import data as dash_data, p2p as dash_p2p
 from p2pool.util import deferral
 
 
+def _safe_addr_str(addr):
+    """Safely format address tuple for printing (handles Unicode in Python 2.7)"""
+    try:
+        if isinstance(addr, tuple) and len(addr) == 2:
+            host, port = addr
+            # Ensure host is ASCII-safe string
+            if isinstance(host, unicode):
+                host = host.encode('ascii', 'replace')
+            return '%s:%d' % (host, port)
+        return str(addr)
+    except Exception:
+        return repr(addr)
+
+
 class DashNetworkBroadcaster(object):
     """Manages independent P2P connections to Dash network nodes for block broadcasting"""
     
@@ -150,7 +164,7 @@ class DashNetworkBroadcaster(object):
             'connected_at': time.time(),
             'protected': True  # CRITICAL FLAG
         }
-        print 'Broadcaster: Local dashd at %s:%d marked as PROTECTED' % self.local_dashd_addr
+        print 'Broadcaster: Local dashd at %s marked as PROTECTED' % _safe_addr_str(self.local_dashd_addr)
         
         # Get additional peers from dashd
         try:
@@ -292,8 +306,8 @@ class DashNetworkBroadcaster(object):
                     }
                     added_count += 1
                     # Clear failure history for new peer from dashd
-                    print 'Broadcaster: NEW peer from dashd: %s:%d (ping=%.1fms, score=%d)' % (
-                        host, port, ping_ms, score)
+                    print 'Broadcaster: NEW peer from dashd: %s (ping=%.1fms, score=%d)' % (
+                        _safe_addr_str(addr), ping_ms, score)
                     if addr in self.connection_failures:
                         del self.connection_failures[addr]
                         print '  -> Cleared previous failure history'
@@ -358,7 +372,7 @@ class DashNetworkBroadcaster(object):
                     'failed_broadcasts': 0,
                 }
                 new_count += 1
-                print '  + NEW: %s:%d (via P2P discovery)' % (host, port)
+                print '  + NEW: %s (via P2P discovery)' % _safe_addr_str(addr)
             else:
                 # Update last_seen
                 self.peer_db[addr]['last_seen'] = timestamp
@@ -376,7 +390,7 @@ class DashNetworkBroadcaster(object):
         """
         if peer_addr in self.peer_db:
             self.peer_db[peer_addr]['last_seen'] = time.time()
-            print 'Broadcaster: PING from %s:%d (peer still alive)' % peer_addr
+            print 'Broadcaster: PING from %s (peer still alive)' % _safe_addr_str(peer_addr)
     
     def handle_block_message(self, peer_addr, block_hash):
         """Handle 'block' or 'inv' message - track block propagation
@@ -396,8 +410,8 @@ class DashNetworkBroadcaster(object):
             self.peer_db[peer_addr]['blocks_relayed'] += 1
             self.peer_db[peer_addr]['score'] += 5  # Small bonus
             
-            print 'Broadcaster: BLOCK from %s:%d (hash=%064x, total_blocks=%d)' % (
-                peer_addr[0], peer_addr[1], block_hash, 
+            print 'Broadcaster: BLOCK from %s (hash=%064x, total_blocks=%d)' % (
+                _safe_addr_str(peer_addr), block_hash, 
                 self.peer_db[peer_addr]['blocks_relayed'])
     
     def handle_tx_message(self, peer_addr):
@@ -417,8 +431,8 @@ class DashNetworkBroadcaster(object):
             
             # Only log every 100 transactions to reduce spam
             if self.peer_db[peer_addr]['txs_relayed'] % 100 == 0:
-                print 'Broadcaster: TX activity from %s:%d (%d transactions relayed)' % (
-                    peer_addr[0], peer_addr[1], self.peer_db[peer_addr]['txs_relayed'])
+                print 'Broadcaster: TX activity from %s (%d transactions relayed)' % (
+                    _safe_addr_str(peer_addr), self.peer_db[peer_addr]['txs_relayed'])
     
     @defer.inlineCallbacks
     def refresh_connections(self):
@@ -492,10 +506,10 @@ class DashNetworkBroadcaster(object):
         for addr in to_disconnect:
             conn = self.connections.get(addr)
             if conn and not conn.get('protected', False):
-                print '  - Disconnecting %s:%d' % addr
+                print '  - Disconnecting %s' % _safe_addr_str(addr)
                 self._disconnect_peer(addr)
             elif conn and conn.get('protected', False):
-                print '  - PRESERVING protected connection to %s:%d (local dashd)' % addr
+                print '  - PRESERVING protected connection to %s (local dashd)' % _safe_addr_str(addr)
         
         # Connect to new peers with retry/backoff logic
         to_connect = target_addrs - current_addrs
@@ -517,8 +531,8 @@ class DashNetworkBroadcaster(object):
                 # Put in backoff if not already there
                 if addr not in self.connection_failures:
                     self.connection_failures[addr] = current_time
-                    print 'Broadcaster: Peer %s:%d exceeded max attempts (%d), entering backoff' % (
-                        addr[0], addr[1], attempts)
+                    print 'Broadcaster: Peer %s exceeded max attempts (%d), entering backoff' % (
+                        _safe_addr_str(addr), attempts)
                 continue
             
             to_connect_filtered.append(addr)
@@ -526,7 +540,7 @@ class DashNetworkBroadcaster(object):
         if in_backoff:
             print 'Broadcaster: %d peers in backoff period:' % len(in_backoff)
             for addr, remaining in in_backoff[:5]:  # Show first 5
-                print '  - %s:%d (backoff: %ds remaining)' % (addr[0], addr[1], remaining)
+                print '  - %s (backoff: %ds remaining)' % (_safe_addr_str(addr), remaining)
             if len(in_backoff) > 5:
                 print '  ... and %d more' % (len(in_backoff) - 5)
         
@@ -535,8 +549,8 @@ class DashNetworkBroadcaster(object):
         
         for addr in to_connect_filtered:
             attempts = self.connection_attempts.get(addr, 0)
-            print '  + Connecting to %s:%d (attempt %d/%d)' % (
-                addr[0], addr[1], attempts + 1, self.max_connection_attempts)
+            print '  + Connecting to %s (attempt %d/%d)' % (
+                _safe_addr_str(addr), attempts + 1, self.max_connection_attempts)
             self._connect_peer(addr)
         
         # Verify local dashd is still connected
@@ -561,8 +575,8 @@ class DashNetworkBroadcaster(object):
             if total > 0:
                 success_rate = (info['successful_broadcasts'] * 100.0) / total
             
-            print '  %d. %s:%d - score=%.1f, source=%s, success=%.1f%%%s' % (
-                i+1, addr[0], addr[1], score, source, success_rate, protected)
+            print '  %d. %s - score=%.1f, source=%s, success=%.1f%%%s' % (
+                i+1, _safe_addr_str(addr), score, source, success_rate, protected)
         
         print 'Broadcaster: Connection status: %d connected (local dashd: %s)' % (
             len(self.connections),
@@ -634,8 +648,8 @@ class DashNetworkBroadcaster(object):
             
             def gotConnection_wrapper(protocol):
                 connection_time = time.time() - connection_start_time
-                print 'Broadcaster: CONNECTED to %s:%d (%.3fs, attempt %d/%d)' % (
-                    host, port, connection_time, 
+                print 'Broadcaster: CONNECTED to %s (%.3fs, attempt %d/%d)' % (
+                    _safe_addr_str(addr), connection_time, 
                     self.connection_attempts[addr], self.max_connection_attempts)
                 
                 # Clear failure history on successful connection
@@ -652,9 +666,9 @@ class DashNetworkBroadcaster(object):
                 # Request peer addresses from this peer (P2P discovery)
                 try:
                     protocol.send_getaddr()
-                    print 'Broadcaster:   -> Sent getaddr request to %s:%d' % (host, port)
+                    print 'Broadcaster:   -> Sent getaddr request to %s' % _safe_addr_str(addr)
                 except Exception as e:
-                    print >>sys.stderr, 'Broadcaster: Error sending getaddr to %s:%d: %s' % (host, port, e)
+                    print >>sys.stderr, 'Broadcaster: Error sending getaddr to %s: %s' % (_safe_addr_str(addr), e)
                 
                 # Hook addr message handler for P2P discovery
                 original_handle_addr = getattr(protocol, 'handle_addr', None)
@@ -731,8 +745,8 @@ class DashNetworkBroadcaster(object):
                 self.stats['connection_stats']['failed_connections'] += 1
                 self.connection_failures[addr] = time.time()
                 
-                print >>sys.stderr, 'Broadcaster: CONNECTION %s to %s:%d (%.3fs, attempt %d/%d): %s' % (
-                    failure_type, host, port, connection_time,
+                print >>sys.stderr, 'Broadcaster: CONNECTION %s to %s (%.3fs, attempt %d/%d): %s' % (
+                    failure_type, _safe_addr_str(addr), connection_time,
                     self.connection_attempts[addr], self.max_connection_attempts,
                     error_msg[:100])
                 
@@ -759,10 +773,10 @@ class DashNetworkBroadcaster(object):
                 'protected': False
             }
             
-            print 'Broadcaster: Initiated connection to %s:%d (timeout=30s)' % (host, port)
+            print 'Broadcaster: Initiated connection to %s (timeout=30s)' % _safe_addr_str(addr)
             
         except Exception as e:
-            print >>sys.stderr, 'Broadcaster: EXCEPTION connecting to %s:%d: %s' % (host, port, e)
+            print >>sys.stderr, 'Broadcaster: EXCEPTION connecting to %s: %s' % (_safe_addr_str(addr), e)
             self.stats['connection_stats']['failed_connections'] += 1
             self.connection_failures[addr] = time.time()
             if addr in self.connections:
@@ -780,7 +794,7 @@ class DashNetworkBroadcaster(object):
         
         # CRITICAL: Refuse to disconnect protected peers
         if conn.get('protected', False):
-            print >>sys.stderr, 'Broadcaster: BLOCKED attempt to disconnect PROTECTED peer %s:%d' % addr
+            print >>sys.stderr, 'Broadcaster: BLOCKED attempt to disconnect PROTECTED peer %s' % _safe_addr_str(addr)
             return
         
         # Safe to disconnect non-protected peer
@@ -789,10 +803,10 @@ class DashNetworkBroadcaster(object):
             if conn['connector']:
                 conn['connector'].disconnect()
         except Exception as e:
-            print >>sys.stderr, 'Broadcaster: Error disconnecting %s:%d: %s' % (addr, e)
+            print >>sys.stderr, 'Broadcaster: Error disconnecting %s: %s' % (_safe_addr_str(addr), e)
         
         del self.connections[addr]
-        print 'Broadcaster: Disconnected from %s:%d' % addr
+        print 'Broadcaster: Disconnected from %s' % _safe_addr_str(addr)
     
     @defer.inlineCallbacks
     def broadcast_block(self, block):
@@ -912,7 +926,7 @@ class DashNetworkBroadcaster(object):
             defer.returnValue(True)
             
         except Exception as e:
-            print >>sys.stderr, 'Broadcaster: Error sending block to %s:%d: %s' % (addr[0], addr[1], e)
+            print >>sys.stderr, 'Broadcaster: Error sending block to %s: %s' % (_safe_addr_str(addr), e)
             defer.returnValue(False)
     
     def _get_peer_db_path(self):
