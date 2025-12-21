@@ -2276,7 +2276,7 @@
                     hashrateChart.series[seriesIndex].hide();
                 }
                 
-                // Toggle 100% guideline for luck trend
+                // Toggle 100% guideline and Y-axis labels for luck trend
                 if (seriesName === 'lucktrend' && hashrateChart.yAxis[1]) {
                     var plotLine = hashrateChart.yAxis[1].plotLinesAndBands[0];
                     if (plotLine) {
@@ -2285,6 +2285,10 @@
                             plotLine.label.attr('visibility', seriesVisibility[seriesName] ? 'visible' : 'hidden');
                         }
                     }
+                    // Toggle Y-axis labels
+                    hashrateChart.yAxis[1].update({
+                        labels: { enabled: seriesVisibility[seriesName] }
+                    });
                 }
             }
             
@@ -2295,7 +2299,7 @@
                     fullscreenChart.series[seriesIndex].hide();
                 }
                 
-                // Toggle 100% guideline for luck trend
+                // Toggle 100% guideline and Y-axis labels for luck trend
                 if (seriesName === 'lucktrend' && fullscreenChart.yAxis[1]) {
                     var plotLine = fullscreenChart.yAxis[1].plotLinesAndBands[0];
                     if (plotLine) {
@@ -2304,6 +2308,10 @@
                             plotLine.label.attr('visibility', seriesVisibility[seriesName] ? 'visible' : 'hidden');
                         }
                     }
+                    // Toggle Y-axis labels
+                    fullscreenChart.yAxis[1].update({
+                        labels: { enabled: seriesVisibility[seriesName] }
+                    });
                 }
             }
         }
