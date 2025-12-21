@@ -2678,6 +2678,31 @@
             // Use avg_luck from luckStats endpoint (includes weighted current round)
             var avgLuck = (luckStats && luckStats.avg_luck !== null) ? luckStats.avg_luck : null;
             
+            // Calculate dynamic luck Y-axis range to center 100%
+            var luckMin = 0, luckMax = 200;
+            if (luckTrendData.length > 0) {
+                var luckValues = luckTrendData.map(function(p) { return p.y; });
+                var minLuck = Math.min.apply(null, luckValues);
+                var maxLuck = Math.max.apply(null, luckValues);
+                
+                // Calculate the maximum distance from 100% to determine symmetric range
+                var maxDistance = Math.max(Math.abs(100 - minLuck), Math.abs(maxLuck - 100));
+                
+                // Add 20% padding for better visibility
+                maxDistance = maxDistance * 1.2;
+                
+                // Set symmetric range around 100%
+                luckMin = Math.max(0, 100 - maxDistance);
+                luckMax = 100 + maxDistance;
+                
+                // Ensure minimum range of 50% on each side (100 total)
+                if (luckMax - luckMin < 100) {
+                    var center = (luckMin + luckMax) / 2;
+                    luckMin = Math.max(0, center - 50);
+                    luckMax = center + 50;
+                }
+            }
+            
             document.getElementById('graph-current').textContent = format_hashrate(current);
             document.getElementById('graph-average').textContent = format_hashrate(avg);
             document.getElementById('graph-peak').textContent = format_hashrate(peak);
@@ -2756,12 +2781,13 @@
                 }, {
                     // Secondary Y-axis for luck percentage
                     title: { text: null },
-                    min: 0,
+                    min: luckMin,
+                    max: luckMax,
                     lineColor: '#ffc107',
                     tickColor: '#ffc107',
                     labels: {
                         style: { color: '#ffc107', fontSize: '10px' },
-                        formatter: function() { return this.value + '%'; }
+                        formatter: function() { return this.value.toFixed(0) + '%'; }
                     },
                     gridLineWidth: 0,
                     opposite: true,
@@ -3254,6 +3280,31 @@
             // Use avg_luck from luckStats endpoint (includes weighted current round)
             var fsAvgLuck = (luckStats && luckStats.avg_luck !== null) ? luckStats.avg_luck : null;
             
+            // Calculate dynamic luck Y-axis range to center 100% (fullscreen)
+            var fsLuckMin = 0, fsLuckMax = 200;
+            if (luckTrendData.length > 0) {
+                var fsLuckValues = luckTrendData.map(function(p) { return p.y; });
+                var fsMinLuck = Math.min.apply(null, fsLuckValues);
+                var fsMaxLuck = Math.max.apply(null, fsLuckValues);
+                
+                // Calculate the maximum distance from 100% to determine symmetric range
+                var fsMaxDistance = Math.max(Math.abs(100 - fsMinLuck), Math.abs(fsMaxLuck - 100));
+                
+                // Add 20% padding for better visibility
+                fsMaxDistance = fsMaxDistance * 1.2;
+                
+                // Set symmetric range around 100%
+                fsLuckMin = Math.max(0, 100 - fsMaxDistance);
+                fsLuckMax = 100 + fsMaxDistance;
+                
+                // Ensure minimum range of 50% on each side (100 total)
+                if (fsLuckMax - fsLuckMin < 100) {
+                    var fsCenter = (fsLuckMin + fsLuckMax) / 2;
+                    fsLuckMin = Math.max(0, fsCenter - 50);
+                    fsLuckMax = fsCenter + 50;
+                }
+            }
+            
             document.getElementById('fs-graph-current').textContent = format_hashrate(current);
             document.getElementById('fs-graph-average').textContent = format_hashrate(avg);
             document.getElementById('fs-graph-peak').textContent = format_hashrate(peak);
@@ -3308,12 +3359,13 @@
                 }, {
                     // Second Y-axis for luck percentage
                     title: { text: null },
-                    min: 0,
+                    min: fsLuckMin,
+                    max: fsLuckMax,
                     lineColor: '#ffc107',
                     tickColor: '#ffc107',
                     labels: {
                         style: { color: '#ffc107', fontSize: '11px' },
-                        formatter: function() { return this.value + '%'; }
+                        formatter: function() { return this.value.toFixed(0) + '%'; }
                     },
                     gridLineWidth: 0,
                     opposite: true,
