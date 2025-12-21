@@ -2626,6 +2626,10 @@
             });
             
             // Interpolate luck trend to align with hashrate time boundaries
+            // Use a simple exponential decay toward 0 after the last known block luck,
+            // based on target block time (Dash ~150s). This reflects rising expected work
+            // with no found block: luck drifts down as time passes without a hit.
+            var targetBlockTimeMs = 150000; // 2.5 minutes
             if (luckTrendData.length > 0) {
                 // Sort by time
                 luckTrendData.sort(function(a, b) { return a[0] - b[0]; });
@@ -2635,9 +2639,13 @@
                     luckTrendData.unshift([minTime, luckTrendData[0][1]]);
                 }
                 
-                // Add interpolated point at maxTime with decay to 0 instead of flat carry
+                // Add interpolated point at maxTime with exponential decay toward 0
                 if (luckTrendData[luckTrendData.length - 1][0] < maxTime) {
-                    luckTrendData.push([maxTime, 0]);
+                    var lastTime = luckTrendData[luckTrendData.length - 1][0];
+                    var lastLuckVal = luckTrendData[luckTrendData.length - 1][1];
+                    var decay = Math.exp(-(maxTime - lastTime) / targetBlockTimeMs);
+                    var decayedLuck = lastLuckVal * decay;
+                    luckTrendData.push([maxTime, decayedLuck]);
                 }
             } else if (luckTrendData.length === 0 && sortedBlocks.length > 0) {
                 // Edge case: No blocks in time window, but blocks exist before it
@@ -2652,14 +2660,17 @@
                 }
                 
                 if (lastBlockBeforeWindow) {
-                    // Draw line from minTime to maxTime decaying to 0
+                    // Draw line from minTime to maxTime with exponential decay toward 0
                     var lastLuck = lastBlockBeforeWindow.luck;
                     luckTrendData.push([minTime, lastLuck]);
-                    luckTrendData.push([maxTime, 0]);
+                    var decay = Math.exp(-(maxTime - minTime) / targetBlockTimeMs);
+                    luckTrendData.push([maxTime, lastLuck * decay]);
                 } else if (luckStats && luckStats.current_luck_trend) {
-                    // No blocks with luck at all, use current round luck if available and decay to 0
-                    luckTrendData.push([minTime, luckStats.current_luck_trend]);
-                    luckTrendData.push([maxTime, 0]);
+                    // No blocks with luck at all, use current round luck if available and decay
+                    var startLuck = luckStats.current_luck_trend;
+                    luckTrendData.push([minTime, startLuck]);
+                    var decay = Math.exp(-(maxTime - minTime) / targetBlockTimeMs);
+                    luckTrendData.push([maxTime, startLuck * decay]);
                 }
             }
             
@@ -3252,6 +3263,8 @@
             });
             
             // Interpolate luck trend to align with hashrate time boundaries
+            // Apply exponential decay toward 0 after the last block (target block 150s)
+            var targetBlockTimeMs = 150000; // 2.5 minutes
             if (luckTrendData.length > 0) {
                 // Sort by time
                 luckTrendData.sort(function(a, b) { return a[0] - b[0]; });
@@ -3261,9 +3274,13 @@
                     luckTrendData.unshift([minTime, luckTrendData[0][1]]);
                 }
                 
-                // Add interpolated point at maxTime with decay to 0 instead of flat carry
+                // Add interpolated point at maxTime with exponential decay toward 0
                 if (luckTrendData[luckTrendData.length - 1][0] < maxTime) {
-                    luckTrendData.push([maxTime, 0]);
+                    var lastTime = luckTrendData[luckTrendData.length - 1][0];
+                    var lastLuckVal = luckTrendData[luckTrendData.length - 1][1];
+                    var decay = Math.exp(-(maxTime - lastTime) / targetBlockTimeMs);
+                    var decayedLuck = lastLuckVal * decay;
+                    luckTrendData.push([maxTime, decayedLuck]);
                 }
             } else if (luckTrendData.length === 0 && sortedBlocks.length > 0) {
                 // Edge case: No blocks in time window, but blocks exist before it
@@ -3278,14 +3295,17 @@
                 }
                 
                 if (lastBlockBeforeWindow) {
-                    // Draw line from minTime to maxTime decaying to 0
+                    // Draw line from minTime to maxTime with exponential decay toward 0
                     var lastLuck = lastBlockBeforeWindow.luck;
                     luckTrendData.push([minTime, lastLuck]);
-                    luckTrendData.push([maxTime, 0]);
+                    var decay = Math.exp(-(maxTime - minTime) / targetBlockTimeMs);
+                    luckTrendData.push([maxTime, lastLuck * decay]);
                 } else if (luckStats && luckStats.current_luck_trend) {
-                    // No blocks with luck at all, use current round luck if available and decay to 0
-                    luckTrendData.push([minTime, luckStats.current_luck_trend]);
-                    luckTrendData.push([maxTime, 0]);
+                    // No blocks with luck at all, use current round luck if available and decay
+                    var startLuck = luckStats.current_luck_trend;
+                    luckTrendData.push([minTime, startLuck]);
+                    var decay = Math.exp(-(maxTime - minTime) / targetBlockTimeMs);
+                    luckTrendData.push([maxTime, startLuck * decay]);
                 }
             }
             
