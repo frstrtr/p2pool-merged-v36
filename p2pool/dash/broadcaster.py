@@ -65,6 +65,9 @@ class DashNetworkBroadcaster(object):
         # Active connections: (host, port) -> connection info dict
         self.connections = {}
         
+        # Track dashd's peer connections (to avoid duplication)
+        self.dashd_peers = set()  # Set of (host, port) tuples dashd is connected to
+        
         # Connection tracking for retry logic
         self.connection_attempts = {}  # (host, port) -> attempt count
         self.connection_failures = {}  # (host, port) -> last failure time
@@ -254,6 +257,9 @@ class DashNetworkBroadcaster(object):
             peer_info = yield self.dashd.rpc_getpeerinfo()
             print 'Broadcaster: Received %d peers from dashd' % len(peer_info)
             
+            # Clear and rebuild dashd_peers set to track which peers dashd is connected to
+            self.dashd_peers.clear()
+            
             added_count = 0
             updated_count = 0
             
@@ -275,6 +281,9 @@ class DashNetworkBroadcaster(object):
                 # Skip local dashd
                 if addr == self.local_dashd_addr:
                     continue
+                
+                # Track that dashd is connected to this peer
+                self.dashd_peers.add(addr)
                 
                 # Filter out ephemeral ports (incoming connection ports from dashd)
                 if port not in [9999, 19999, 18444]:
@@ -492,14 +501,23 @@ class DashNetworkBroadcaster(object):
         
         # Score all peers
         scored_peers = []
+        dashd_overlap_count = 0
+        
         for addr, info in self.peer_db.items():
             # CRITICAL: Local dashd always gets maximum score
             if info.get('protected', False):
                 score = 999999
+                scored_peers.append((score, addr, info))
+            # Skip peers that dashd is already connected to (avoid duplication)
+            elif addr in self.dashd_peers:
+                dashd_overlap_count += 1
+                continue
             else:
                 score = self._calculate_peer_score(info, current_time)
-            
-            scored_peers.append((score, addr, info))
+                scored_peers.append((score, addr, info))
+        
+        if dashd_overlap_count > 0:
+            print 'Broadcaster: Excluded %d peers (already connected via dashd)' % dashd_overlap_count
         
         # Sort by score (highest first)
         scored_peers.sort(reverse=True)
@@ -900,7 +918,7 @@ class DashNetworkBroadcaster(object):
         print '  Target peers: %d' % len(self.connections)
         print '  Transactions: %d' % len(block.get('txs', []))
         
-        # Send to ALL peers in parallel (including local dashd)
+        # Send to ALL peers in parallel (including local dashd for fastest propagation)
         deferreds = []
         peer_addrs = []
         
