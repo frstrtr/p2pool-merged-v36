@@ -2549,25 +2549,6 @@
             var luckTrendData = [];
             var validLucks = [];
 
-            // Compute average hashrate in window for decay scaling
-            var avgHashrateWindow = 0;
-            if (values.length > 0) {
-                var sumHashWindow = values.reduce(function(a, b) { return a + b; }, 0);
-                avgHashrateWindow = sumHashWindow / values.length;
-            }
-
-            // Helper: estimate expected block time for the pool from network diff and pool hashrate
-            var lastNetDiff = (netDiffData.length > 0) ? netDiffData[netDiffData.length - 1][1] : null;
-            var computePoolBlockTimeMs = function(avgHashrate, netDiff) {
-                if (!avgHashrate || avgHashrate <= 0 || !netDiff || netDiff <= 0) {
-                    return 150000; // fallback to Dash target
-                }
-                var blockHashes = netDiff * 4294967296; // 2^32
-                var seconds = blockHashes / avgHashrate;
-                return Math.max(150000, seconds * 1000);
-            };
-            var poolBlockTimeMs = computePoolBlockTimeMs(avgHashrateWindow, lastNetDiff);
-            
             // Process network difficulty samples - convert to hashrate equivalent
             var netDiffData = [];
             networkDiffSamples = networkDiffSamples || [];
@@ -2587,6 +2568,25 @@
                 console.log('First net diff point:', new Date(netDiffData[0][0]), 'value:', netDiffData[0][1]);
                 console.log('Last net diff point:', new Date(netDiffData[netDiffData.length - 1][0]), 'value:', netDiffData[netDiffData.length - 1][1]);
             }
+
+            // Compute average hashrate in window for decay scaling
+            var avgHashrateWindow = 0;
+            if (values.length > 0) {
+                var sumHashWindow = values.reduce(function(a, b) { return a + b; }, 0);
+                avgHashrateWindow = sumHashWindow / values.length;
+            }
+
+            // Helper: estimate expected block time for the pool from network diff and pool hashrate
+            var lastNetDiff = (netDiffData.length > 0) ? netDiffData[netDiffData.length - 1][1] : null;
+            var computePoolBlockTimeMs = function(avgHashrate, netDiff) {
+                if (!avgHashrate || avgHashrate <= 0 || !netDiff || netDiff <= 0) {
+                    return 150000; // fallback to Dash target
+                }
+                var blockHashes = netDiff * 4294967296; // 2^32
+                var seconds = blockHashes / avgHashrate;
+                return Math.max(150000, seconds * 1000);
+            };
+            var poolBlockTimeMs = computePoolBlockTimeMs(avgHashrateWindow, lastNetDiff);
             
             // Compute average hashrate in window for decay scaling
             var avgHashrateWindow = 0;
