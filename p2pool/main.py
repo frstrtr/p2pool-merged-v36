@@ -620,12 +620,21 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifie
         deferral.RobustLoopingCall(save_shares).start(60)
         
         # Register graceful shutdown handler
+        @defer.inlineCallbacks
         def shutdown_handler():
             """Archive shares and optionally compact storage on graceful shutdown"""
             print 'Graceful shutdown: archiving shares...'
             try:
                 save_shares()  # Final save and archive
                 print 'Shutdown archival complete'
+                
+                # Stop P2P node gracefully
+                print 'Stopping P2P node...'
+                try:
+                    yield node.stop()
+                    print 'P2P node stopped'
+                except Exception as e:
+                    print 'Warning: P2P node shutdown error: %s' % str(e)
                 
                 # Stop broadcaster if running
                 if broadcaster:
