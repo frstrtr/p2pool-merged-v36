@@ -646,17 +646,6 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifie
             print '=' * 70
             sys.stdout.flush()
             
-            # FIRST: Set P2P node stopping flag to suppress disconnect logs
-            print 'Setting P2P stopping flag...'
-            sys.stdout.flush()
-            try:
-                node.stopping = True
-                print 'P2P stopping flag set (will suppress disconnect logs)'
-                sys.stdout.flush()
-            except Exception as e:
-                print 'Warning: Could not set stopping flag: %s' % str(e)
-                sys.stdout.flush()
-            
             # Archive shares
             print 'Archiving shares...'
             sys.stdout.flush()
@@ -670,30 +659,36 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint, telegram_notifie
                 
             # Stop P2P node gracefully
             print 'Stopping P2P node...'
+            sys.stdout.flush()
             try:
                 yield node.stop()
                 print 'P2P node stopped'
+                sys.stdout.flush()
             except Exception as e:
                 print 'Warning: P2P node shutdown error: %s' % str(e)
+                sys.stdout.flush()
                 
-                # Stop broadcaster if running
-                if broadcaster:
-                    print 'Stopping broadcaster...'
-                    try:
-                        broadcaster.stop()
-                        print 'Broadcaster stopped'
-                    except Exception as e:
-                        print 'Warning: Broadcaster shutdown error: %s' % str(e)
-                
-                # Compact storage if requested
-                if args.compact_on_shutdown:
-                    print 'Compacting share storage...'
-                    if rebuild_share_storage():
-                        print 'Share storage compaction successful'
-                    else:
-                        print 'Share storage compaction skipped or failed'
-            except Exception as e:
-                print 'Warning: Shutdown archival failed: %s' % str(e)
+            # Stop broadcaster if running
+            if broadcaster:
+                print 'Stopping broadcaster...'
+                sys.stdout.flush()
+                try:
+                    broadcaster.stop()
+                    print 'Broadcaster stopped'
+                    sys.stdout.flush()
+                except Exception as e:
+                    print 'Warning: Broadcaster shutdown error: %s' % str(e)
+                    sys.stdout.flush()
+            
+            # Compact storage if requested
+            if args.compact_on_shutdown:
+                print 'Compacting share storage...'
+                sys.stdout.flush()
+                if rebuild_share_storage():
+                    print 'Share storage compaction successful'
+                else:
+                    print 'Share storage compaction skipped or failed'
+                sys.stdout.flush()
         
         # Register with reactor stop event
         reactor.addSystemEventTrigger('before', 'shutdown', shutdown_handler)

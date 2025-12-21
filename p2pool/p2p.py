@@ -779,10 +779,11 @@ class Node(object):
         del self.peers[conn.nonce]
         
         # Don't log peer disconnections during graceful shutdown
-        # Check attribute exists and is True
         is_stopping = getattr(self, 'stopping', False)
         if not is_stopping:
             print 'Lost peer %s:%i - %s' % (conn.addr[0], conn.addr[1], reason.getErrorMessage())
+        else:
+            print '[DEBUG] Suppressed disconnect for %s:%i (stopping=True)' % (conn.addr[0], conn.addr[1])
         else:
             # Suppressed during graceful shutdown
             pass
