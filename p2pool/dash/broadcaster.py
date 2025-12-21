@@ -101,7 +101,7 @@ class DashNetworkBroadcaster(object):
         print '  Max connection attempts: %d' % self.max_connection_attempts
         print '  Connection timeout: %ds' % self.connection_timeout
         print '  Dashd refresh interval: %ds' % self.dashd_refresh_interval
-        print '  Local dashd: %s:%d (PROTECTED)' % local_dashd_addr
+        print '  Local dashd: %s (PROTECTED)' % _safe_addr_str(local_dashd_addr)
         print '  Data directory: %s' % datadir_path
         print 'Broadcaster: Initialization complete'
     
