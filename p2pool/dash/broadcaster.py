@@ -665,6 +665,13 @@ class DashNetworkBroadcaster(object):
         
         host, port = addr
         
+        # Skip IPv6 addresses if we keep getting "Network unreachable" errors
+        # This indicates the system doesn't have IPv6 connectivity
+        if ':' in host and addr in self.connection_attempts and self.connection_attempts[addr] >= 2:
+            if addr in self.connection_failures:
+                # If we've tried IPv6 twice and failed, stop trying
+                return
+        
         # Track connection attempt
         if addr not in self.connection_attempts:
             self.connection_attempts[addr] = 0
@@ -788,6 +795,9 @@ class DashNetworkBroadcaster(object):
                     self.stats['connection_stats']['refused'] += 1
                     failure_type = 'REFUSED'
                     should_log = (self.stats['connection_stats']['refused'] % 50 == 1)  # Log every 50th
+                elif 'unreachable' in error_msg.lower() or 'no route' in error_msg.lower():
+                    failure_type = 'UNREACHABLE'
+                    should_log = (self.stats['connection_stats']['failed_connections'] % 50 == 1)  # Log every 50th
                 else:
                     failure_type = 'ERROR'
                     should_log = True  # Always log other errors
