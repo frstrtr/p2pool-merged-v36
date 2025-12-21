@@ -2694,31 +2694,31 @@
             var avgLuck = (luckStats && luckStats.avg_luck !== null) ? luckStats.avg_luck : null;
             
             // Calculate dynamic luck Y-axis range to center 100%
-            // Lower bound is always 0%, upper bound adjusts to keep 100% centered
+            // The transformed data is already in luckTrendData, so find its max
             var luckMin = 0, luckMax = 200;
             if (luckTrendData.length > 0) {
-                var luckValues = luckTrendData.map(function(p) { return p.y; });
-                var minLuck = Math.min.apply(null, luckValues);
-                var maxLuck = Math.max.apply(null, luckValues);
+                // luckTrendData already contains transformed values
+                var transformedValues = luckTrendData.map(function(p) { return p.y; });
+                var minTransformed = Math.min.apply(null, transformedValues);
+                var maxTransformed = Math.max.apply(null, transformedValues);
                 
-                console.log('Luck range - min:', minLuck, 'max:', maxLuck, 'values:', luckValues.length);
+                console.log('Transformed luck range - min:', minTransformed.toFixed(1), 'max:', maxTransformed.toFixed(1));
                 
-                // For values above 100%, use logarithmic compression
-                // This makes the upper half represent 100%-infinity in the same space as 0-100%
-                var distanceAbove = maxLuck > 100 ? (maxLuck - 100) : 0;
-                var compressedAbove = distanceAbove > 0 ? 
-                    100 * Math.log10(1 + distanceAbove / 100) : 0;
+                // Calculate the distance from 100% for the maximum transformed value
+                var distanceAbove = Math.max(0, maxTransformed - 100);
+                var distanceBelow = Math.max(0, 100 - minTransformed);
                 
-                console.log('Above 100%: actual=' + distanceAbove.toFixed(1) + ', compressed=' + compressedAbove.toFixed(1));
+                // Use the larger distance to keep 100% centered
+                var maxDistance = Math.max(distanceAbove, distanceBelow);
                 
-                // To center 100% at 50% of graph height:
-                // Lower half = 0 to 100 (100 units)
-                // Upper half = 100 to luckMax (also 100 units)
-                // So luckMax = 100 + 100 = 200
-                luckMin = 0;
-                luckMax = 200;
+                // Add 10% padding
+                maxDistance = maxDistance * 1.1;
                 
-                console.log('Luck axis - min:', luckMin, 'max:', luckMax, '(100% is centered)');
+                // Set symmetric range around 100%
+                luckMin = Math.max(0, 100 - maxDistance);
+                luckMax = 100 + maxDistance;
+                
+                console.log('Luck axis - min:', luckMin.toFixed(1), 'max:', luckMax.toFixed(1), '(100% centered at', (100/(luckMax-luckMin)*100).toFixed(1) + '%)');
             }
             
             document.getElementById('graph-current').textContent = format_hashrate(current);
@@ -3335,24 +3335,28 @@
             // Calculate dynamic luck Y-axis range to center 100% (fullscreen)
             var fsLuckMin = 0, fsLuckMax = 200;
             if (luckTrendData.length > 0) {
-                var fsLuckValues = luckTrendData.map(function(p) { return p.y; });
-                var fsMinLuck = Math.min.apply(null, fsLuckValues);
-                var fsMaxLuck = Math.max.apply(null, fsLuckValues);
+                // luckTrendData already contains transformed values
+                var fsTransformedValues = luckTrendData.map(function(p) { return p.y; });
+                var fsMinTransformed = Math.min.apply(null, fsTransformedValues);
+                var fsMaxTransformed = Math.max.apply(null, fsTransformedValues);
                 
-                console.log('Fullscreen luck range - min:', fsMinLuck, 'max:', fsMaxLuck);
+                console.log('Fullscreen transformed range - min:', fsMinTransformed.toFixed(1), 'max:', fsMaxTransformed.toFixed(1));
                 
-                // Logarithmic compression for values above 100%
-                var fsDistanceAbove = fsMaxLuck > 100 ? (fsMaxLuck - 100) : 0;
-                var fsCompressedAbove = fsDistanceAbove > 0 ? 
-                    100 * Math.log10(1 + fsDistanceAbove / 100) : 0;
+                // Calculate distances from 100%
+                var fsDistanceAbove = Math.max(0, fsMaxTransformed - 100);
+                var fsDistanceBelow = Math.max(0, 100 - fsMinTransformed);
                 
-                console.log('FS - Above 100%: actual=' + fsDistanceAbove.toFixed(1) + ', compressed=' + fsCompressedAbove.toFixed(1));
+                // Use larger distance to keep 100% centered
+                var fsMaxDistance = Math.max(fsDistanceAbove, fsDistanceBelow);
                 
-                // Fixed range: 0-200% to center 100%
-                fsLuckMin = 0;
-                fsLuckMax = 200;
+                // Add 10% padding
+                fsMaxDistance = fsMaxDistance * 1.1;
                 
-                console.log('Fullscreen axis - min:', fsLuckMin, 'max:', fsLuckMax, '(100% centered)');
+                // Symmetric range around 100%
+                fsLuckMin = Math.max(0, 100 - fsMaxDistance);
+                fsLuckMax = 100 + fsMaxDistance;
+                
+                console.log('Fullscreen axis - min:', fsLuckMin.toFixed(1), 'max:', fsLuckMax.toFixed(1));
             }
             
             document.getElementById('fs-graph-current').textContent = format_hashrate(current);
