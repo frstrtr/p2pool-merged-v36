@@ -1877,17 +1877,42 @@
                     return;
                 }
 
-                // Current round luck (current luck trend)
-                if (luckData.current_luck_trend) {
-                    var currentLuck = luckData.current_luck_trend;
-                    d3.select('#luck_current_round')
-                        .text('Round: ' + d3.format('.0f')(currentLuck) + '%')
-                        .style('background', currentLuck >= 100 ? 'var(--success)' : (currentLuck >= 75 ? 'var(--warning)' : 'var(--danger)'));
+                // Current round luck with exponential decay (matches graph interpolation)
+                if (luckData.current_luck_trend && luckData.time_since_last_block && luckData.current_expected_time) {
+                    var baseLuck = luckData.current_luck_trend;
+                    
+                    // Fetch network difficulty and pool hashrate to calculate pool block time for decay
+                    d3.json('../web/graph_data/network_difficulty/last_day', function(netDiffData) {
+                        d3.json('../local_stats', function(localStats) {
+                            var currentLuck = baseLuck; // Default to non-decayed
+                            
+                            // Calculate pool block time for realistic decay
+                            if (netDiffData && netDiffData.length > 0 && localStats && localStats.pool_hash_rate) {
+                                var lastNetDiff = netDiffData[netDiffData.length - 1][1];
+                                var poolHashrate = localStats.pool_hash_rate;
+                                
+                                if (lastNetDiff > 0 && poolHashrate > 0) {
+                                    var blockHashes = lastNetDiff * 4294967296; // 2^32
+                                    var poolBlockTimeSec = blockHashes / poolHashrate;
+                                    var poolBlockTimeMs = Math.max(150000, poolBlockTimeSec * 1000);
+                                    
+                                    // Apply exponential decay toward 0
+                                    var timeSinceMs = luckData.time_since_last_block * 1000;
+                                    var decay = Math.exp(-timeSinceMs / poolBlockTimeMs);
+                                    currentLuck = baseLuck * decay;
+                                }
+                            }
+                            
+                            d3.select('#luck_current_round')
+                                .text('Round: ' + d3.format('.0f')(currentLuck) + '%')
+                                .style('background', currentLuck >= 100 ? 'var(--success)' : (currentLuck >= 75 ? 'var(--warning)' : 'var(--danger)'));
+                        });
+                    });
                 } else {
                     d3.select('#luck_current_round').text('Round: -').style('background', 'var(--primary)');
                 }
 
-                // Calculate 7-day and 30-day luck from blocks
+                // Calculate 7-day and 30-day luck from blocks, including current round with decay
                 var now = Date.now() / 1000;
                 var sevenDaysAgo = now - (7 * 24 * 60 * 60);
                 var thirtyDaysAgo = now - (30 * 24 * 60 * 60);
@@ -1895,23 +1920,78 @@
                 var sevenDayBlocks = luckData.blocks.filter(function(b) { return b.ts >= sevenDaysAgo && b.luck; });
                 var thirtyDayBlocks = luckData.blocks.filter(function(b) { return b.ts >= thirtyDaysAgo && b.luck; });
 
-                if (sevenDayBlocks.length > 0) {
-                    var sevenDayLuck = d3.sum(sevenDayBlocks, function(b) { return b.luck; }) / sevenDayBlocks.length;
-                    d3.select('#luck_seven_days')
-                        .text('7d: ' + d3.format('.0f')(sevenDayLuck) + '%')
-                        .style('background', sevenDayLuck >= 100 ? 'var(--success)' : (sevenDayLuck >= 75 ? 'var(--warning)' : 'var(--danger)'));
-                } else {
-                    d3.select('#luck_seven_days').text('7d: -').style('background', 'var(--primary)');
-                }
+                // Fetch network difficulty and pool hashrate for sophisticated decay calculation
+                d3.json('../web/graph_data/network_difficulty/last_day', function(netDiffData) {
+                    d3.json('../local_stats', function(localStats) {
+                        var currentRoundLuck = null;
+                        
+                        // Calculate decayed current round luck if we have the data
+                        if (luckData.current_luck_trend && luckData.time_since_last_block && 
+                            netDiffData && netDiffData.length > 0 && localStats && localStats.pool_hash_rate) {
+                            var lastNetDiff = netDiffData[netDiffData.length - 1][1];
+                            var poolHashrate = localStats.pool_hash_rate;
+                            
+                            if (lastNetDiff > 0 && poolHashrate > 0) {
+                                var blockHashes = lastNetDiff * 4294967296; // 2^32
+                                var poolBlockTimeSec = blockHashes / poolHashrate;
+                                var poolBlockTimeMs = Math.max(150000, poolBlockTimeSec * 1000);
+                                
+                                // Apply exponential decay toward 0
+                                var timeSinceMs = luckData.time_since_last_block * 1000;
+                                var decay = Math.exp(-timeSinceMs / poolBlockTimeMs);
+                                currentRoundLuck = luckData.current_luck_trend * decay;
+                            }
+                        }
+                        
+                        // 7-day luck: include current round if in window
+                        if (sevenDayBlocks.length > 0) {
+                            var sevenDaySum = d3.sum(sevenDayBlocks, function(b) { return b.luck; });
+                            var sevenDayCount = sevenDayBlocks.length;
+                            
+                            // Add current round if recent enough and we have decayed value
+                            if (currentRoundLuck !== null && luckData.time_since_last_block < (7 * 24 * 60 * 60)) {
+                                sevenDaySum += currentRoundLuck;
+                                sevenDayCount += 1;
+                            }
+                            
+                            var sevenDayLuck = sevenDaySum / sevenDayCount;
+                            d3.select('#luck_seven_days')
+                                .text('7d: ' + d3.format('.0f')(sevenDayLuck) + '%')
+                                .style('background', sevenDayLuck >= 100 ? 'var(--success)' : (sevenDayLuck >= 75 ? 'var(--warning)' : 'var(--danger)'));
+                        } else if (currentRoundLuck !== null) {
+                            // Only current round in window
+                            d3.select('#luck_seven_days')
+                                .text('7d: ' + d3.format('.0f')(currentRoundLuck) + '%')
+                                .style('background', currentRoundLuck >= 100 ? 'var(--success)' : (currentRoundLuck >= 75 ? 'var(--warning)' : 'var(--danger)'));
+                        } else {
+                            d3.select('#luck_seven_days').text('7d: -').style('background', 'var(--primary)');
+                        }
 
-                if (thirtyDayBlocks.length > 0) {
-                    var thirtyDayLuck = d3.sum(thirtyDayBlocks, function(b) { return b.luck; }) / thirtyDayBlocks.length;
-                    d3.select('#luck_thirty_days')
-                        .text('30d: ' + d3.format('.0f')(thirtyDayLuck) + '%')
-                        .style('background', thirtyDayLuck >= 100 ? 'var(--success)' : (thirtyDayLuck >= 75 ? 'var(--warning)' : 'var(--danger)'));
-                } else {
-                    d3.select('#luck_thirty_days').text('30d: -').style('background', 'var(--primary)');
-                }
+                        // 30-day luck: include current round if in window
+                        if (thirtyDayBlocks.length > 0) {
+                            var thirtyDaySum = d3.sum(thirtyDayBlocks, function(b) { return b.luck; });
+                            var thirtyDayCount = thirtyDayBlocks.length;
+                            
+                            // Add current round if recent enough and we have decayed value
+                            if (currentRoundLuck !== null && luckData.time_since_last_block < (30 * 24 * 60 * 60)) {
+                                thirtyDaySum += currentRoundLuck;
+                                thirtyDayCount += 1;
+                            }
+                            
+                            var thirtyDayLuck = thirtyDaySum / thirtyDayCount;
+                            d3.select('#luck_thirty_days')
+                                .text('30d: ' + d3.format('.0f')(thirtyDayLuck) + '%')
+                                .style('background', thirtyDayLuck >= 100 ? 'var(--success)' : (thirtyDayLuck >= 75 ? 'var(--warning)' : 'var(--danger)'));
+                        } else if (currentRoundLuck !== null) {
+                            // Only current round in window
+                            d3.select('#luck_thirty_days')
+                                .text('30d: ' + d3.format('.0f')(currentRoundLuck) + '%')
+                                .style('background', currentRoundLuck >= 100 ? 'var(--success)' : (currentRoundLuck >= 75 ? 'var(--warning)' : 'var(--danger)'));
+                        } else {
+                            d3.select('#luck_thirty_days').text('30d: -').style('background', 'var(--primary)');
+                        }
+                    });
+                });
             });
         }
 
