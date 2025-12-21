@@ -784,9 +784,6 @@ class Node(object):
             print 'Lost peer %s:%i - %s' % (conn.addr[0], conn.addr[1], reason.getErrorMessage())
         else:
             print '[DEBUG] Suppressed disconnect for %s:%i (stopping=True)' % (conn.addr[0], conn.addr[1])
-        else:
-            # Suppressed during graceful shutdown
-            pass
     
     
     def got_addr(self, (host, port), services, timestamp):
