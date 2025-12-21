@@ -951,6 +951,9 @@ class DashNetworkBroadcaster(object):
                 # Parse address
                 if ':' in addr_str:
                     host, port = addr_str.rsplit(':', 1)
+                    # Ensure host is plain string, not unicode (Python 2.7 compatibility)
+                    if isinstance(host, unicode):
+                        host = host.encode('ascii', 'replace')
                     addr = (host, int(port))
                 else:
                     continue
@@ -975,7 +978,7 @@ class DashNetworkBroadcaster(object):
             # Convert to JSON-serializable format
             peers_json = {}
             for addr, peer_info in self.peer_db.items():
-                addr_str = '%s:%d' % addr
+                addr_str = _safe_addr_str(addr)
                 # Create a copy to avoid modifying original
                 peer_copy = dict(peer_info)
                 # Remove non-serializable fields
@@ -986,7 +989,7 @@ class DashNetworkBroadcaster(object):
                 'version': '1.0',
                 'last_updated': time.time(),
                 'bootstrapped': self.bootstrapped,
-                'local_dashd': '%s:%d' % self.local_dashd_addr,
+                'local_dashd': _safe_addr_str(self.local_dashd_addr),
                 'peers': peers_json
             }
             
