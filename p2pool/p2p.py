@@ -747,7 +747,7 @@ class Node(object):
         self.running = False
         self.stopping = True  # Set BEFORE disconnecting peers to suppress lost_conn logs
         
-        print 'P2P: Shutting down gracefully...'
+        print 'P2P: Shutting down gracefully (stopping flag set, %d peers)...' % len(self.peers)
         
         self._stop_thinking()
         yield self.clientfactory.stop()
@@ -776,6 +776,10 @@ class Node(object):
         # Don't log peer disconnections during graceful shutdown
         if not self.stopping:
             print 'Lost peer %s:%i - %s' % (conn.addr[0], conn.addr[1], reason.getErrorMessage())
+        else:
+            # Debug: verify suppression is working
+            if p2pool.DEBUG:
+                print 'P2P: Gracefully disconnected peer %s:%i (suppressed log)' % (conn.addr[0], conn.addr[1])
     
     
     def got_addr(self, (host, port), services, timestamp):
