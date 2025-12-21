@@ -2758,6 +2758,7 @@
             
             // Display current worker count and unique miner count
             var currentWorkerCount = minerCount.length > 0 ? minerCount[minerCount.length - 1][1] : 0;
+            currentWorkerCount = (currentWorkerCount === null || currentWorkerCount === undefined) ? 0 : currentWorkerCount;
             var uniqueMiners = [];
             if (uniqueMinerCountData && uniqueMinerCountData.length > 0) {
                 for (var i = 0; i < uniqueMinerCountData.length; i++) {
@@ -2769,6 +2770,7 @@
                 }
             }
             var currentUniqueMinerCount = uniqueMiners.length > 0 ? uniqueMiners[uniqueMiners.length - 1][1] : 0;
+            currentUniqueMinerCount = (currentUniqueMinerCount === null || currentUniqueMinerCount === undefined) ? 0 : currentUniqueMinerCount;
             document.getElementById('graph-miners').textContent = currentWorkerCount + '/' + currentUniqueMinerCount;
             
             if (avgLuck !== null) {
@@ -3397,7 +3399,9 @@
             
             // Display current worker count and unique miner count in fullscreen
             var fsWorkerCount = minerCount.length > 0 ? minerCount[minerCount.length - 1][1] : 0;
+            fsWorkerCount = (fsWorkerCount === null || fsWorkerCount === undefined) ? 0 : fsWorkerCount;
             var fsUniqueMinerCount = uniqueMinerCount.length > 0 ? uniqueMinerCount[uniqueMinerCount.length - 1][1] : 0;
+            fsUniqueMinerCount = (fsUniqueMinerCount === null || fsUniqueMinerCount === undefined) ? 0 : fsUniqueMinerCount;
             document.getElementById('fs-graph-miners').textContent = fsWorkerCount + '/' + fsUniqueMinerCount;
             
             if (fsAvgLuck !== null) {
