@@ -524,6 +524,11 @@ class DashNetworkBroadcaster(object):
                 if time_since_failure < self.connection_timeout:
                     in_backoff.append((addr, int(self.connection_timeout - time_since_failure)))
                     continue
+                else:
+                    # Backoff expired - reset attempt counter and clear failure
+                    del self.connection_failures[addr]
+                    if addr in self.connection_attempts:
+                        self.connection_attempts[addr] = 0
             
             # Check if we've exceeded max attempts
             attempts = self.connection_attempts.get(addr, 0)
@@ -736,19 +741,23 @@ class DashNetworkBroadcaster(object):
                 if 'timed out' in error_msg.lower() or 'timeout' in error_msg.lower():
                     self.stats['connection_stats']['timeouts'] += 1
                     failure_type = 'TIMEOUT'
+                    should_log = True  # Always log timeouts
                 elif 'refused' in error_msg.lower():
                     self.stats['connection_stats']['refused'] += 1
                     failure_type = 'REFUSED'
+                    should_log = (self.stats['connection_stats']['refused'] % 50 == 1)  # Log every 50th
                 else:
                     failure_type = 'ERROR'
+                    should_log = True  # Always log other errors
                 
                 self.stats['connection_stats']['failed_connections'] += 1
                 self.connection_failures[addr] = time.time()
                 
-                print >>sys.stderr, 'Broadcaster: CONNECTION %s to %s (%.3fs, attempt %d/%d): %s' % (
-                    failure_type, _safe_addr_str(addr), connection_time,
-                    self.connection_attempts[addr], self.max_connection_attempts,
-                    error_msg[:100])
+                if should_log:
+                    print >>sys.stderr, 'Broadcaster: CONNECTION %s to %s (%.3fs, attempt %d/%d): %s' % (
+                        failure_type, _safe_addr_str(addr), connection_time,
+                        self.connection_attempts[addr], self.max_connection_attempts,
+                        error_msg[:100])
                 
                 # Update peer database
                 if addr in self.peer_db:
