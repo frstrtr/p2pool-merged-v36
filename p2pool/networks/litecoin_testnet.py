@@ -6,18 +6,20 @@ CHAIN_LENGTH = 24*60*60//15  # 24 hours worth of shares
 REAL_CHAIN_LENGTH = 24*60*60//15
 TARGET_LOOKBEHIND = 100  # shares
 SPREAD = 10  # blocks
-IDENTIFIER = 'e037d5b8c6923410'.decode('hex')  # Unique identifier for this p2pool network
-PREFIX = '7208c1a53ef629b0'.decode('hex')  # Share chain prefix
+IDENTIFIER = 'cca5e24ec6408b1e'.decode('hex')  # From jtoomim/p2pool
+PREFIX = 'ad9614f6466a39cf'.decode('hex')  # From jtoomim/p2pool
 COINBASEEXT = '0D2F5032506F6F6C2D744C54432F'.decode('hex')  # "/P2Pool-tLTC/" in hex
-P2P_PORT = 19327  # P2Pool share chain port for Litecoin testnet
+P2P_PORT = 19338  # P2Pool share chain port (from jtoomim/p2pool)
 MIN_TARGET = 0
 MAX_TARGET = 2**256//2**20 - 1
 PERSIST = False  # Don't persist shares for testnet
-WORKER_PORT = 19332  # Stratum port for miners (different from RPC)
-BOOTSTRAP_ADDRS = ''.split(' ')  # No bootstrap for testnet initially
-ANNOUNCE_CHANNEL = ''
+WORKER_PORT = 19327  # Stratum port for miners (from jtoomim/p2pool)
+BOOTSTRAP_ADDRS = 'forre.st'.split(' ')  # From jtoomim/p2pool
+ANNOUNCE_CHANNEL = '#p2pool-alt'
 VERSION_CHECK = lambda v: True  # Accept all versions for testnet
-MINIMUM_PROTOCOL_VERSION = 1700
+SOFTFORKS_REQUIRED = set(['bip65', 'csv', 'segwit', 'mweb'])  # Litecoin softforks
+MINIMUM_PROTOCOL_VERSION = 3301  # From jtoomim/p2pool
+SEGWIT_ACTIVATION_VERSION = 17  # From jtoomim/p2pool
 
 # Stratum Vardiff Configuration
 STRATUM_SHARE_RATE = 10  # Target 10 seconds per pseudoshare
