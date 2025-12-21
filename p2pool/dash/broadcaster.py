@@ -346,8 +346,7 @@ class DashNetworkBroadcaster(object):
         
         new_count = 0
         updated_count = 0
-        
-        print 'Broadcaster: P2P Discovery - Received %d peer addresses' % len(addrs)
+        filtered_count = 0
         
         for addr_info in addrs:
             host = addr_info.get('host')
@@ -359,6 +358,7 @@ class DashNetworkBroadcaster(object):
             # Filter out non-standard ports (ephemeral/random ports from incoming connections)
             # Only accept standard Dash P2P port (9999 mainnet, 19999 testnet, 18444 regtest)
             if port not in [9999, 19999, 18444]:
+                filtered_count += 1
                 continue
             
             addr = (host, port)
@@ -383,9 +383,13 @@ class DashNetworkBroadcaster(object):
                 self.peer_db[addr]['last_seen'] = timestamp
                 updated_count += 1
         
-        if new_count > 0 or updated_count > 0:
-            print 'Broadcaster: P2P discovery complete - %d new, %d updated (total: %d peers)' % (
-                new_count, updated_count, len(self.peer_db))
+        # Only log if there are significant updates (new peers or many filtered)
+        if new_count > 0:
+            print 'Broadcaster: P2P discovery - %d new peers added (total: %d peers)' % (
+                new_count, len(self.peer_db))
+        elif filtered_count > 100:
+            print 'Broadcaster: P2P discovery - filtered %d ephemeral ports, %d updated' % (
+                filtered_count, updated_count)
     
     def handle_ping_message(self, peer_addr):
         """Handle 'ping' message - track peer activity
@@ -395,7 +399,7 @@ class DashNetworkBroadcaster(object):
         """
         if peer_addr in self.peer_db:
             self.peer_db[peer_addr]['last_seen'] = time.time()
-            print 'Broadcaster: PING from %s (peer still alive)' % _safe_addr_str(peer_addr)
+            # Don't log every ping - too verbose
     
     def handle_block_message(self, peer_addr, block_hash):
         """Handle 'block' or 'inv' message - track block propagation
