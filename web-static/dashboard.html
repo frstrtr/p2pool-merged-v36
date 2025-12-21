@@ -2656,11 +2656,26 @@
             }
             
             // Convert simple array points to objects for luck trend
+            // Apply logarithmic compression to values above 100%
+            // This transforms actual luck (0-infinity) to display luck (0-200)
+            // where 100% stays at 100%, and values above compress logarithmically
+            var transformLuck = function(actualLuck) {
+                if (actualLuck <= 100) {
+                    // Linear below 100%: 0% → 0, 100% → 100
+                    return actualLuck;
+                } else {
+                    // Logarithmic above 100%: 100% → 100, 200% → 130, 500% → 170, 1000% → 200
+                    var distanceAbove = actualLuck - 100;
+                    var compressed = 100 * Math.log10(1 + distanceAbove / 100);
+                    return 100 + compressed;
+                }
+            };
+            
             luckTrendData = luckTrendData.map(function(point) {
                 if (Array.isArray(point)) {
-                    return {x: point[0], y: point[1]};
+                    return {x: point[0], y: transformLuck(point[1])};
                 }
-                return point;
+                return {x: point.x, y: transformLuck(point.y)};
             });
             
             // Debug: log processed results
@@ -2679,45 +2694,31 @@
             var avgLuck = (luckStats && luckStats.avg_luck !== null) ? luckStats.avg_luck : null;
             
             // Calculate dynamic luck Y-axis range to center 100%
-            // Use asymmetric scaling: linear below 100%, compressed above 100%
+            // Lower bound is always 0%, upper bound adjusts to keep 100% centered
             var luckMin = 0, luckMax = 200;
             if (luckTrendData.length > 0) {
                 var luckValues = luckTrendData.map(function(p) { return p.y; });
                 var minLuck = Math.min.apply(null, luckValues);
                 var maxLuck = Math.max.apply(null, luckValues);
                 
-                console.log('Luck range calculation - min:', minLuck, 'max:', maxLuck, 'values:', luckValues.length);
-                
-                // Calculate distances from 100%
-                var distanceBelow = 100 - minLuck; // How far below 100%
-                var distanceAbove = maxLuck - 100; // How far above 100%
+                console.log('Luck range - min:', minLuck, 'max:', maxLuck, 'values:', luckValues.length);
                 
                 // For values above 100%, use logarithmic compression
-                // log(1 + x) provides smooth compression for large values
-                var compressedDistanceAbove = distanceAbove > 0 ? 
+                // This makes the upper half represent 100%-infinity in the same space as 0-100%
+                var distanceAbove = maxLuck > 100 ? (maxLuck - 100) : 0;
+                var compressedAbove = distanceAbove > 0 ? 
                     100 * Math.log10(1 + distanceAbove / 100) : 0;
                 
-                // Use the larger of the two distances (one linear, one compressed)
-                var maxDistance = Math.max(distanceBelow, compressedDistanceAbove);
+                console.log('Above 100%: actual=' + distanceAbove.toFixed(1) + ', compressed=' + compressedAbove.toFixed(1));
                 
-                // Add 20% padding
-                maxDistance = maxDistance * 1.2;
+                // To center 100% at 50% of graph height:
+                // Lower half = 0 to 100 (100 units)
+                // Upper half = 100 to luckMax (also 100 units)
+                // So luckMax = 100 + 100 = 200
+                luckMin = 0;
+                luckMax = 200;
                 
-                // Set symmetric range around 100% (both sides use same scale)
-                luckMin = Math.max(0, 100 - maxDistance);
-                luckMax = 100 + maxDistance;
-                
-                console.log('Calculated luck axis - min:', luckMin.toFixed(1), 'max:', luckMax.toFixed(1), 
-                    'distBelow:', distanceBelow.toFixed(1), 'distAbove:', distanceAbove.toFixed(1), 
-                    'compressed:', compressedDistanceAbove.toFixed(1));
-                
-                // Ensure minimum range of 50% on each side (100 total)
-                if (luckMax - luckMin < 100) {
-                    var center = (luckMin + luckMax) / 2;
-                    luckMin = Math.max(0, center - 50);
-                    luckMax = center + 50;
-                    console.log('Applied minimum range - min:', luckMin, 'max:', luckMax);
-                }
+                console.log('Luck axis - min:', luckMin, 'max:', luckMax, '(100% is centered)');
             }
             
             document.getElementById('graph-current').textContent = format_hashrate(current);
@@ -2804,7 +2805,30 @@
                     tickColor: '#ffc107',
                     labels: {
                         style: { color: '#ffc107', fontSize: '10px' },
-                        formatter: function() { return this.value.toFixed(0) + '%'; }
+                        formatter: function() {
+                            // Inverse transform: convert display value back to actual luck
+                            var displayValue = this.value;
+                            if (displayValue <= 100) {
+                                // Linear range: display = actual
+                                return displayValue.toFixed(0) + '%';
+                            } else {
+                                // Logarithmic range: need to reverse the compression
+                                // displayValue = 100 + 100*log10(1 + (actualLuck-100)/100)
+                                // Solving for actualLuck:
+                                var compressed = displayValue - 100;
+                                var actualLuck = 100 + 100 * (Math.pow(10, compressed / 100) - 1);
+                                
+                                // Show ∞ for values near the maximum
+                                if (displayValue >= 195) {
+                                    return '∞';
+                                }
+                                // Show rounded value for readability
+                                if (actualLuck > 1000) {
+                                    return (actualLuck / 1000).toFixed(1) + 'k%';
+                                }
+                                return actualLuck.toFixed(0) + '%';
+                            }
+                        }
                     },
                     gridLineWidth: 0,
                     opposite: true,
@@ -3278,11 +3302,22 @@
             }
             
             // Convert simple array points to objects for luck trend
+            // Apply same logarithmic transformation for fullscreen
+            var transformLuckFS = function(actualLuck) {
+                if (actualLuck <= 100) {
+                    return actualLuck;
+                } else {
+                    var distanceAbove = actualLuck - 100;
+                    var compressed = 100 * Math.log10(1 + distanceAbove / 100);
+                    return 100 + compressed;
+                }
+            };
+            
             luckTrendData = luckTrendData.map(function(point) {
                 if (Array.isArray(point)) {
-                    return {x: point[0], y: point[1]};
+                    return {x: point[0], y: transformLuckFS(point[1])};
                 }
-                return point;
+                return {x: point.x, y: transformLuckFS(point.y)};
             });
             
             // Update fullscreen stats
@@ -3298,7 +3333,6 @@
             var fsAvgLuck = (luckStats && luckStats.avg_luck !== null) ? luckStats.avg_luck : null;
             
             // Calculate dynamic luck Y-axis range to center 100% (fullscreen)
-            // Use asymmetric scaling: linear below 100%, compressed above 100%
             var fsLuckMin = 0, fsLuckMax = 200;
             if (luckTrendData.length > 0) {
                 var fsLuckValues = luckTrendData.map(function(p) { return p.y; });
@@ -3307,34 +3341,18 @@
                 
                 console.log('Fullscreen luck range - min:', fsMinLuck, 'max:', fsMaxLuck);
                 
-                // Calculate distances from 100%
-                var fsDistanceBelow = 100 - fsMinLuck;
-                var fsDistanceAbove = fsMaxLuck - 100;
-                
-                // For values above 100%, use logarithmic compression
-                var fsCompressedDistanceAbove = fsDistanceAbove > 0 ? 
+                // Logarithmic compression for values above 100%
+                var fsDistanceAbove = fsMaxLuck > 100 ? (fsMaxLuck - 100) : 0;
+                var fsCompressedAbove = fsDistanceAbove > 0 ? 
                     100 * Math.log10(1 + fsDistanceAbove / 100) : 0;
                 
-                // Use the larger of the two distances
-                var fsMaxDistance = Math.max(fsDistanceBelow, fsCompressedDistanceAbove);
+                console.log('FS - Above 100%: actual=' + fsDistanceAbove.toFixed(1) + ', compressed=' + fsCompressedAbove.toFixed(1));
                 
-                // Add 20% padding
-                fsMaxDistance = fsMaxDistance * 1.2;
+                // Fixed range: 0-200% to center 100%
+                fsLuckMin = 0;
+                fsLuckMax = 200;
                 
-                // Set symmetric range around 100%
-                fsLuckMin = Math.max(0, 100 - fsMaxDistance);
-                fsLuckMax = 100 + fsMaxDistance;
-                
-                console.log('Fullscreen luck axis - min:', fsLuckMin.toFixed(1), 'max:', fsLuckMax.toFixed(1),
-                    'distBelow:', fsDistanceBelow.toFixed(1), 'distAbove:', fsDistanceAbove.toFixed(1),
-                    'compressed:', fsCompressedDistanceAbove.toFixed(1));
-                
-                // Ensure minimum range of 50% on each side (100 total)
-                if (fsLuckMax - fsLuckMin < 100) {
-                    var fsCenter = (fsLuckMin + fsLuckMax) / 2;
-                    fsLuckMin = Math.max(0, fsCenter - 50);
-                    fsLuckMax = fsCenter + 50;
-                }
+                console.log('Fullscreen axis - min:', fsLuckMin, 'max:', fsLuckMax, '(100% centered)');
             }
             
             document.getElementById('fs-graph-current').textContent = format_hashrate(current);
@@ -3397,7 +3415,24 @@
                     tickColor: '#ffc107',
                     labels: {
                         style: { color: '#ffc107', fontSize: '11px' },
-                        formatter: function() { return this.value.toFixed(0) + '%'; }
+                        formatter: function() {
+                            // Inverse transform for fullscreen
+                            var displayValue = this.value;
+                            if (displayValue <= 100) {
+                                return displayValue.toFixed(0) + '%';
+                            } else {
+                                var compressed = displayValue - 100;
+                                var actualLuck = 100 + 100 * (Math.pow(10, compressed / 100) - 1);
+                                
+                                if (displayValue >= 195) {
+                                    return '∞';
+                                }
+                                if (actualLuck > 1000) {
+                                    return (actualLuck / 1000).toFixed(1) + 'k%';
+                                }
+                                return actualLuck.toFixed(0) + '%';
+                            }
+                        }
                     },
                     gridLineWidth: 0,
                     opposite: true,
