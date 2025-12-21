@@ -574,6 +574,14 @@ class ServerFactory(protocol.ServerFactory):
         assert self.running
         self.running = False
         
+        # Gracefully disconnect all incoming peers
+        print 'P2P: Disconnecting %d incoming peers...' % len(self.node.conns)
+        for proto in list(self.node.conns):
+            try:
+                proto.transport.loseConnection()
+            except:
+                pass
+        
         return self.listen_port.stopListening()
 
 class ClientFactory(protocol.ClientFactory):
@@ -633,6 +641,15 @@ class ClientFactory(protocol.ClientFactory):
     def stop(self):
         assert self.running
         self.running = False
+        
+        # Gracefully disconnect all connected peers
+        print 'P2P: Disconnecting %d outgoing peers...' % len(self.conns)
+        for proto in list(self.conns):
+            try:
+                proto.transport.loseConnection()
+            except:
+                pass
+        
         self._stop_thinking()
     
     def _think(self):
