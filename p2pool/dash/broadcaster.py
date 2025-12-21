@@ -532,15 +532,30 @@ class DashNetworkBroadcaster(object):
         print '  Current connections: %d' % len(current_addrs)
         print '  Target connections: %d' % len(target_addrs)
         
-        # Disconnect from peers not in target list
+        # Disconnect from peers not in target list OR that overlap with dashd
         to_disconnect = current_addrs - target_addrs
+        
+        # Also disconnect from any peers that dashd is now connected to (avoid duplication)
+        dashd_overlap_disconnect = set()
+        for addr in current_addrs:
+            conn = self.connections.get(addr)
+            if conn and not conn.get('protected', False) and addr in self.dashd_peers:
+                dashd_overlap_disconnect.add(addr)
+                to_disconnect.add(addr)
+        
+        if dashd_overlap_disconnect:
+            print 'Broadcaster: Disconnecting from %d peers (now connected via dashd):' % len(dashd_overlap_disconnect)
+            for addr in dashd_overlap_disconnect:
+                print '  - %s (avoiding duplication)' % _safe_addr_str(addr)
+        
         if to_disconnect:
-            print 'Broadcaster: Disconnecting from %d low-quality peers:' % len(to_disconnect)
+            print 'Broadcaster: Disconnecting from %d peers total:' % len(to_disconnect)
         
         for addr in to_disconnect:
             conn = self.connections.get(addr)
             if conn and not conn.get('protected', False):
-                print '  - Disconnecting %s' % _safe_addr_str(addr)
+                if addr not in dashd_overlap_disconnect:  # Already logged above
+                    print '  - Disconnecting %s' % _safe_addr_str(addr)
                 self._disconnect_peer(addr)
             elif conn and conn.get('protected', False):
                 print '  - PRESERVING protected connection to %s (local dashd)' % _safe_addr_str(addr)
