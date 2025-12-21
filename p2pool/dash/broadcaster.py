@@ -951,6 +951,26 @@ class DashNetworkBroadcaster(object):
         """Get path to peer database file"""
         return os.path.join(self.datadir_path, 'broadcast_peers.json')
     
+    def _cleanup_invalid_ports(self):
+        """Remove peers with invalid/ephemeral ports from database"""
+        valid_ports = [9999, 19999, 18444]  # mainnet, testnet, regtest
+        invalid_addrs = []
+        
+        for addr in self.peer_db.keys():
+            if addr[1] not in valid_ports:
+                invalid_addrs.append(addr)
+        
+        if invalid_addrs:
+            print 'Broadcaster: Cleaning up %d peers with invalid ports (ephemeral ports)' % len(invalid_addrs)
+            for addr in invalid_addrs:
+                del self.peer_db[addr]
+                # Also clean from other tracking dicts
+                if addr in self.connection_attempts:
+                    del self.connection_attempts[addr]
+                if addr in self.connection_failures:
+                    del self.connection_failures[addr]
+            print 'Broadcaster: Cleanup complete - %d valid peers remain' % len(self.peer_db)
+    
     def _load_peer_database(self):
         """Load peer database from disk"""
         db_path = self._get_peer_db_path()
@@ -983,6 +1003,9 @@ class DashNetworkBroadcaster(object):
             self.bootstrapped = data.get('bootstrapped', False)
             
             print 'Broadcaster: Loaded %d peers from database' % len(self.peer_db)
+            
+            # Clean up invalid ports (ephemeral ports from incoming connections)
+            self._cleanup_invalid_ports()
             
         except Exception as e:
             print >>sys.stderr, 'Broadcaster: Error loading peer database: %s' % e
