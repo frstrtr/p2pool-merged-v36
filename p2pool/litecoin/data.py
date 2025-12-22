@@ -50,7 +50,6 @@ pubkey_hash_to_address = bitcoin_data.pubkey_hash_to_address
 address_to_pubkey_hash = bitcoin_data.address_to_pubkey_hash
 address_to_script2 = bitcoin_data.address_to_script2
 pubkey_to_address = bitcoin_data.pubkey_to_address
-get_txid = bitcoin_data.get_txid
 
 # Scrypt PoW function for Litecoin/Dogecoin
 def scrypt_hash(data):
