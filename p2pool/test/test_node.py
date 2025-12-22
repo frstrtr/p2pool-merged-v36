@@ -9,20 +9,20 @@ from twisted.python import failure
 from twisted.trial import unittest
 from twisted.web import client, resource, server
 
-from p2pool import data, node, work
-from p2pool.dash import data as dash_data, networks, worker_interface
+from p2pool import data, node, work, main
+from p2pool.bitcoin import data as bitcoin_data, networks, worker_interface
 from p2pool.util import deferral, jsonrpc, math, variable
 
-class dashd(object): # can be used as p2p factory, p2p protocol, or rpc jsonrpc proxy
+class bitcoind(object): # can be used as p2p factory, p2p protocol, or rpc jsonrpc proxy
     def __init__(self):
-        self.blocks = [0x00000000000132b9afeca5e9a2fdf4477338df6dcff1342300240bc70397c4bb]
-        self.headers = {0x132b9afeca5e9a2fdf4477338df6dcff1342300240bc70397c4bb: {
-            'nonce': 2093330011,
-            'timestamp': 1452288263,
-            'merkle_root': 0x43dda83285fae26de9a97331f617392261c77495debe97b7e18b1faf38d1ef8,
-            'version': 3,
+        self.blocks = [0x000000000000016c169477c25421250ec5d32cf9c6d38538b5de970a2355fd89]
+        self.headers = {0x16c169477c25421250ec5d32cf9c6d38538b5de970a2355fd89: {
+            'nonce': 1853158954,
+            'timestamp': 1351658517,
+            'merkle_root': 2282849479936278423916707524932131168473430114569971665822757638339486597658L,
+            'version': 1,
             'previous_block': 1048610514577342396345362905164852351970507722694242579238530L,
-            'bits': dash_data.FloatingInteger(bits=0x1b0d642e, target=0x44b9f20000000000000000000000000000000000000000000000L),
+            'bits': bitcoin_data.FloatingInteger(bits=0x1a0513c5, target=0x513c50000000000000000000000000000000000000000000000L),
         }}
         
         self.conn = variable.Variable(self)
@@ -64,14 +64,14 @@ class dashd(object): # can be used as p2p factory, p2p protocol, or rpc jsonrpc 
             pass
         elif param['mode'] == 'submit':
             result = param['data']
-            block = dash_data.block_type.unpack(result.decode('hex'))
+            block = bitcoin_data.block_type.unpack(result.decode('hex'))
             if sum(tx_out['value'] for tx_out in block['txs'][0]['tx_outs']) != sum(tx['tx_outs'][0]['value'] for tx in block['txs'][1:]) + 5000000000:
                 print 'invalid fee'
             if block['header']['previous_block'] != self.blocks[-1]:
                 return False
-            if dash_data.hash256(result.decode('hex')) > block['header']['bits'].target:
+            if bitcoin_data.hash256(result.decode('hex')) > block['header']['bits'].target:
                 return False
-            header_hash = dash_data.hash256(dash_data.block_header_type.pack(block['header']))
+            header_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(block['header']))
             self.blocks.append(header_hash)
             self.headers[header_hash] = block['header']
             reactor.callLater(0, self.new_block.happened)
@@ -83,18 +83,18 @@ class dashd(object): # can be used as p2p factory, p2p protocol, or rpc jsonrpc 
         for i in xrange(100):
             fee = i
             txs.append(dict(
-                data=dash_data.tx_type.pack(dict(version=1, type=0, tx_ins=[], tx_outs=[dict(value=fee, script='hello!'*100)], lock_time=0, extra_payload=None)).encode('hex'),
+                data=bitcoin_data.tx_type.pack(dict(version=1, tx_ins=[], tx_outs=[dict(value=fee, script='hello!'*100)], lock_time=0)).encode('hex'),
                 fee=fee,
             ))
         return {
-            "version" : 3,
+            "version" : 2,
             "previousblockhash" : '%064x' % (self.blocks[-1],),
             "transactions" : txs,
             "coinbaseaux" : {
                 "flags" : "062f503253482f"
             },
             "coinbasevalue" : 5000000000 + sum(tx['fee'] for tx in txs),
-            "target" : "00000000000044b9f20000000000000000000000000000000000000000000000",
+            "target" : "0000000000000513c50000000000000000000000000000000000000000000000",
             "mintime" : 1351655621,
             "mutable" : [
                 "time",
@@ -107,7 +107,6 @@ class dashd(object): # can be used as p2p factory, p2p protocol, or rpc jsonrpc 
             "curtime" : 1351659940,
             "bits" : "21008000",
             "height" : len(self.blocks),
-            "coinbase_payload" : "",
         }
 
 @apply
@@ -126,7 +125,7 @@ class mm_provider(object):
 
 mynet = math.Object(
     NAME='mynet',
-    PARENT=networks.nets['dash'],
+    PARENT=networks.nets['litecoin_testnet'],
     SHARE_PERIOD=5, # seconds
     CHAIN_LENGTH=20*60//3, # shares
     REAL_CHAIN_LENGTH=20*60//3, # shares
@@ -147,16 +146,16 @@ mynet = math.Object(
 class MiniNode(object):
     @classmethod
     @defer.inlineCallbacks
-    def start(cls, net, factory, dashd, peer_ports, merged_urls):
+    def start(cls, net, factory, bitcoind, peer_ports, merged_urls):
         self = cls()
         
-        self.n = node.Node(factory, dashd, [], [], net)
+        self.n = node.Node(factory, bitcoind, [], [], net)
         yield self.n.start()
         
         self.n.p2p_node = node.P2PNode(self.n, port=0, max_incoming_conns=1000000, addr_store={}, connect_addrs=[('127.0.0.1', peer_port) for peer_port in peer_ports])
         self.n.p2p_node.start()
-        
-        wb = work.WorkerBridge(node=self.n, my_pubkey_hash=random.randrange(2**160), donation_percentage=random.uniform(0, 10), merged_urls=merged_urls, worker_fee=3)
+
+        wb = work.WorkerBridge(node=self.n, my_pubkey_hash=random.randrange(2**160), donation_percentage=random.uniform(0, 10), merged_urls=merged_urls, worker_fee=3, args=math.Object(donation_percentage=random.uniform(0, 10), address='foo', worker_fee=3, timeaddresses=1000), pubkeys=main.keypool(), bitcoind=bitcoind)
         self.wb = wb
         web_root = resource.Resource()
         worker_interface.WorkerInterface(wb).attach_to(web_root)
@@ -174,7 +173,7 @@ class MiniNode(object):
 class Test(unittest.TestCase):
     @defer.inlineCallbacks
     def test_node(self):
-        bitd = dashd()
+        bitd = bitcoind()
         
         mm_root = resource.Resource()
         mm_root.putChild('', jsonrpc.HTTPServer(mm_provider))
@@ -183,7 +182,7 @@ class Test(unittest.TestCase):
         n = node.Node(bitd, bitd, [], [], mynet)
         yield n.start()
         
-        wb = work.WorkerBridge(node=n, my_pubkey_hash=42, donation_percentage=2, merged_urls=[('http://127.0.0.1:%i' % (mm_port.getHost().port,), '')], worker_fee=3)
+        wb = work.WorkerBridge(node=n, my_pubkey_hash=42, donation_percentage=2, merged_urls=[('http://127.0.0.1:%i' % (mm_port.getHost().port,), '')], worker_fee=3, args=math.Object(donation_percentage=2, address='foo', worker_fee=3, timeaddresses=1000), pubkeys=main.keypool(), bitcoind=bitd)
         web_root = resource.Resource()
         worker_interface.WorkerInterface(wb).attach_to(web_root)
         port = reactor.listenTCP(0, server.Site(web_root))
@@ -222,7 +221,7 @@ class Test(unittest.TestCase):
         N = 3
         SHARES = 600
         
-        bitd = dashd()
+        bitd = bitcoind()
         
         nodes = []
         for i in xrange(N):
@@ -242,7 +241,7 @@ class Test(unittest.TestCase):
         # crawl web pages
         from p2pool import web
         stop_event = variable.Event()
-        web2_root, _ = web.get_web_root(nodes[0].wb, tempfile.mkdtemp(), variable.Variable(None), stop_event)
+        web2_root = web.get_web_root(nodes[0].wb, tempfile.mkdtemp(), variable.Variable({'errors': '', 'version': 100000}), stop_event)
         web2_port = reactor.listenTCP(0, server.Site(web2_root))
         for name in web2_root.listNames() + ['web/' + x for x in web2_root.getChildWithDefault('web', None).listNames()]:
             if name in ['web/graph_data', 'web/share', 'web/share_data']: continue

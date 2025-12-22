@@ -20,16 +20,7 @@ class Error(Exception):
         #    raise TypeError('message must be a unicode')
         self.code, self.message, self.data = code, message, data
     def __str__(self):
-        try:
-            # Try to encode message safely, replacing unicode characters that can't be encoded
-            if isinstance(self.message, unicode):
-                safe_message = self.message.encode('ascii', 'replace')
-            else:
-                safe_message = str(self.message)
-            return '%i %s' % (self.code, safe_message) + (' %r' % (self.data, ) if self.data is not None else '')
-        except:
-            # Fallback to code only if message encoding fails
-            return 'Error code: %i' % self.code
+        return '%i %s' % (self.code, self.message) + (' %r' % (self.data, ) if self.data is not None else '')
     def _to_obj(self):
         return {
             'code': self.code,
@@ -60,13 +51,16 @@ class Proxy(object):
 
 @defer.inlineCallbacks
 def _handle(data, provider, preargs=(), response_handler=None):
+        print '[DEBUG jsonrpc] _handle called with data:', repr(str(data)[:200])
         id_ = None
         
         try:
             try:
                 try:
                     req = json.loads(data)
-                except Exception:
+                    print '[DEBUG jsonrpc] Parsed JSON request:', req
+                except Exception as e:
+                    print '[DEBUG jsonrpc] JSON parse error:', e
                     raise Error_for_code(-32700)(u'Parse error')
                 
                 if 'result' in req or 'error' in req:
@@ -148,13 +142,27 @@ class HTTPServer(deferred_resource.DeferredResource):
         deferred_resource.DeferredResource.__init__(self)
         self._provider = provider
     
+    def render(self, request):
+        print '[DEBUG jsonrpc] render called, method=%s, path=%s' % (request.method, request.path)
+        return deferred_resource.DeferredResource.render(self, request)
+    
     @defer.inlineCallbacks
     def render_POST(self, request):
-        data = yield _handle(request.content.read(), self._provider, preargs=[request])
-        assert data is not None
-        request.setHeader('Content-Type', 'application/json')
-        request.setHeader('Content-Length', len(data))
-        request.write(data)
+        print '[DEBUG jsonrpc] render_POST called'
+        try:
+            content_data = request.content.read()
+            print '[DEBUG jsonrpc] Request data:', repr(str(content_data)[:200])
+            data = yield _handle(content_data, self._provider, preargs=[request])
+            print '[DEBUG jsonrpc] _handle returned:', repr(str(data)[:200])
+            assert data is not None
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Content-Length', str(len(data)))
+            request.write(data)
+        except Exception as e:
+            print '[DEBUG jsonrpc] Exception in render_POST:', repr(e)
+            import traceback
+            traceback.print_exc()
+            raise
 
 class LineBasedPeer(basic.LineOnlyReceiver):
     delimiter = '\n'

@@ -21,23 +21,23 @@ Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h`
 
 ### Multiaddress Format (Litecoin + Dogecoin)
 ```
-litecoin_address+dogecoin_address
+litecoin_address,dogecoin_address
 ```
-**Note**: We use `+` instead of `:` to avoid HTTP Basic Auth parsing issues.
+**Note**: We use `,` (comma) as the separator. This avoids conflicts with HTTP Basic Auth (`:`) and difficulty syntax (`+`).
 
-Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB`
+Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB`
 
 ### With Worker Name
 ```
 litecoin_address+dogecoin_address.worker_name
 ```
-Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.worker1`
+Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.worker1`
 
 Alternative format:
 ```
 litecoin_address+dogecoin_address_worker_name
 ```
-Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB_worker1`
+Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB_worker1`
 
 ## Miner Configuration Examples
 
@@ -52,13 +52,13 @@ minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
 **Multiaddress (Litecoin + Dogecoin):**
 ```bash
 minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
-  -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB -p x
+  -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB -p x
 ```
 
 **With worker name:**
 ```bash
 minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
-  -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.rig1 -p x
+  -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.rig1 -p x
 ```
 
 ### cgminer / bfgminer
