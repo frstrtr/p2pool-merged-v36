@@ -873,7 +873,8 @@ def run():
         print 'Pausing for 3 seconds...'
         time.sleep(3)
     
-    realnets = dict((name, net) for name, net in networks.nets.iteritems() if '_testnet' not in name)
+    # Include all networks (Dash, Litecoin testnet, Dogecoin testnet, etc.)
+    realnets = dict((name, net) for name, net in networks.nets.iteritems())
     
     parser = fixargparse.FixedArgumentParser(description='p2pool (version %s)' % (p2pool.__version__,), fromfile_prefix_chars='@')
     parser.add_argument('--version', action='version', version=p2pool.__version__)
