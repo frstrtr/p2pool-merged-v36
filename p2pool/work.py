@@ -231,13 +231,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         user, contents2 = contents[0], contents[1:]
         
-        # Parse merged mining addresses (format: ltc_addr:doge_addr or ltc_addr:doge_addr.worker)
+        # Parse merged mining addresses (format: ltc_addr+doge_addr or ltc_addr+doge_addr.worker)
+        # Using + instead of : to avoid HTTP Basic Auth URL parsing issues
         merged_addresses = {}
         worker = ''
         
-        if ':' in user:
+        if '+' in user and not any(c in user for c in ['/'])  # Avoid confusion with difficulty separator
             # Split merged addresses
-            parts = user.split(':')
+            parts = user.split('+', 1)  # Only split on first +
             user = parts[0]  # Primary address (Litecoin)
             if len(parts) > 1:
                 merged_addr = parts[1]
