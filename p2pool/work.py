@@ -231,14 +231,31 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         user, contents2 = contents[0], contents[1:]
         
-        # Parse worker name (supports user.worker or user_worker format)
+        # Parse merged mining addresses (format: ltc_addr:doge_addr or ltc_addr:doge_addr.worker)
+        merged_addresses = {}
         worker = ''
-        if '_' in user:
-            worker = user.split('_')[1]
-            user = user.split('_')[0]
-        elif '.' in user:
-            worker = user.split('.')[1]
-            user = user.split('.')[0]
+        
+        if ':' in user:
+            # Split merged addresses
+            parts = user.split(':')
+            user = parts[0]  # Primary address (Litecoin)
+            if len(parts) > 1:
+                merged_addr = parts[1]
+                # Check if worker name is attached to merged address
+                if '.' in merged_addr:
+                    merged_addr, worker = merged_addr.split('.', 1)
+                elif '_' in merged_addr:
+                    merged_addr, worker = merged_addr.split('_', 1)
+                merged_addresses['dogecoin'] = merged_addr
+        
+        # Parse worker name from primary address if not already set
+        if not worker:
+            if '_' in user:
+                worker = user.split('_')[1]
+                user = user.split('_')[0]
+            elif '.' in user:
+                worker = user.split('.')[1]
+                user = user.split('.')[0]
 
         desired_pseudoshare_target = None
         desired_share_target = None
@@ -277,14 +294,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
         if worker:
             user = user + '.' + worker
 
-        return user, pubkey_hash, desired_share_target, desired_pseudoshare_target
+        return user, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses
 
     def preprocess_request(self, user):
         # Removed peer connection check - allow solo mining
         if time.time() > self.current_work.value['last_update'] + 60:
             raise jsonrpc.Error_for_code(-12345)(u'lost contact with coind')
-        user, pubkey_hash, desired_share_target, desired_pseudoshare_target = self.get_user_details(user)
-        return pubkey_hash, desired_share_target, desired_pseudoshare_target
+        user, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses = self.get_user_details(user)
+        return pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses
 
     def _estimate_local_hash_rate(self):
         if len(self.recent_shares_ts_work) == 50:
@@ -310,9 +327,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
             addr_hash_rates[datum['pubkey_hash']] = addr_hash_rates.get(datum['pubkey_hash'], 0) + datum['work']/dt
         return addr_hash_rates
 
-    def get_work(self, pubkey_hash, desired_share_target, desired_pseudoshare_target):
+    def get_work(self, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses=None):
         global print_throttle
         t0 = time.time()  # Benchmarking start
+        
+        # Store merged addresses for later use in block submission
+        if merged_addresses is None:
+            merged_addresses = {}
+        self._current_merged_addresses = merged_addresses
         
         # Removed peer connection check - allow solo mining
         # P2Pool can work standalone even with PERSIST=True
@@ -516,7 +538,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
             except:
                 log.err(None, 'Error while processing potential block:')
 
-            user, _, _, _ = self.get_user_details(user)
+            user, _, _, _, _ = self.get_user_details(user)
             assert header['previous_block'] == ba['previous_block']
             assert header['merkle_root'] == dash_data.check_merkle_link(dash_data.hash256(new_packed_gentx), merkle_link)
             assert header['bits'] == ba['bits']
@@ -534,10 +556,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             # Build complete Dogecoin block with multiaddress coinbase
                             template = aux_work['template']
                             
-                            # For now, use a simple single-address fallback until share chain integration
-                            # TODO: Integrate with share chain to get actual shareholder distribution
-                            # For testing, use a dummy shareholder (the merged mining address)
-                            shareholders = {}  # Empty = will use all to one address in build_merged_coinbase
+                            # Get miner's merged addresses if provided
+                            merged_addrs = getattr(self, '_current_merged_addresses', {})
+                            dogecoin_address = merged_addrs.get('dogecoin')
+                            
+                            # Build shareholders dict
+                            if dogecoin_address:
+                                # Miner provided dogecoin address - use it for payout
+                                shareholders = {dogecoin_address: 1.0}
+                                print 'Using miner dogecoin address: %s' % dogecoin_address
+                            else:
+                                # No dogecoin address provided - create dummy output
+                                # TODO: Integrate with share chain to get actual shareholder distribution
+                                shareholders = {}
                             
                             # Build Dogecoin coinbase with shareholder outputs
                             try:
