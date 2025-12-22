@@ -6,7 +6,7 @@ multiaddress coinbase transactions, allowing proportional payouts to
 multiple miners on merged chains (e.g., Dogecoin).
 """
 
-import dash_data
+from p2pool.dash import data as dash_data
 from p2pool.util import pack
 
 
