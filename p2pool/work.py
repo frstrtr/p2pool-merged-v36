@@ -14,6 +14,7 @@ import dash.getwork as dash_getwork, dash.data as dash_data
 from dash import helper, script, worker_interface
 from util import forest, jsonrpc, variable, deferral, math, pack
 import p2pool, p2pool.data as p2pool_data
+from p2pool import merged_mining
 
 print_throttle = 0.0
 
@@ -86,14 +87,60 @@ class WorkerBridge(worker_interface.WorkerBridge):
         @defer.inlineCallbacks
         def set_merged_work(merged_url, merged_userpass):
             merged_proxy = jsonrpc.HTTPProxy(merged_url, dict(Authorization='Basic ' + base64.b64encode(merged_userpass)))
+            
+            # Try to detect auxpow capability on first call
+            auxpow_capable = None
+            
             while self.running:
-                auxblock = yield deferral.retry('Error while calling merged getauxblock on %s:' % (merged_url,), 30)(merged_proxy.rpc_getauxblock)()
-                self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: dict(
-                    hash=int(auxblock['hash'], 16),
-                    target='p2pool' if auxblock['target'] == 'p2pool' else pack.IntType(256).unpack(auxblock['target'].decode('hex')),
-                    merged_proxy=merged_proxy,
-                )}))
+                try:
+                    # First, try getblocktemplate with auxpow capability (multiaddress support)
+                    if auxpow_capable is None or auxpow_capable:
+                        template = yield deferral.retry('Error while calling merged getblocktemplate on %s:' % (merged_url,), 30)(
+                            merged_proxy.rpc_getblocktemplate
+                        )({"capabilities": ["auxpow"]})
+                        
+                        # Check if auxpow is supported (modified Dogecoin with multiaddress)
+                        if 'auxpow' in template:
+                            if auxpow_capable is None:
+                                print 'Detected auxpow-capable merged mining daemon at %s (multiaddress support enabled)' % (merged_url,)
+                            auxpow_capable = True
+                            
+                            chainid = template['auxpow']['chainid']
+                            target_hex = template['auxpow']['target']
+                            
+                            # Store full template for multiaddress coinbase building
+                            self.merged_work.set(math.merge_dicts(self.merged_work.value, {chainid: dict(
+                                template=template,
+                                hash=0,  # Not used with getblocktemplate
+                                target=pack.IntType(256).unpack(target_hex.decode('hex')),
+                                merged_proxy=merged_proxy,
+                                multiaddress=True,
+                            )}))
+                        else:
+                            # getblocktemplate succeeded but no auxpow - shouldn't happen
+                            if auxpow_capable is None:
+                                print 'Warning: getblocktemplate succeeded but no auxpow object at %s, falling back to getauxblock' % (merged_url,)
+                            auxpow_capable = False
+                            raise ValueError('No auxpow in template')
+                            
+                except Exception as e:
+                    # Fall back to standard getauxblock (single address)
+                    if auxpow_capable is None:
+                        print 'Auxpow not supported at %s, using standard getauxblock (single address mode)' % (merged_url,)
+                    auxpow_capable = False
+                    
+                    auxblock = yield deferral.retry('Error while calling merged getauxblock on %s:' % (merged_url,), 30)(
+                        merged_proxy.rpc_getauxblock
+                    )()
+                    self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: dict(
+                        hash=int(auxblock['hash'], 16),
+                        target='p2pool' if auxblock['target'] == 'p2pool' else pack.IntType(256).unpack(auxblock['target'].decode('hex')),
+                        merged_proxy=merged_proxy,
+                        multiaddress=False,
+                    )}))
+                
                 yield deferral.sleep(1)
+        
         for merged_url, merged_userpass in merged_urls:
             set_merged_work(merged_url, merged_userpass)
 
@@ -482,27 +529,88 @@ class WorkerBridge(worker_interface.WorkerBridge):
             for aux_work, index, hashes in mm_later:
                 try:
                     if pow_hash <= aux_work['target'] or p2pool.DEBUG:
-                        df = deferral.retry('Error submitting merged block: (will retry)', 10, 10)(aux_work['merged_proxy'].rpc_getauxblock)(
-                            pack.IntType(256, 'big').pack(aux_work['hash']).encode('hex'),
-                            dash_data.aux_pow_type.pack(dict(
-                                merkle_tx=dict(
-                                    tx=new_gentx,
-                                    block_hash=header_hash,
-                                    merkle_link=merkle_link,
-                                ),
-                                merkle_link=dash_data.calculate_merkle_link(hashes, index),
-                                parent_block_header=header,
-                            )).encode('hex'),
-                        )
-                        @df.addCallback
-                        def _(result, aux_work=aux_work):
-                            if result != (pow_hash <= aux_work['target']):
-                                print >>sys.stderr, 'Merged block submittal result: %s Expected: %s' % (result, pow_hash <= aux_work['target'])
-                            else:
-                                print 'Merged block submittal result: %s' % (result,)
-                        @df.addErrback
-                        def _(err):
-                            log.err(err, 'Error submitting merged block:')
+                        # Check if this is multiaddress merged mining (getblocktemplate with auxpow)
+                        if aux_work.get('multiaddress'):
+                            # Build complete Dogecoin block with multiaddress coinbase
+                            template = aux_work['template']
+                            
+                            # For now, use a simple single-address fallback until share chain integration
+                            # TODO: Integrate with share chain to get actual shareholder distribution
+                            # For testing, use a dummy shareholder (the merged mining address)
+                            shareholders = {}  # Empty = will use all to one address in build_merged_coinbase
+                            
+                            # Build Dogecoin coinbase with shareholder outputs
+                            try:
+                                merged_coinbase = merged_mining.build_merged_coinbase(
+                                    template=template,
+                                    shareholders=shareholders,
+                                    net=self.node.net
+                                )
+                                
+                                # Build complete Dogecoin block
+                                merged_block, auxpow = merged_mining.build_merged_block(
+                                    template=template,
+                                    coinbase_tx=merged_coinbase,
+                                    auxpow_proof=dict(
+                                        merkle_tx=dict(
+                                            tx=new_gentx,
+                                            block_hash=header_hash,
+                                            merkle_link=merkle_link,
+                                        ),
+                                        merkle_link=dash_data.calculate_merkle_link(hashes, index),
+                                        parent_block_header=header,
+                                    ),
+                                    parent_block_header=header,
+                                    merkle_link_to_parent=merkle_link
+                                )
+                                
+                                # Pack block for submission
+                                block_hex = dash_data.block_type.pack(merged_block).encode('hex')
+                                auxpow_hex = dash_data.aux_pow_type.pack(auxpow).encode('hex')
+                                
+                                # Submit via submitauxblock (block + auxpow)
+                                print 'Submitting multiaddress merged block via submitauxblock...'
+                                df = deferral.retry('Error submitting multiaddress merged block: (will retry)', 10, 10)(
+                                    aux_work['merged_proxy'].rpc_submitauxblock
+                                )(block_hex, auxpow_hex)
+                                
+                                @df.addCallback
+                                def _(result, aux_work=aux_work):
+                                    if result is None or result == True:
+                                        print 'Multiaddress merged block accepted!'
+                                    else:
+                                        print >>sys.stderr, 'Multiaddress merged block rejected: %s' % (result,)
+                                
+                                @df.addErrback
+                                def _(err):
+                                    log.err(err, 'Error submitting multiaddress merged block:')
+                                    
+                            except Exception as e:
+                                print >>sys.stderr, 'Error building multiaddress merged block: %s' % (e,)
+                                log.err(None, 'Error building multiaddress merged block:')
+                        else:
+                            # Standard getauxblock submission (backward compatible)
+                            df = deferral.retry('Error submitting merged block: (will retry)', 10, 10)(aux_work['merged_proxy'].rpc_getauxblock)(
+                                pack.IntType(256, 'big').pack(aux_work['hash']).encode('hex'),
+                                dash_data.aux_pow_type.pack(dict(
+                                    merkle_tx=dict(
+                                        tx=new_gentx,
+                                        block_hash=header_hash,
+                                        merkle_link=merkle_link,
+                                    ),
+                                    merkle_link=dash_data.calculate_merkle_link(hashes, index),
+                                    parent_block_header=header,
+                                )).encode('hex'),
+                            )
+                            @df.addCallback
+                            def _(result, aux_work=aux_work):
+                                if result != (pow_hash <= aux_work['target']):
+                                    print >>sys.stderr, 'Merged block submittal result: %s Expected: %s' % (result, pow_hash <= aux_work['target'])
+                                else:
+                                    print 'Merged block submittal result: %s' % (result,)
+                            @df.addErrback
+                            def _(err):
+                                log.err(err, 'Error submitting merged block:')
                 except:
                     log.err(None, 'Error while processing merged mining POW:')
 
