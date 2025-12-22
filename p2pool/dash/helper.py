@@ -5,6 +5,7 @@ from twisted.internet import defer, error as twisted_error
 
 import p2pool
 from p2pool.dash import data as dash_data
+from p2pool.bitcoin import data as bitcoin_data
 from p2pool.util import deferral, jsonrpc
 
 @deferral.retry('Error while checking dash connection:', 1)
@@ -112,15 +113,19 @@ def getwork(coind, net, use_getblocktemplate=True):
     if 'coinbase_payload' in work and len(work['coinbase_payload']) != 0:
         coinbase_payload = work['coinbase_payload'].decode('hex')
 
+    # Use bitcoin_data for networks with Segwit support (Litecoin, etc.)
+    # Use dash_data for Dash-specific networks
+    data_module = bitcoin_data if 'segwit' in getattr(net, 'SOFTFORKS_REQUIRED', set()) else dash_data
+
     defer.returnValue(dict(
         version=work['version'],
         previous_block=int(work['previousblockhash'], 16),
-        transactions=map(dash_data.tx_type.unpack, packed_transactions),
-        transaction_hashes=map(dash_data.hash256, packed_transactions),
+        transactions=map(data_module.tx_type.unpack, packed_transactions),
+        transaction_hashes=map(data_module.hash256, packed_transactions),
         transaction_fees=[x.get('fee', None) if isinstance(x, dict) else None for x in work['transactions']],
         subsidy=work['coinbasevalue'],
         time=work['time'] if 'time' in work else work['curtime'],
-        bits=dash_data.FloatingIntegerType().unpack(work['bits'].decode('hex')[::-1]) if isinstance(work['bits'], (str, unicode)) else dash_data.FloatingInteger(work['bits']),
+        bits=data_module.FloatingIntegerType().unpack(work['bits'].decode('hex')[::-1]) if isinstance(work['bits'], (str, unicode)) else data_module.FloatingInteger(work['bits']),
         coinbaseflags=work['coinbaseflags'].decode('hex') if 'coinbaseflags' in work else ''.join(x.decode('hex') for x in work['coinbaseaux'].itervalues()) if 'coinbaseaux' in work else '',
         height=work['height'],
         last_update=time.time(),
