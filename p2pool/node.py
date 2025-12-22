@@ -7,8 +7,12 @@ from twisted.python import log
 
 import p2pool
 from p2pool import data as p2pool_data, p2p
-from p2pool.dash import data as dash_data, helper, height_tracker
+from p2pool.dash import data as dash_data, height_tracker
 from p2pool.util import deferral, variable
+
+# Import helper dynamically based on network type
+# Will be set properly in Node.__init__
+helper = None
 
 
 class P2PNode(p2p.Node):
@@ -160,6 +164,16 @@ class Node(object):
         self.factory = factory
         self.coind = coind
         self.net = net
+        
+        # Select appropriate helper module based on network requirements
+        # Use litecoin helper for Segwit-enabled networks, dash helper otherwise
+        global helper
+        if 'segwit' in getattr(net, 'SOFTFORKS_REQUIRED', set()):
+            from p2pool.litecoin import helper as litecoin_helper
+            helper = litecoin_helper
+        else:
+            from p2pool.dash import helper as dash_helper
+            helper = dash_helper
         
         self.tracker = p2pool_data.OkayTracker(self.net)
         
