@@ -189,11 +189,10 @@ class DeferredCacher(object):
                 self.waiting.pop(key).callback(None)
                 if fail.check(RetrySilentlyException):
                     return
-                # Commented out: These errors are expected from sharechain iteration (non-block shares)
-                # print
-                # print 'Error when requesting noncached value for key: %r' % (key,)
-                # fail.printTraceback()
-                # print
+                print
+                print 'Error when requesting noncached value:'
+                fail.printTraceback()
+                print
             self.func(key).addCallback(cb).addErrback(eb)
         if default is not self._nothing:
             return default

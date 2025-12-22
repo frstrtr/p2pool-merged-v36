@@ -12,9 +12,9 @@ def parse_username(username):
     merged_addresses = {}
     worker = ''
     
-    if '+' in user and not any(c in user for c in ['/']):
+    if ',' in user:
         # Split merged addresses
-        parts = user.split('+', 1)
+        parts = user.split(',', 1)
         user = parts[0]  # Primary address (Litecoin)
         if len(parts) > 1:
             merged_addr = parts[1]
@@ -63,28 +63,28 @@ test_cases = [
     "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h",
     
     # Multiaddress format
-    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB",
+    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB",
     
     # With worker name (dot notation)
-    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.worker1",
+    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.worker1",
     
     # With worker name (underscore notation)
-    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB_worker1",
+    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB_worker1",
     
     # With difficulty (pseudoshare)
-    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB+0.001",
+    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB+0.001",
     
     # With difficulty (share)
-    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB/32",
+    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB/32",
     
     # With both difficulties
-    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB+0.001/32",
+    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB+0.001/32",
     
     # With worker and difficulty
-    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.rig1+0.001",
+    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.rig1+0.001",
     
     # Worker on primary address
-    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h.worker1+nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB",
+    "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h.worker1,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB",
 ]
 
 print("=" * 80)

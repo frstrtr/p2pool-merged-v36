@@ -6,7 +6,7 @@ multiaddress coinbase transactions, allowing proportional payouts to
 multiple miners on merged chains (e.g., Dogecoin).
 """
 
-from p2pool.dash import data as dash_data
+from p2pool.bitcoin import data as bitcoin_data
 from p2pool.util import pack
 
 
@@ -40,8 +40,8 @@ def build_merged_coinbase(template, shareholders, net):
     
     Args:
         template: Block template from getblocktemplate (with auxpow)
-        shareholders: Dict of {address: fraction} where fractions sum to ~1.0
-        net: Network object
+        shareholders: Dict of {address: fraction} OR {address: (fraction, net_obj)}
+        net: Network object (default if shareholders don't specify network per address)
     
     Returns:
         Dict representing the coinbase transaction
@@ -51,12 +51,22 @@ def build_merged_coinbase(template, shareholders, net):
     
     # Build outputs for each shareholder
     tx_outs = []
-    for address, fraction in shareholders.iteritems():
+    
+    # Build outputs for each shareholder
+    for address, value in shareholders.iteritems():
+    for address, value in shareholders.iteritems():
+        # Handle both old format (address: fraction) and new format (address: (fraction, net))
+        if isinstance(value, tuple):
+            fraction, addr_net = value
+        else:
+            fraction = value
+            addr_net = net
+        
         amount = int(total_reward * fraction)
         if amount > 0:  # Skip dust outputs
             try:
-                # Use existing dash_data.address_to_script2 function
-                script2 = dash_data.address_to_script2(address, net)
+                # Use existing bitcoin_data.address_to_script2 function with proper network
+                script2 = bitcoin_data.address_to_script2(address, addr_net)
                 tx_outs.append({
                     'value': amount,
                     'script': script2,
@@ -75,11 +85,13 @@ def build_merged_coinbase(template, shareholders, net):
         })
     
     # Build coinbase transaction
+    # Note: For coinbase, use None for previous_output and sequence
+    # PossiblyNoneType will encode them properly during serialization
     coinbase_tx = {
         'version': 1,
         'tx_ins': [{
-            'previous_output': None,  # Coinbase marker
-            'sequence': 0xffffffff,
+            'previous_output': None,  # Will be encoded as dict(hash=0, index=2**32-1)
+            'sequence': None,  # Will be encoded as 0xffffffff
             'script': build_coinbase_input_script(height, '/P2Pool-Scrypt/'),
         }],
         'tx_outs': tx_outs,
@@ -103,19 +115,26 @@ def build_merged_block(template, coinbase_tx, auxpow_proof, parent_block_header,
     Returns:
         Complete block dict ready for packing and submitblock
     """
-    # Collect all transactions (coinbase first, then template transactions)
+    # Collect all transaction hashes for merkle root calculation
+    # Start with coinbase transaction (packed)
+    coinbase_packed = bitcoin_data.tx_type.pack(coinbase_tx)
+    tx_hashes = [bitcoin_data.hash256(coinbase_packed)]
+    
+    # Collect both hashes and unpacked txs (needed for block packing later)
     tx_list = [coinbase_tx]
     
     # Add transactions from template
     for tx in template.get('transactions', []):
-        # Transactions in template are hex-encoded, need to unpack them
+        # Transactions in template are hex-encoded raw format
         tx_data = tx['data'].decode('hex')
-        tx_unpacked = dash_data.tx_type.unpack(tx_data)
+        # Calculate hash directly from raw data
+        tx_hashes.append(bitcoin_data.hash256(tx_data))
+        # Unpack for including in block
+        tx_unpacked = bitcoin_data.tx_type.unpack(tx_data)
         tx_list.append(tx_unpacked)
     
     # Calculate merkle root from transaction hashes
-    tx_hashes = [dash_data.hash256(dash_data.tx_type.pack(tx)) for tx in tx_list]
-    merkle_root = dash_data.merkle_hash(tx_hashes)
+    merkle_root = bitcoin_data.merkle_hash(tx_hashes)
     
     # Build block header
     header = {
@@ -123,7 +142,7 @@ def build_merged_block(template, coinbase_tx, auxpow_proof, parent_block_header,
         'previous_block': int(template['previousblockhash'], 16),
         'merkle_root': merkle_root,
         'timestamp': template['curtime'],
-        'bits': dash_data.FloatingIntegerType().unpack(template['bits'].decode('hex')[::-1]),
+        'bits': bitcoin_data.FloatingIntegerType().unpack(template['bits'].decode('hex')[::-1]),
         'nonce': parent_block_header['nonce'],  # Use nonce from parent chain
     }
     

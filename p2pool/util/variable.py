@@ -16,19 +16,14 @@ class Event(object):
         return self.watch(func)
     def watch_weakref(self, obj, func):
         # func must not contain a reference to obj!
-        # Wrap the callback to handle None weakref gracefully
-        def safe_callback(*args):
-            ref = obj_ref()
-            if ref is not None:
-                func(ref, *args)
-        watch_id = self.watch(safe_callback)
+        watch_id = self.watch(lambda *args: func(obj_ref(), *args))
         obj_ref = weakref.ref(obj, lambda _: self.unwatch(watch_id))
     def watch(self, func):
         id = self.id_generator.next()
         self.observers[id] = func
         return id
     def unwatch(self, id):
-        self.observers.pop(id, None)  # Use pop with default to avoid KeyError
+        self.observers.pop(id)
     
     @property
     def once(self):
