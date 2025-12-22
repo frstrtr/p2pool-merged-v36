@@ -35,10 +35,10 @@ pypy run_p2pool.py \
     --net $NET \
     --address $P2POOL_ADDRESS \
     --fee $P2POOL_FEE \
-    --bitcoind-rpc-username $LTC_RPC_USER \
-    --bitcoind-rpc-password $LTC_RPC_PASS \
-    --bitcoind-address $LTC_RPC_HOST \
-    --bitcoind-rpc-port $LTC_RPC_PORT \
+    --dashd-rpc-username $LTC_RPC_USER \
+    --dashd-rpc-password $LTC_RPC_PASS \
+    --dashd-address $LTC_RPC_HOST \
+    --dashd-rpc-port $LTC_RPC_PORT \
     --worker-port 9327 \
     --p2pool-port 9338 \
     --max-conns 40 \
