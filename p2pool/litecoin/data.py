@@ -49,9 +49,6 @@ from p2pool.dash.data import (
     merkle_hash,
     # Transaction types
     tx_type,
-    tx_id_type,
-    tx_in_type,
-    tx_out_type,
     # Block types  
     block_header_type,
     block_type,
@@ -72,7 +69,7 @@ __all__ = [
     'address_type',
     'target_to_average_attempts', 'target_to_difficulty', 'difficulty_to_target',
     'merkle_hash',
-    'tx_type', 'tx_id_type', 'tx_in_type', 'tx_out_type',
+    'tx_type',
     'block_header_type', 'block_type',
     'merkle_tx_type', 'merkle_link_type',
     'aux_pow_type', 'aux_pow_coinbase_type', 'make_auxpow_tree',
