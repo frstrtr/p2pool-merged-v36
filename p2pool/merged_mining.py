@@ -115,16 +115,17 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
     })
     print >>sys.stderr, '[OP_RETURN] Added P2Pool identifier to merged block: "%s"' % P2POOL_TAG
     
-    # Add P2Pool author donation output (1% of block reward)
-    # This is SEPARATE from parent chain donation
+    # Add P2Pool author donation output (ALWAYS included as blockchain marker)
+    # Even if donation_percentage=0, this output marks every block as P2Pool-mined
+    # This is equivalent to gentx_before_refhash on parent chain
     tx_outs.append({
         'value': donation_amount,
         'script': DONATION_SCRIPT,
     })
     
-    print >>sys.stderr, '[DONATION] Added P2Pool author donation to merged block: %d satoshis (%.1f%%)' % (
+    print >>sys.stderr, '[DONATION] Added P2Pool marker/donation to merged block: %d satoshis (%.1f%%)' % (
         donation_amount, donation_percentage)
-    print >>sys.stderr, '[MERGED COINBASE] Total outputs: %d (miners) + 1 (OP_RETURN) + 1 (donation) = %d' % (
+    print >>sys.stderr, '[MERGED COINBASE] Total outputs: %d (miners) + 1 (OP_RETURN) + 1 (donation marker) = %d' % (
         len(tx_outs) - 2, len(tx_outs))
     
     # If no valid outputs, create a single output to a default address

@@ -26,15 +26,17 @@ gentx_before_refhash = pack.VarStrType().pack(DONATION_SCRIPT) + \
 
 ### Merged Chain (Dogecoin) - merged_mining.py
 ```python
-def build_merged_coinbase(template, shareholders, net):
+def build_merged_coinbase(template, shareholders, net, donation_percentage):
     # Build separate coinbase for Dogecoin
-    # Includes: miner outputs + OP_RETURN + donation
+    # ALWAYS includes donation output (even if 0%) as P2Pool marker
 ```
 
 **Dogecoin coinbase includes:**
-- Miner payouts (99% of reward, distributed to shareholders)
-- OP_RETURN tag ("P2Pool merged mining" - identifies on Dogecoin blockchain)
-- P2Pool donation (1% of reward - SEPARATE from Litecoin donation)
+- Miner payouts ((100-X)% of reward, distributed to shareholders)
+- OP_RETURN tag ("P2Pool merged mining" - data-only identifier)
+- **P2Pool donation output (ALWAYS present, even if 0% - blockchain marker)**
+
+**Important:** The donation output is **ALWAYS included** in every merged block, even if `--give-author 0` is used. This serves as a permanent blockchain marker identifying the block as P2Pool-mined, equivalent to how `gentx_before_refhash` marks parent chain blocks.
 
 ## Why Two Separate Coinbases?
 
@@ -43,6 +45,8 @@ In merged mining:
 - **Dogecoin block** references Litecoin block but has DIFFERENT coinbase (merged chain)
 - Each blockchain has independent reward structures
 - Each needs its own P2Pool identification
+
+**Critical:** The P2Pool donation script is **ALWAYS included** in merged blocks (even with 0 value if `--give-author 0`). This serves as a permanent blockchain marker that identifies every block as P2Pool-mined, just like `gentx_before_refhash` does for parent chain blocks.
 
 ## Coinbase Transaction Structure
 
@@ -71,11 +75,11 @@ pypy run_p2pool.py --net litecoin --merged http://user:pass@host:port/ <address>
 # Custom donation (2.5% on both chains)
 pypy run_p2pool.py --net litecoin --merged http://user:pass@host:port/ --give-author 2.5 <address>
 
-# No donation (0% - not recommended, helps support P2Pool development)
+# No donation amount (but marker still present on both chains)
 pypy run_p2pool.py --net litecoin --merged http://user:pass@host:port/ --give-author 0 <address>
 ```
 
-**Important:** The same donation percentage applies to **BOTH** the parent chain (Litecoin) and merged chain (Dogecoin). This ensures consistent support for P2Pool development across all mined blocks.
+**Important:** The donation script output is **ALWAYS included** in merged blocks as a blockchain marker, even when `--give-author 0`. This ensures every P2Pool-mined block is permanently identifiable on the blockchain, similar to how `gentx_before_refhash` marks parent chain blocks. The same donation percentage applies to **BOTH** the parent chain (Litecoin) and merged chain (Dogecoin).
 
 ## Technical Details
 
@@ -117,11 +121,12 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
     op_return_script = '\x6a' + chr(len(P2POOL_TAG)) + P2POOL_TAG
     tx_outs.append({'value': 0, 'script': op_return_script})
     
-    # Add donation output (X% from --give-author)
+    # Add donation output (ALWAYS included as P2Pool marker, even if 0%)
+    # This ensures every block is identifiable as P2Pool-mined
     tx_outs.append({'value': donation_amount, 'script': DONATION_SCRIPT})
 ```
 
-**Key Point**: The `donation_percentage` parameter comes from `args.donation_percentage` (the `--give-author` CLI option), ensuring both chains use the same donation rate.
+**Key Point**: The donation script output is **ALWAYS included** (even with 0 value if `--give-author 0`) to serve as a permanent blockchain marker. This is equivalent to how `gentx_before_refhash` marks parent chain blocks. The `donation_percentage` parameter comes from `args.donation_percentage` (the `--give-author` CLI option), ensuring both chains use the same donation rate.
 
 ### File: `p2pool/work.py`
 Fixed critical bugs that were preventing merged mining from working:
