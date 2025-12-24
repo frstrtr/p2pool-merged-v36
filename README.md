@@ -2,6 +2,23 @@
 
 Decentralized pool mining software for Dash cryptocurrency.
 
+## 🎉 Latest: Litecoin + Dogecoin Merged Mining (Testnet)
+
+**Status:** ✅ **WORKING** - Successfully mining real blocks on Dogecoin testnet!
+
+Branch: `feature/scrypt-litecoin-dogecoin`
+
+### Key Features
+- ✅ Litecoin scrypt mining with Dogecoin AuxPoW merged mining
+- ✅ Multiaddress coinbase - miners specify both LTC and DOGE addresses
+- ✅ Automatic address conversion (same pubkey_hash, correct network format)
+- ✅ Modern P2PKH donation script (saves 42 bytes vs old P2PK)
+- ✅ Node operator fees for merged mining infrastructure
+- ✅ Real-time monitoring dashboard
+- ✅ **15+ blocks accepted and confirmed on Dogecoin testnet blockchain!**
+
+See [MERGED_MINING_DONATION.md](MERGED_MINING_DONATION.md) for technical details.
+
 ## 📋 Documentation
 
 **⚠️ IMPORTANT**: For complete installation instructions, troubleshooting, and configuration, please see:

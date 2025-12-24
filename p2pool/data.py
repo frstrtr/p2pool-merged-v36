@@ -65,7 +65,9 @@ def is_segwit_activated(version, net):
     segwit_activation_version = getattr(net, 'SEGWIT_ACTIVATION_VERSION', 0)
     return version >= segwit_activation_version and segwit_activation_version > 0
 
-DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac'.decode('hex')
+# P2PKH donation script (modern format) - Dash address: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u
+# Format: OP_DUP OP_HASH160 <20-byte pubkey_hash> OP_EQUALVERIFY OP_CHECKSIG
+DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'.decode('hex')
 def donation_script_to_address(net):
     try:
         return bitcoin_data.script2_to_address(
@@ -459,6 +461,15 @@ class BaseShare(object):
         self.header = dict(self.min_header, merkle_root=merkle_root)
         self.pow_hash = net.PARENT.POW_FUNC(bitcoin_data.block_header_type.pack(self.header))
         self.hash = self.header_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(self.header))
+        
+        # DEBUG: Print share validation info
+        import sys
+        print >>sys.stderr, '[SHARE VALIDATION DEBUG]'
+        print >>sys.stderr, '  gentx_hash:  %064x' % self.gentx_hash
+        print >>sys.stderr, '  merkle_root: %064x' % merkle_root
+        print >>sys.stderr, '  pow_hash:    %064x' % self.pow_hash
+        print >>sys.stderr, '  target:      %064x' % self.target
+        print >>sys.stderr, '  passes:      %s' % (self.pow_hash <= self.target)
         
         if self.target > net.MAX_TARGET:
             from p2pool import p2p

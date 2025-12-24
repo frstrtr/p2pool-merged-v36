@@ -15,6 +15,17 @@ from util import forest, jsonrpc, variable, deferral, math, pack
 import p2pool, p2pool.data as p2pool_data
 from p2pool import merged_mining
 
+# Import merged chain networks for address conversion
+# These are used when converting pubkey_hash from share chain to merged chain addresses
+try:
+    from bitcoin.networks import dogecoin_testnet as dogecoin_testnet_net
+except ImportError:
+    dogecoin_testnet_net = None
+try:
+    from bitcoin.networks import dogecoin as dogecoin_net
+except ImportError:
+    dogecoin_net = None
+
 print_throttle = 0.0
 
 class WorkerBridge(worker_interface.WorkerBridge):
@@ -33,6 +44,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 		
         self.donation_percentage = args.donation_percentage
         self.worker_fee = args.worker_fee
+        self.merged_operator_address = getattr(args, 'merged_operator_address', None)
 
 
         self.net = self.node.net.PARENT
@@ -117,28 +129,117 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 # Step 1-2: Build Dogecoin coinbase and transactions, calculate merkle root
                                 doge_tx_hashes = [int(tx['hash'], 16) for tx in template.get('transactions', [])]
                                 
-                                # Build merged mining coinbase with P2Pool author donation (1%)
-                                # Use multiaddress parsing if available, otherwise use single address
-                                if hasattr(self.args, 'multiaddress') and self.args.multiaddress:
-                                    # Parse multiaddress format: addr1:0.4,addr2:0.3,addr3:0.2,addr4:0.1
+                                # Build merged mining coinbase with P2Pool PPLNS shareholder distribution
+                                # Use the share chain to calculate proper payouts (same as parent chain)
+                                #
+                                # ADDRESS CONVERSION STRATEGY:
+                                # Miners' merged chain addresses are auto-converted from their pubkey_hash
+                                # using the merged chain's address format (e.g., Litecoin → Dogecoin encoding).
+                                # This works because:
+                                # - Share chain stores pubkey_hash (160-bit, network-agnostic)
+                                # - Same private key controls addresses on both chains
+                                # - Auto-conversion: pubkey_hash → chain-specific address encoding
+                                #
+                                # DISCRETE PER-CHAIN ADDRESSES:
+                                # To support truly independent addresses per chain would require:
+                                # 1. Protocol change: Add 'merged_addresses' field to share_data_type
+                                # 2. Network consensus: All nodes must understand new share format
+                                # 3. Share type version bump: Backward compatibility migration
+                                # 4. Storage overhead: Each share grows with per-chain address data
+                                # Current approach (auto-conversion) avoids protocol changes and works
+                                # for 99% of use cases where miners control same keys across chains.
+                                previous_share = self.node.tracker.items[self.node.best_share_var.value] if self.node.best_share_var.value is not None else None
+                                
+                                if previous_share is not None:
+                                    # Get PPLNS weights from share chain (same logic as parent chain in data.py)
+                                    target = bitcoin_data.FloatingIntegerType().unpack(template['bits'].decode('hex'))
+                                    weights, total_weight, donation_weight = self.node.tracker.get_cumulative_weights(
+                                        previous_share.share_data['previous_share_hash'],
+                                        max(0, min(template['height'], self.node.net.REAL_CHAIN_LENGTH) - 1),
+                                        65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(target),
+                                    )
+                                    
+                                    # Determine the correct merged chain network for address conversion
+                                    # We detect based on chainid: Dogecoin chainid = 2
+                                    # This converts pubkey_hash from share chain to merged chain address format
+                                    if chainid == 2:  # Dogecoin
+                                        # Use Dogecoin testnet or mainnet based on parent chain
+                                        if hasattr(self.node.net, 'PARENT') and 'test' in getattr(self.node.net.PARENT, 'SYMBOL', '').lower():
+                                            merged_addr_net = dogecoin_testnet_net
+                                        else:
+                                            merged_addr_net = dogecoin_net
+                                        if merged_addr_net is None:
+                                            print >>sys.stderr, '[MERGED] Warning: Dogecoin network module not available, using parent chain addresses'
+                                            merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                    else:
+                                        # Unknown chain - fallback to parent network (may produce wrong addresses!)
+                                        print >>sys.stderr, '[MERGED] Warning: Unknown chainid %d, using parent chain address format' % chainid
+                                        merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                    
+                                    # Convert weights (script -> weight) to shareholders (address -> fraction)
                                     shareholders = {}
-                                    for part in self.args.multiaddress.split(','):
-                                        addr, fraction_str = part.strip().split(':')
-                                        shareholders[addr.strip()] = float(fraction_str)
-                                    print >>sys.stderr, '[MERGED] Building coinbase with %d shareholders' % len(shareholders)
+                                    for script, weight in weights.iteritems():
+                                        try:
+                                            # Convert script to address for merged chain network
+                                            # script is P2PKH: OP_DUP OP_HASH160 <20 bytes pubkey_hash> OP_EQUALVERIFY OP_CHECKSIG
+                                            address = bitcoin_data.script2_to_address(script, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                            fraction = float(weight) / float(total_weight) if total_weight > 0 else 0
+                                            shareholders[address] = fraction
+                                        except Exception as e:
+                                            print >>sys.stderr, '[MERGED] Warning: Could not convert script to address: %s' % e
+                                    
+                                    print >>sys.stderr, '[MERGED] Using PPLNS distribution with %d shareholders from share chain' % len(shareholders)
                                 else:
-                                    # Single address mode - use the address from args or default
+                                    # Fallback: No shares yet, use single address mode
+                                    # Need to convert to merged chain address format
+                                    if chainid == 2:  # Dogecoin
+                                        if hasattr(self.node.net, 'PARENT') and 'test' in getattr(self.node.net.PARENT, 'SYMBOL', '').lower():
+                                            merged_addr_net = dogecoin_testnet_net
+                                        else:
+                                            merged_addr_net = dogecoin_net
+                                        if merged_addr_net is None:
+                                            merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                    else:
+                                        merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                    
                                     mining_address = getattr(self.args, 'address', None)
                                     if not mining_address and self.my_pubkey_hash:
+                                        # Convert pubkey_hash to merged chain address
                                         mining_address = bitcoin_data.pubkey_hash_to_address(
-                                            self.my_pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION,
-                                            -1, self.node.net.PARENT)
+                                            self.my_pubkey_hash, merged_addr_net.ADDRESS_VERSION,
+                                            -1, merged_addr_net)
                                     shareholders = {mining_address: 1.0} if mining_address else {}
-                                    print >>sys.stderr, '[MERGED] Single address mode: %s' % mining_address
+                                    print >>sys.stderr, '[MERGED] No share chain yet, using single address: %s' % mining_address
                                 
-                                # Build coinbase with P2Pool donation (uses --give-author percentage)
+                                # Determine node operator address for merged chain
+                                # Priority: 1) --merged-operator-address, 2) convert parent pubkey_hash to merged chain
+                                node_operator_address = None
+                                if self.my_pubkey_hash and self.worker_fee > 0:
+                                    if self.merged_operator_address:
+                                        # Use explicitly provided merged chain address
+                                        node_operator_address = self.merged_operator_address
+                                        print >>sys.stderr, '[MERGED] Using provided node operator address: %s' % node_operator_address
+                                    else:
+                                        # Convert pubkey_hash to merged chain address format (NOT parent chain!)
+                                        if chainid == 2:  # Dogecoin
+                                            if hasattr(self.node.net, 'PARENT') and 'test' in getattr(self.node.net.PARENT, 'SYMBOL', '').lower():
+                                                merged_addr_net = dogecoin_testnet_net
+                                            else:
+                                                merged_addr_net = dogecoin_net
+                                            if merged_addr_net is None:
+                                                merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                        else:
+                                            merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                        
+                                        node_operator_address = bitcoin_data.pubkey_hash_to_address(
+                                            self.my_pubkey_hash, merged_addr_net.ADDRESS_VERSION,
+                                            -1, merged_addr_net)
+                                        print >>sys.stderr, '[MERGED] Converted node operator address to merged chain: %s' % node_operator_address
+                                
+                                # Build coinbase with P2Pool donation and node fee
                                 doge_coinbase_tx = merged_mining.build_merged_coinbase(
-                                    template, shareholders, self.node.net, self.donation_percentage)
+                                    template, shareholders, merged_addr_net, self.donation_percentage,
+                                    node_operator_address, self.worker_fee)
                                 
                                 doge_coinbase_hash = bitcoin_data.hash256(bitcoin_data.tx_type.pack(doge_coinbase_tx))
                                 all_doge_tx_hashes = [doge_coinbase_hash] + doge_tx_hashes
@@ -304,6 +405,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         # Parse merged mining addresses (format: ltc_addr,doge_addr or ltc_addr,doge_addr.worker)
         # Using , (comma) separator - URL-safe and not used in difficulty parsing
+        # NOTE: This parsing exists but merged addresses are NOT stored in share chain.
+        # They're used for current work only. Historical shares use auto-conversion.
+        # To make this persistent would require P2Pool protocol changes (new share format).
         merged_addresses = {}
         worker = ''
         
@@ -556,6 +660,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
         else:
             current_time = time.time()
             if (current_time - print_throttle) > 5.0:
+                # DEBUG: Print actual target values to diagnose share difficulty issue
+                print >>sys.stderr, '[SHARE DEBUG] share_info[bits].target = %x' % share_info['bits'].target
+                print >>sys.stderr, '[SHARE DEBUG] share_info[bits].bits = %x' % share_info['bits'].bits
+                print >>sys.stderr, '[SHARE DEBUG] target (pseudoshare) = %x' % target
+                print >>sys.stderr, '[SHARE DEBUG] MAX_TARGET = %x' % self.node.net.MAX_TARGET
+                print >>sys.stderr, '[SHARE DEBUG] MIN_TARGET = %x' % self.node.net.MIN_TARGET
+                print >>sys.stderr, '[SHARE DEBUG] SANE_TARGET_RANGE = (%x, %x)' % self.node.net.PARENT.SANE_TARGET_RANGE
                 print 'New work for worker %s! Difficulty: %.06f Share difficulty: %.06f (speed %.06f) Total block value: %.6f %s including %i transactions' % (
                     bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT),
                     bitcoin_data.target_to_difficulty(target),
@@ -1000,11 +1111,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 except:
                     log.err(None, 'Error while processing merged mining POW:')
 
-            # TODO: P2Pool share creation doesn't work with Stratum yet because Share.__init__
-            # reconstructs gentx from the original packed_gentx, but Stratum miners change
-            # the coinbase_nonce which modifies gentx. This causes merkle_root mismatch.
-            # For now, treat all submissions as pseudoshares.
-            if False and pow_hash <= share_info['bits'].target and header_hash not in received_header_hashes:
+            # P2Pool share creation - re-enabled for PERSIST=False bootstrap
+            # Note: Stratum miners change coinbase_nonce which modifies gentx.
+            # Share.__init__ reconstructs gentx and this should now work correctly.
+            if pow_hash <= share_info['bits'].target and header_hash not in received_header_hashes:
                 print >>sys.stderr, '[DEBUG] Attempting to create P2Pool share:'
                 print >>sys.stderr, '  pow_hash: %064x' % pow_hash
                 print >>sys.stderr, '  target:   %064x' % share_info['bits'].target

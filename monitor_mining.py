@@ -17,13 +17,36 @@ DOGE_RPC_USER = "dogeuser"
 DOGE_RPC_PASS = "dogepass123"
 DOGE_RPC_URL = "http://127.0.0.1:44555/"
 P2POOL_LOG = "/tmp/p2pool_new.log"
-MINING_ADDRESS = "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h"
+
+# Mining addresses
+# Litecoin testnet (parent chain): mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
+# Dogecoin testnet (merged chain): nZj5sSzP9NSYLRBbWUTz4tConRSSeuYQvY (same pubkey_hash, different ADDRESS_VERSION)
+LTC_MINING_ADDRESS = "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h"  # Parent chain
+DOGE_MINING_ADDRESS = "nZj5sSzP9NSYLRBbWUTz4tConRSSeuYQvY"  # Merged mining payouts (NEW - correctly converted)
+
+# OLD address used before address conversion fix (Dec 24, 2024)
+# This is where historical blocks paid out (LTC address was used directly in DOGE coinbase)
+OLD_DOGE_MINING_ADDRESS = "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h"  # Historical payouts
+
+MINING_ADDRESS = DOGE_MINING_ADDRESS  # Use new correct address for blockchain scanning
+
 EXPLORER_URL = "https://blockexplorer.one/dogecoin/testnet"
 SSH_HOST = "user0@192.168.80.182"
 
-# P2Pool donation script (from merged_mining.py)
-DONATION_SCRIPT = "4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac"
-# Donation address (derived from pubkey): 1BHCtLJRhWftUQT9RZmhEBYx6QXJZbXRKL (mainnet) or testnet equivalent
+# P2Pool donation script (P2PKH format - updated Dec 2024)
+# Original P2PK (67 bytes): 4104ffd03...664bac (Forrest era)
+# New P2PKH (25 bytes): 76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac
+# Pubkey hash: 20cb5c22b1e4d5947e5c112c7696b51ad9af3c61
+# Addresses derived from this pubkey_hash:
+#   Dash mainnet:     XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u
+#   Dogecoin mainnet: D88Vn6Dyct7DKfVCfR3syHkjyNx9gEyyiv
+#   Dogecoin testnet: nXBZW6xtYrZwCe4PhEhLDhM3DFLSd1pa1R
+DONATION_SCRIPT = "76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac"
+DONATION_ADDRESS_DOGE_TESTNET = "nXBZW6xtYrZwCe4PhEhLDhM3DFLSd1pa1R"
+DONATION_ADDRESS_DOGE_MAINNET = "D88Vn6Dyct7DKfVCfR3syHkjyNx9gEyyiv"
+
+# Old P2PK script for backward compatibility (blocks mined before Dec 24, 2024)
+OLD_DONATION_SCRIPT = "4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac"
 
 # Track recent candidates
 recent_candidates = deque(maxlen=10)
@@ -61,13 +84,63 @@ def get_balance():
     """Get wallet balance"""
     return rpc_call("getbalance")
 
+def get_address_balance(address):
+    """Get balance for a specific address by scanning UTXOs"""
+    try:
+        # Use listunspent to find UTXOs for this address
+        utxos = rpc_call("listunspent", [0, 9999999, [address]])
+        if utxos:
+            return sum(u.get('amount', 0) for u in utxos)
+        return 0
+    except:
+        return None
+
+def get_received_by_address(address):
+    """Get total received by address (includes spent)"""
+    try:
+        result = rpc_call("getreceivedbyaddress", [address, 0])  # 0 confirmations
+        if result is not None:
+            return result
+        # If address not in wallet, return None (will trigger blockchain scan)
+        return None
+    except:
+        return None
+
+def scan_blockchain_for_address(address, num_blocks=100):
+    """Scan recent blocks for payments to an address (fallback for non-wallet addresses)"""
+    try:
+        current_height = get_block_count()
+        if not current_height:
+            return 0
+        
+        total_received = 0
+        blocks_with_payments = 0
+        
+        for i in range(min(num_blocks, current_height)):
+            height = current_height - i
+            block_hash = rpc_call("getblockhash", [height])
+            if not block_hash:
+                continue
+            
+            block = rpc_call("getblock", [block_hash, 2])
+            if not block:
+                continue
+            
+            # Check coinbase transaction
+            coinbase_tx = block["tx"][0]
+            for vout in coinbase_tx.get("vout", []):
+                addresses = vout.get("scriptPubKey", {}).get("addresses", [])
+                if address in addresses:
+                    total_received += vout.get("value", 0)
+                    blocks_with_payments += 1
+        
+        return total_received
+    except:
+        return 0
+
 def get_submission_stats():
     """Parse block submission statistics from P2Pool logs"""
     try:
-        # Count different submission results
-        cmd = "grep 'rpc_submitblock returned' " + P2POOL_LOG + " | sed 's/.*returned: //' | sort | uniq -c"
-        result = run_ssh_command(cmd)
-        
         stats = {
             'accepted': 0,
             'inconclusive': 0,
@@ -77,30 +150,32 @@ def get_submission_stats():
             'other': 0
         }
         
-        for line in result.split('\n'):
-            if not line.strip():
-                continue
-            try:
-                count, result_type = line.strip().split(None, 1)
-                count = int(count)
-                
-                if 'None' in result_type:
-                    stats['accepted'] = count
-                elif 'inconclusive' in result_type and 'duplicate' not in result_type:
-                    stats['inconclusive'] = count
-                elif 'duplicate-inconclusive' in result_type:
-                    stats['duplicate_inconclusive'] = count
-                elif 'duplicate' in result_type:
-                    stats['duplicate'] = count
-                elif 'bad-cb-height' in result_type:
-                    stats['bad_cb_height'] = count
-                else:
-                    stats['other'] += count
-            except:
-                continue
+        # Method 1: Count "Multiaddress merged block accepted!" messages (new format)
+        cmd_multiaddr = "grep -c 'Multiaddress merged block accepted!' " + P2POOL_LOG + " 2>/dev/null || echo 0"
+        multiaddr_accepted = int(run_ssh_command(cmd_multiaddr))
+        
+        # Method 2: Count "rpc_submitblock returned: None" (legacy format)
+        cmd_legacy = "grep -c 'rpc_submitblock returned: None' " + P2POOL_LOG + " 2>/dev/null || echo 0"
+        legacy_accepted = int(run_ssh_command(cmd_legacy))
+        
+        # Use the higher count (should not double-count as formats differ)
+        stats['accepted'] = max(multiaddr_accepted, legacy_accepted)
+        
+        # Count rejections - both multiaddress and legacy
+        cmd_inconclusive = r"grep -c 'rejected: inconclusive\|rejected.*inconclusive' " + P2POOL_LOG + " 2>/dev/null || echo 0"
+        stats['inconclusive'] = int(run_ssh_command(cmd_inconclusive))
+        
+        # Count duplicate/duplicate-inconclusive
+        cmd_duplicate = r"grep -c 'duplicate\|duplicate-inconclusive' " + P2POOL_LOG + " 2>/dev/null || echo 0"
+        dup_count = int(run_ssh_command(cmd_duplicate))
+        stats['duplicate'] = dup_count
+        
+        # Count bad-cb-height errors
+        cmd_cb = "grep -c 'bad-cb-height' " + P2POOL_LOG + " 2>/dev/null || echo 0"
+        stats['bad_cb_height'] = int(run_ssh_command(cmd_cb))
         
         return stats
-    except:
+    except Exception as e:
         return None
 
 def check_accepted_blocks_orphan_status():
@@ -148,7 +223,8 @@ def check_accepted_blocks_orphan_status():
                     # Check for donation address or 2-output pattern (our signature)
                     if len(vouts) == 2:  # Our blocks have exactly 2 outputs
                         script_hex = vout.get("scriptPubKey", {}).get("hex", "")
-                        if script_hex == DONATION_SCRIPT:
+                        # Check both new P2PKH and old P2PK donation scripts
+                        if script_hex == DONATION_SCRIPT or script_hex == OLD_DONATION_SCRIPT:
                             found_ours = True
                             break
                 
@@ -158,8 +234,8 @@ def check_accepted_blocks_orphan_status():
             except:
                 continue
         
-        # Get total accepted from logs
-        cmd_total = "grep -c 'rpc_submitblock returned: None' " + P2POOL_LOG + " 2>/dev/null || echo 0"
+        # Get total accepted from logs (both new and legacy format)
+        cmd_total = "grep -c 'Multiaddress merged block accepted!\\|rpc_submitblock returned: None' " + P2POOL_LOG + " 2>/dev/null || echo 0"
         total_accepted = int(run_ssh_command(cmd_total))
         
         orphaned = max(0, total_accepted - our_blocks_in_chain)
@@ -176,8 +252,8 @@ def check_accepted_blocks_orphan_status():
 def check_recent_accepted_blocks():
     """Check coinbase outputs of recently accepted blocks"""
     try:
-        # Find timestamps of accepted blocks
-        cmd = "grep -B10 'rpc_submitblock returned: None' " + P2POOL_LOG + " | grep 'Dogecoin block candidate' | tail -5"
+        # Find timestamps of accepted blocks (both new and legacy format)
+        cmd = r"grep -B10 'Multiaddress merged block accepted!\|rpc_submitblock returned: None' " + P2POOL_LOG + " | grep 'Dogecoin block candidate' | tail -5"
         result = run_ssh_command(cmd)
         
         blocks_info = []
@@ -334,10 +410,10 @@ def get_donation_balance(mined_blocks):
             coinbase_tx = block["tx"][0]
             vouts = coinbase_tx.get("vout", [])
             
-            # Look for outputs with our donation script
+            # Look for outputs with our donation script (both old and new)
             for vout in vouts:
                 script_hex = vout.get("scriptPubKey", {}).get("hex", "")
-                if script_hex == DONATION_SCRIPT:
+                if script_hex == DONATION_SCRIPT or script_hex == OLD_DONATION_SCRIPT:
                     donation_outputs += 1
                     donation_total += vout.get("value", 0)
         
@@ -380,21 +456,39 @@ def print_network_stats(info):
     print(f"  Chain:            {info.get('chain', 'unknown')}")
     print()
 
-def print_mining_stats(candidates, balance, local_stats, donation_info):
+def print_mining_stats(candidates, balance, local_stats, donation_info, address_balance=None, old_address_balance=None, donation_balance=None):
     """Print our mining statistics"""
     print("⛏️  MINING STATS")
     print("-" * 80)
     print(f"  Total Candidates: {candidates}")
     print(f"  Candidate Rate:   {local_stats['candidates_per_min']:.2f} per minute")
     print(f"  Network Share:    ~{local_stats['network_share']:.2f}% (estimated)")
-    print(f"  Wallet Balance:   {balance:,.1f} DOGE")
     
-    if donation_info:
-        print(f"\n  💰 P2Pool Donation Fund (last {donation_info['scanned_blocks']} blocks):")
-        print(f"     Outputs Found:  {donation_info['outputs']}")
-        print(f"     Total Donated:  {donation_info['total']:,.1f} DOGE")
+    # Show wallet balance
+    if balance is not None:
+        print(f"  Wallet Balance:   {balance:,.1f} DOGE (total)")
     else:
-        print(f"\n  💰 P2Pool Donation Fund: Scanning...")
+        print(f"  Wallet Balance:   N/A")
+    
+    # Show OLD address balance (historical blocks before fix)
+    if old_address_balance is not None and old_address_balance > 0:
+        print(f"  Old Address:      {old_address_balance:,.1f} DOGE ({OLD_DOGE_MINING_ADDRESS}) [pre-fix]")
+    
+    # Show NEW address balance (blocks after address conversion fix)
+    if address_balance is not None:
+        print(f"  New Address:      {address_balance:,.1f} DOGE ({DOGE_MINING_ADDRESS})")
+    else:
+        print(f"  New Address:      Check explorer: {EXPLORER_URL}/address/{DOGE_MINING_ADDRESS}")
+    
+    # Show P2Pool donation address balance
+    print(f"\n  💰 P2Pool Donation ({DONATION_ADDRESS_DOGE_TESTNET}):")
+    if donation_balance is not None:
+        print(f"     Balance:        {donation_balance:,.1f} DOGE")
+    else:
+        print(f"     Check:          {EXPLORER_URL}/address/{DONATION_ADDRESS_DOGE_TESTNET}")
+    
+    if donation_info and donation_info.get('outputs', 0) > 0:
+        print(f"     Recent blocks:  {donation_info['outputs']} outputs, {donation_info['total']:,.1f} DOGE")
     print()
 
 def print_submission_stats(stats, orphan_status):
@@ -406,14 +500,14 @@ def print_submission_stats(stats, orphan_status):
     else:
         total = sum(stats.values())
         print(f"  Total Submissions: {total}")
-        print(f"  ✅ Accepted:       {stats['accepted']} ({stats['accepted']*100//max(1,total)}%)")
-        print(f"  ⏱️  Too Late:        {stats['inconclusive']} ({stats['inconclusive']*100//max(1,total)}%)")
-        print(f"  🔄 Duplicate:      {stats['duplicate'] + stats['duplicate_inconclusive']}")
+        print(f"  ✅ Accepted:       {stats['accepted']} ({stats['accepted']*100//max(1,total)}%) [Multiaddress merged]")
+        print(f"  ⏱️  Too Late:        {stats['inconclusive']} ({stats['inconclusive']*100//max(1,total)}%) [Racing with network]")
+        print(f"  🔄 Duplicate:      {stats['duplicate']}")
         print(f"  ❌ Errors:         {stats['bad_cb_height'] + stats['other']}")
         
         if orphan_status and orphan_status.get('total_accepted', 0) > 0:
             print(f"\n  🔍 ORPHAN ANALYSIS (last {orphan_status['checked_blocks']} blocks scanned):")
-            print(f"     Still in Chain: {orphan_status['in_chain']} blocks (have 2 outputs + donation script)")
+            print(f"     Still in Chain: {orphan_status['in_chain']} blocks (have donation script)")
             print(f"     Orphaned:       {orphan_status['orphaned']} blocks (removed from chain)")
             print(f"     Orphan Rate:    {orphan_status['orphaned']*100//max(1,orphan_status['total_accepted'])}%")
             
@@ -484,23 +578,34 @@ def main():
                 # Calculate local mining stats
                 local_stats = calculate_local_stats(network_info)
                 
-                # Get submission statistics
+                # Get submission statistics (fast - just grep counts)
                 submission_stats = get_submission_stats()
                 
-                # Check orphan status of accepted blocks
-                orphan_status = check_accepted_blocks_orphan_status()
+                # Skip slow orphan check - too slow over SSH
+                orphan_status = None
                 
-                # Check for mined blocks (fast scan)
-                mined_blocks = check_recent_blocks(10)
+                # Skip slow mined blocks scan - too slow over SSH
+                mined_blocks = []
                 
-                # Check donation balance in our mined blocks
-                donation_info = get_donation_balance(mined_blocks)
+                # Skip slow donation scan
+                donation_info = None
+                
+                # Get balance for mining addresses (wallet lookup only - blockchain scan too slow over SSH)
+                # NEW address (after address conversion fix)
+                address_balance = get_received_by_address(DOGE_MINING_ADDRESS)
+                # Skip blockchain scan - too slow. Use explorer: https://blockexplorer.one/dogecoin/testnet/address/{address}
+                
+                # OLD address (before fix - LTC address used directly in DOGE coinbase)
+                old_address_balance = get_received_by_address(OLD_DOGE_MINING_ADDRESS)
+                
+                # Donation address balance (new P2PKH donation script)
+                donation_balance = get_received_by_address(DONATION_ADDRESS_DOGE_TESTNET)
                 
                 # Now clear and display everything at once
                 clear_screen()
                 print_header()
                 print_network_stats(network_info)
-                print_mining_stats(total_candidates, balance, local_stats, donation_info)
+                print_mining_stats(total_candidates, balance, local_stats, donation_info, address_balance, old_address_balance, donation_balance)
                 print_submission_stats(submission_stats, orphan_status)
                 print_recent_candidates(recent)
                 print_mined_blocks(mined_blocks)
