@@ -1,5 +1,8 @@
 # P2Pool Merged Mining - Dual Coinbase Structure
 
+**Status:** ✅ WORKING - Successfully mining real blocks on Dogecoin testnet!
+**Last Updated:** December 24, 2024
+
 ## Overview
 
 P2Pool merged mining requires **TWO SEPARATE coinbase transactions**:
@@ -8,6 +11,32 @@ P2Pool merged mining requires **TWO SEPARATE coinbase transactions**:
 2. **Merged Chain Coinbase** (Dogecoin) - Built by `merged_mining.py`
 
 Each chain has its own donation and OP_RETURN structure!
+
+## Recent Updates (Dec 24, 2024)
+
+### ✅ Address Conversion Fix
+- Fixed pubkey_hash → address conversion for merged mining payouts
+- Created `p2pool/bitcoin/networks/dogecoin.py` and `dogecoin_testnet.py`
+- Updated `work.py` to detect chainid=2 (Dogecoin) and use correct ADDRESS_VERSION
+- Same pubkey_hash now produces correct addresses for each network:
+  - Litecoin testnet: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h` (v111)
+  - Dogecoin testnet: `nZj5sSzP9NSYLRBbWUTz4tConRSSeuYQvY` (v113)
+
+### ✅ Donation Script Modernization
+- **Updated from P2PK (67 bytes) to P2PKH (25 bytes)** - saves 42 bytes per block!
+- Old format (Forrest era): `4104ffd03...664bac` (uncompressed pubkey)
+- New format (modern): `76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac`
+- Donation addresses derived from pubkey_hash `20cb5c22b1e4d5947e5c112c7696b51ad9af3c61`:
+  - **Dash mainnet:** `XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u`
+  - **Dogecoin mainnet:** `D88Vn6Dyct7DKfVCfR3syHkjyNx9gEyyiv`
+  - **Dogecoin testnet:** `nXBZW6xtYrZwCe4PhEhLDhM3DFLSd1pa1R` ✅ [Confirmed on-chain!](https://blockexplorer.one/dogecoin/testnet/address/nXBZW6xtYrZwCe4PhEhLDhM3DFLSd1pa1R)
+  - **Litecoin testnet:** `miWMXtNK8VeBZmnDeQ2hFSoTxEpZFbfvFp`
+
+### ✅ Monitoring Dashboard
+- Updated `monitor_mining.py` to track both old and new addresses
+- Shows donation address balance with explorer links
+- Recognizes new "Multiaddress merged block accepted!" format
+- Optimized for fast SSH operation (~4s refresh)
 
 ## Dual Coinbase Architecture
 
@@ -26,13 +55,15 @@ gentx_before_refhash = pack.VarStrType().pack(DONATION_SCRIPT) + \
 
 ### Merged Chain (Dogecoin) - merged_mining.py
 ```python
-def build_merged_coinbase(template, shareholders, net, donation_percentage):
+def build_merged_coinbase(template, shareholders, net, donation_percentage, 
+                         node_operator_address, worker_fee):
     # Build separate coinbase for Dogecoin
     # ALWAYS includes donation output (even if 0%) as P2Pool marker
 ```
 
 **Dogecoin coinbase includes:**
-- Miner payouts ((100-X)% of reward, distributed to shareholders)
+- Miner payouts (miners' share of reward, distributed to shareholders)
+- **Node operator fee (--worker-fee percentage, paid to P2Pool node runner)**
 - OP_RETURN tag ("P2Pool merged mining" - data-only identifier)
 - **P2Pool donation output (ALWAYS present, even if 0% - blockchain marker)**
 
@@ -52,20 +83,39 @@ In merged mining:
 
 ### Dogecoin Merged Block Coinbase
 ```
-Output 0:    Miner 1 - (100-X)% × (their share %)
-Output 1:    Miner 2 - (100-X)% × (their share %)
+Output 0:    Miner 1 - Miners' share × (their fraction)
+Output 1:    Miner 2 - Miners' share × (their fraction)
 ...
-Output N:    Miner N - (100-X)% × (their share %)
-Output N+1:  OP_RETURN - "P2Pool merged mining" (0 DOGE, data only)
-Output N+2:  P2Pool Donation - X% of block reward
+Output N:    Miner N - Miners' share × (their fraction)
+Output N+1:  Node Fee - Y% of block reward (if --worker-fee > 0)
+Output N+2:  OP_RETURN - "P2Pool merged mining" (0 DOGE, data only)
+Output N+3:  P2Pool Donation - X% of block reward (ALWAYS present)
+```
+
+**Reward Distribution:**
+- Miners' share = 100% - X% (donation) - Y% (node fee)
+- Each miner gets: Miners' share × their fraction
+- Node operator gets: Y% (--worker-fee, default 0.5%)
+- P2Pool author gets: X% (--give-author, default 1%)
+
+Example with single miner, --give-author 1, --worker-fee 0.5:
+```
+Output 0:    Miner address - 98.5% of block reward
+Output 1:    Node operator - 0.5% of block reward
+Output 2:    OP_RETURN - "P2Pool merged mining"
+Output 3:    P2Pool donation - 1% of block reward
+```
+
+This matches the parent chain (Litecoin) structure where node operators receive compensation for running P2Pool infrastructure.
 ```
 
 Where **X** is the donation percentage set by `--give-author` (default 1.0%)
 
 **Total:** Miners get (100-X)%, P2Pool donation gets X%, OP_RETURN marks the block
 
-## CLI Option
+## CLI Options
 
+### Donation Percentage
 The donation percentage is controlled by the `--give-author` command line option:
 
 ```bash
@@ -78,6 +128,51 @@ pypy run_p2pool.py --net litecoin --merged http://user:pass@host:port/ --give-au
 # No donation amount (but marker still present on both chains)
 pypy run_p2pool.py --net litecoin --merged http://user:pass@host:port/ --give-author 0 <address>
 ```
+
+### Node Operator Address for Merged Chain
+By default, the parent chain (Litecoin) address is converted to merged chain (Dogecoin) format using the same pubkey_hash. Optionally, you can specify a different address for the merged chain:
+
+```bash
+# Auto-convert parent address to merged chain format (default)
+pypy run_p2pool.py --net dogecoin --testnet --worker-fee 0.5 \
+  --merged http://dogeuser:pass@host:44555/ \
+  mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
+
+# Use specific Dogecoin address for merged chain node operator fee
+pypy run_p2pool.py --net dogecoin --testnet --worker-fee 0.5 \
+  --merged http://dogeuser:pass@host:44555/ \
+  --merged-operator-address nXYourDogeAddressHere123 \
+  mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
+```
+
+**When to use `--merged-operator-address`:**
+- You want different addresses for parent chain vs merged chain payouts
+- You have existing Dogecoin addresses from other mining operations
+- You prefer explicit control over each chain's payout address
+
+### Miner Addresses for Merged Chain
+Miners who connect to P2Pool provide their address in the username field. By default, the same pubkey_hash is used for both parent and merged chains, automatically converted to each chain's address format:
+
+```
+Miner connects with: mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h (Litecoin testnet)
+→ Converted to pubkey_hash: 3f26... (network-agnostic)
+→ Parent chain payout: mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h (Litecoin)
+→ Merged chain payout: nXXX... (Dogecoin, same pubkey_hash)
+```
+
+**Miners do NOT need to do anything special** - addresses are automatically converted to the merged chain format.
+
+**Advanced**: Miners can explicitly specify different addresses per chain using comma syntax:
+```
+username: ltc_address,doge_address+difficulty
+```
+**Note:** This syntax is currently parsed but NOT persisted in the share chain. Historical shares use auto-conversion. To implement truly discrete per-chain addresses would require:
+- P2Pool protocol change (add `merged_addresses` field to share data structure)
+- Network-wide consensus update (all nodes must support new share format)
+- Share type version migration (backward compatibility)
+- Increased storage overhead per share
+
+The auto-conversion approach avoids protocol changes and works for the vast majority of use cases where miners control the same private keys across chains.
 
 **Important:** The donation script output is **ALWAYS included** in merged blocks as a blockchain marker, even when `--give-author 0`. This ensures every P2Pool-mined block is permanently identifiable on the blockchain, similar to how `gentx_before_refhash` marks parent chain blocks. The same donation percentage applies to **BOTH** the parent chain (Litecoin) and merged chain (Dogecoin).
 

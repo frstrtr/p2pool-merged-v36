@@ -16,7 +16,9 @@ from p2pool import data as p2pool_data
 
 # P2Pool author donation script (1% of merged mining blocks)
 # This is SEPARATE from the parent chain donation
-DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac'.decode('hex')
+# P2PKH format - Dash address: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u
+# Format: OP_DUP OP_HASH160 <20-byte pubkey_hash> OP_EQUALVERIFY OP_CHECKSIG
+DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'.decode('hex')
 
 # P2Pool merged mining identifier for OP_RETURN
 P2POOL_TAG = 'P2Pool merged mining'
@@ -46,7 +48,7 @@ def build_coinbase_input_script(height, extradata=''):
     return script_bytes
 
 
-def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
+def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, node_operator_address=None, worker_fee=0):
     """
     Build coinbase transaction for MERGED CHAIN (Dogecoin) with multiple outputs
     
@@ -54,15 +56,25 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
     Parent chain uses gentx_before_refhash. Merged chain needs its own structure.
     
     Includes:
-    - Miner outputs (proportional to shares)
+    - Miner outputs (proportional to shares, after fees)
+    - Node operator fee (if worker_fee > 0 and node_operator_address provided)
     - OP_RETURN tag (identifies merged P2Pool blocks on Dogecoin chain)
-    - P2Pool donation (configurable %, default 1%)
+    - P2Pool donation (configurable %, always present as blockchain marker)
+    
+    ADDRESS CONVERSION:
+    Shareholder addresses are auto-converted from pubkey_hash stored in share chain.
+    This provides automatic cross-chain compatibility without protocol changes.
+    For truly discrete per-chain addresses would require P2Pool protocol modification
+    (new share format with merged_addresses field).
     
     Args:
         template: Block template from getblocktemplate (with auxpow)
         shareholders: Dict of {address: fraction} OR {address: (fraction, net_obj)}
+                     Addresses are already converted to merged chain format by caller
         net: Network object (default if shareholders don't specify network per address)
         donation_percentage: Donation percentage (0-100, default 1.0 for 1%)
+        node_operator_address: Address of P2Pool node operator (for worker_fee)
+        worker_fee: Node operator fee percentage (0-100, default 0)
     
     Returns:
         Dict representing the coinbase transaction
@@ -70,15 +82,20 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
     total_reward = template['coinbasevalue']
     height = template['height']
     
-    # Calculate donation amount from configurable percentage (same as parent chain)
+    # Calculate fees from total reward
+    # Order: donation first, then worker fee, then miners split the rest
     donation_amount = int(total_reward * donation_percentage / 100)
-    miners_reward = total_reward - donation_amount
+    worker_fee_amount = int(total_reward * worker_fee / 100) if worker_fee > 0 and node_operator_address else 0
+    miners_reward = total_reward - donation_amount - worker_fee_amount
     
-    print >>sys.stderr, '[MERGED COINBASE] Total reward: %d, Donation (%.1f%%): %d, Miners (%.1f%%): %d' % (
-        total_reward, donation_percentage, donation_amount, 100 - donation_percentage, miners_reward)
+    print >>sys.stderr, '[MERGED COINBASE] Total reward: %d satoshis' % total_reward
+    print >>sys.stderr, '[MERGED COINBASE] - Donation (%.1f%%): %d' % (donation_percentage, donation_amount)
+    print >>sys.stderr, '[MERGED COINBASE] - Node fee (%.1f%%): %d' % (worker_fee, worker_fee_amount)
+    print >>sys.stderr, '[MERGED COINBASE] - Miners (%.1f%%): %d' % (
+        100 - donation_percentage - worker_fee, miners_reward)
     print >>sys.stderr, '[MERGED COINBASE] Building for %d shareholders' % len(shareholders)
     
-    # Build outputs for each shareholder (from 99% of reward)
+    # Build outputs for each shareholder (from miners_reward after fees)
     tx_outs = []
     total_distributed = 0
     
@@ -88,7 +105,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
             fraction, addr_net = value
         else:
             fraction = value
-            addr_net = net.PARENT if hasattr(net, 'PARENT') else net
+            addr_net = net  # Use the passed merged chain network directly
         
         amount = int(miners_reward * fraction)
         total_distributed += amount
@@ -102,9 +119,23 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
                     'script': script2,
                 })
                 print >>sys.stderr, '[MINER PAYOUT] %s: %d satoshis (%.1f%% of %.1f%%)' % (
-                    address[:20] + '...', amount, fraction * 100, 100 - donation_percentage)
+                    address[:20] + '...', amount, fraction * 100, 100 - donation_percentage - worker_fee)
             except ValueError as e:
                 print >>sys.stderr, 'Warning: Failed to decode address %s: %s' % (address, e)
+    
+    # Add node operator fee output (if configured)
+    if worker_fee_amount > 0 and node_operator_address:
+        try:
+            addr_net = net  # Use the passed merged chain network directly
+            node_script = bitcoin_data.address_to_script2(node_operator_address, addr_net)
+            tx_outs.append({
+                'value': worker_fee_amount,
+                'script': node_script,
+            })
+            print >>sys.stderr, '[NODE FEE] %s: %d satoshis (%.1f%%)' % (
+                node_operator_address[:20] + '...', worker_fee_amount, worker_fee)
+        except ValueError as e:
+            print >>sys.stderr, 'Warning: Failed to decode node operator address %s: %s' % (node_operator_address, e)
     
     # Add OP_RETURN output with P2Pool identifier (0 value, data only)
     # This marks the block as P2Pool-mined on the DOGECOIN blockchain

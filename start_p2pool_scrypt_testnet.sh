@@ -1,5 +1,6 @@
 #!/bin/bash
 # Start P2Pool for Litecoin + Dogecoin Merged Mining (Testnet)
+# Updated: 2024-12-24 - Multiaddress coinbase support
 
 cd "$(dirname "$0")"
 
@@ -10,50 +11,65 @@ export LD_LIBRARY_PATH="$HOME/.local/openssl-1.1.1/lib:$LD_LIBRARY_PATH"
 # Litecoin Testnet RPC credentials
 LTC_RPC_USER="litecoinrpc"
 LTC_RPC_PASS="LTC_testnet_pass_2024_secure"
-LTC_RPC_HOST="192.168.80.182"
+LTC_RPC_HOST="127.0.0.1"
 LTC_RPC_PORT="19332"
 
 # Dogecoin Testnet RPC credentials
 DOGE_RPC_USER="dogeuser"
 DOGE_RPC_PASS="dogepass123"
-DOGE_RPC_HOST="192.168.80.182"
+DOGE_RPC_HOST="127.0.0.1"
 DOGE_RPC_PORT="44555"
 
 # P2Pool configuration
-# Litecoin testnet addresses (choose one):
-# Legacy: mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
-# P2SH-Segwit: QcVudrUyKGwqjk4KWadnXfbHgnMVHB1Lif  
-# Bech32 (native segwit): tltc1qpkcpgwl24flh35mknlsf374x8ypqv7de6esjh4
-P2POOL_ADDRESS="tltc1qpkcpgwl24flh35mknlsf374x8ypqv7de6esjh4"  # Using native segwit (best for Litecoin with MWEB)
-P2POOL_FEE="0.5"                                                 # 0.5% pool fee
-NET="litecoin_testnet"
+# For multiaddress coinbase, use LEGACY address format (pubkey_hash based)
+# The same pubkey_hash is used to derive Dogecoin addresses automatically
+# Litecoin testnet legacy: mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h (ADDRESS_VERSION=111)
+# Dogecoin testnet derived: nZj5sSzP9NSYLRBbWUTz4tConRSSeuYQvY (ADDRESS_VERSION=113)
+P2POOL_ADDRESS="mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h"  # Must use legacy for multiaddress!
+POOL_FEE="1"                                          # 1% pool fee (--give-author)
 
-# Dogecoin testnet address for merged mining: nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB
-DOGE_MERGED_ADDRESS="nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB"
-DOGE_MERGED_URL="http://${DOGE_RPC_USER}:${DOGE_RPC_PASS}@${DOGE_RPC_HOST}:${DOGE_RPC_PORT}/"
+# Node operator fee for merged mining (optional)
+# This address receives the operator fee from merged mining blocks
+MERGED_OPERATOR_ADDRESS="nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB"
+
+# Merged mining URL
+DOGE_MERGED_URL="http://${DOGE_RPC_USER}:${DOGE_RPC_PASS}@${DOGE_RPC_HOST}:${DOGE_RPC_PORT}"
+
+# Log file
+LOG_FILE="/tmp/p2pool_merged.log"
 
 echo "=== Starting P2Pool Scrypt (Litecoin + Dogecoin Merged Mining Testnet) ==="
-echo "Network: $NET"
+echo "Network: litecoin --testnet"
 echo "Litecoin Payout Address: $P2POOL_ADDRESS"
-echo "Dogecoin Merged Mining: $DOGE_MERGED_URL"
-echo "Pool Fee: $P2POOL_FEE%"
-echo "Merged Mining: ENABLED (with auxpow capability)"
+echo "Dogecoin Auto-Derived:   (same pubkey_hash converted to DOGE testnet format)"
+echo "Merged Mining URL: $DOGE_MERGED_URL"
+echo "Pool Fee: $POOL_FEE%"
+echo "Node Operator Address: $MERGED_OPERATOR_ADDRESS"
+echo "Log file: $LOG_FILE"
+echo ""
+echo "Multiaddress Coinbase Feature:"
+echo "  - Miners can specify addresses as: LTC_ADDRESS,DOGE_ADDRESS.worker"
+echo "  - If only LTC address provided, DOGE address derived automatically"
+echo "  - Example: mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.rig1"
 echo ""
 echo "NOTE: Ensure Dogecoin daemon with auxpow support is running:"
 echo "  ~/start-dogecoin-auxpow.sh ~/bin-auxpow/dogecoind -testnet -daemon"
 echo ""
 
 # Start P2Pool with Dogecoin merged mining
+# --net litecoin --testnet = Litecoin testnet
+# --address = Pool default address (legacy format required for multiaddress)
+# --merged = Merged mining RPC URL (Dogecoin)
+# --give-author = Pool fee percentage
+# -f = Fee percentage (same as --fee)
+# --merged-operator-address = Node operator receives fee from merged blocks
 pypy run_p2pool.py \
-    --net $NET \
-    --address $P2POOL_ADDRESS \
-    --fee $P2POOL_FEE \
-    --coind-address $LTC_RPC_HOST \
-    --coind-rpc-port $LTC_RPC_PORT \
-    --worker-port 9327 \
-    --p2pool-port 9338 \
-    --max-conns 40 \
-    --outgoing-conns 8 \
-    --merged $DOGE_MERGED_URL \
-    $LTC_RPC_USER $LTC_RPC_PASS \
-    "$@"
+    --net litecoin \
+    --testnet \
+    --address "$P2POOL_ADDRESS" \
+    --merged "$DOGE_MERGED_URL" \
+    --give-author "$POOL_FEE" \
+    -f "$POOL_FEE" \
+    --merged-operator-address "$MERGED_OPERATOR_ADDRESS" \
+    "$@" \
+    2>&1 | tee "$LOG_FILE"

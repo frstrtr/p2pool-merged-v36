@@ -294,6 +294,23 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         # Convert address to pubkey_hash for WorkerBridge
         my_pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(my_address, net.PARENT)
         
+        # Log merged chain operator address configuration
+        if merged_urls:
+            print
+            print 'Merged mining configuration:'
+            if args.merged_operator_address:
+                print '    Using explicit merged chain operator address: %s' % args.merged_operator_address
+            else:
+                # Convert parent address to merged chain format for display
+                try:
+                    merged_operator_addr = bitcoin_data.pubkey_hash_to_address(
+                        my_pubkey_hash, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+                    print '    Auto-converting parent address to merged chain format: %s' % merged_operator_addr
+                    print '    (You can override with --merged-operator-address <dogecoin_address>)'
+                except Exception as e:
+                    print '    Note: Could not preview merged chain address conversion: %s' % e
+            print
+        
         wb = work.WorkerBridge(node, my_pubkey_hash, args.donation_percentage,
                                merged_urls, args.worker_fee, args, pubkeys,
                                bitcoind, args.share_rate)
@@ -504,6 +521,9 @@ def run():
     parser.add_argument('--merged_addr',
         help='call createauxblock/submitauxblock on this url to get work for merged mining and use payout address (example: payout%http://ncuser:ncpass@127.0.0.1:10332/)',
         type=str, action='append', default=[], dest='merged_urls_addr')
+    parser.add_argument('--merged-operator-address',
+        help='node operator payout address for merged chain (e.g., Dogecoin address). If not provided, parent chain address will be converted to merged chain format',
+        type=str, action='store', default=None, dest='merged_operator_address')
     parser.add_argument('--coinbtext',
         help='append this text to the coinbase',
         type=str, action='append', default=[], dest='coinb_texts')
