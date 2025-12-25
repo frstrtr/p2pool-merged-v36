@@ -180,6 +180,7 @@ class BaseShare(object):
                 ('branch', pack.ListType(pack.IntType(256))),
                 ('index', pack.IntType(0)), # it will always be 0
             ])),
+            ('actual_header_merkle_root', pack.PossiblyNoneType(0, pack.IntType(256))),  # For merged mining - stores the actual mined merkle_root
         ])
         t['ref_type'] = pack.ComposedType([
             ('identifier', pack.FixedStrType(64//8)),
@@ -535,7 +536,7 @@ class BaseShare(object):
         )
         # For merged mining, use the actual mined merkle_root if provided (contains merged mining commitment)
         # Otherwise reconstruct it from gentx_hash and merkle_link (normal p2pool operation)
-        if 'actual_header_merkle_root' in contents:
+        if contents.get('actual_header_merkle_root') is not None:
             merkle_root = contents['actual_header_merkle_root']
         else:
             merkle_root = bitcoin_data.check_merkle_link(self.gentx_hash, self.share_info['segwit_data']['txid_merkle_link'] if segwit_activated else self.merkle_link)
