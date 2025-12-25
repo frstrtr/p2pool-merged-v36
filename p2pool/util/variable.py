@@ -16,7 +16,11 @@ class Event(object):
         return self.watch(func)
     def watch_weakref(self, obj, func):
         # func must not contain a reference to obj!
-        watch_id = self.watch(lambda *args: func(obj_ref(), *args))
+        def weak_callback(*args):
+            obj_strong = obj_ref()
+            if obj_strong is not None:
+                func(obj_strong, *args)
+        watch_id = self.watch(weak_callback)
         obj_ref = weakref.ref(obj, lambda _: self.unwatch(watch_id))
     def watch(self, func):
         id = self.id_generator.next()
