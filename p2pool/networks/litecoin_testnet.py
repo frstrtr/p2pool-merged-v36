@@ -10,7 +10,7 @@ IDENTIFIER = 'cca5e24ec6408b1e'.decode('hex')
 PREFIX = 'ad9614f6466a39cf'.decode('hex')
 P2P_PORT = 19338
 MIN_TARGET = 0
-MAX_TARGET = 2**256//2**20 - 1
+MAX_TARGET = 2**256//2**10 - 1  # ~10x easier, allows mining with ~100 kH/s (difficulty ~0.0625 LTC = 4 Scrypt)
 PERSIST = False
 WORKER_PORT = 19327
 BOOTSTRAP_ADDRS = 'forre.st'.split(' ')

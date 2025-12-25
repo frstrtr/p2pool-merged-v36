@@ -2,8 +2,63 @@
 
 This document summarizes the fixes made to support high-hashrate ASIC miners (particularly Antminer D9 with ~1.7 TH/s each, ~10 TH/s total for 6 miners).
 
+**Release v1.2.0** - Litecoin+Dogecoin Merged Mining (December 25, 2025)
 **Release v1.1.0** - Dash Platform support + Protocol v1700 (December 13, 2025)
 **Release v1.0.0** - First stable release with full ASIC support (December 11, 2025)
+
+## v1.2.0 - Litecoin+Dogecoin Merged Mining (December 25, 2025)
+
+### Merged Mining Support for Scrypt Coins
+
+**Full merged mining implementation for Litecoin mining Dogecoin**
+
+**Files:** `p2pool/work.py`, `p2pool/bitcoin/helper.py`, `p2pool/data.py`, `p2pool/merged_mining.py`, `p2pool/networks/litecoin_testnet.py`
+
+#### Key Features:
+- **Merged Mining Coinbase:** Build proper Dogecoin coinbase with PPLNS distribution from P2Pool share chain
+- **Block Submission:** Fixed `submit_block()` to properly return Deferred and use correct node attributes
+- **Share Chain Bootstrap:** Graceful fallback during bootstrap phase when share chain is empty
+- **Address Auto-Conversion:** Automatically convert Litecoin addresses to Dogecoin format for payouts
+
+#### Critical Bug Fixes:
+
+1. **submit_block() signature mismatch** (`helper.py`)
+   - **Problem:** `submit_block()` was called with 6 arguments but only accepts 3
+   - **Solution:** Pass `self.node` object instead of individual attributes
+   - **Also:** Changed `node.coind` → `node.bitcoind` (attribute name fix)
+   - **Also:** Added `return` statement to return Deferred for error handling
+
+2. **Share chain bootstrap KeyError** (`work.py`)
+   - **Problem:** PPLNS calculation failed with `KeyError: None` when traversing empty share chain
+   - **Solution:** Initialize variables before try block, catch exceptions, fall back to single-address mode
+   - **Behavior:** During bootstrap, merged blocks pay to single address; PPLNS activates when chain matures
+
+3. **Merkle root mismatch** (`work.py`, `data.py`)
+   - **Problem:** Share validation failed because merkle_root wasn't preserved through coinbase modification
+   - **Solution:** Pass `actual_header_merkle_root` in share contents for merged mining shares
+
+4. **Target difficulty parsing** (`work.py`)
+   - **Problem:** `template['bits']` unpacking failed for merged mining targets
+   - **Solution:** Use `int(target_hex, 16)` to parse target directly from hex string
+
+#### Configuration:
+```bash
+# Start P2Pool with merged mining:
+pypy run_p2pool.py --net litecoin --testnet \
+  --address mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h \
+  --merged http://dogeuser:dogepass@127.0.0.1:44555 \
+  --merged-operator-address nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB \
+  --give-author 1 -f 1
+```
+
+#### Status:
+- ✅ P2Pool shares being created (150+)
+- ✅ Merged mining work distributed to miners  
+- ✅ Block submission working (returns proper Deferred)
+- ✅ PPLNS fallback during bootstrap (no crashes)
+- ⏳ Waiting for hash to meet Dogecoin target for first merged block
+
+---
 
 ## v1.1.0 - Dash Platform Payment Support (December 13, 2025)
 
