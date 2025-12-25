@@ -318,6 +318,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             # NOW with actual block hash for merged mining commitment
                             parsed_target = pack.IntType(256).unpack(target_hex.decode('hex'))
                             pass  # Suppressed: print '[DEBUG] Dogecoin target from template: %064x' % parsed_target
+                            
+                            # Determine network name from chainid
+                            merged_net_name = 'Dogecoin'
+                            merged_net_symbol = 'DOGE'
+                            if chainid == 98:  # Dogecoin
+                                parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
+                                if parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower():
+                                    merged_net_name = 'Dogecoin Testnet'
+                                    merged_net_symbol = 'tDOGE'
+                            
                             self.merged_work.set(math.merge_dicts(self.merged_work.value, {chainid: dict(
                                 template=template,
                                 hash=doge_block_hash,  # CRITICAL: This hash gets embedded in Litecoin coinbase
@@ -327,6 +337,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 doge_header=doge_header,  # Save for later when building final block
                                 doge_coinbase=doge_coinbase_tx,
                                 doge_tx_hashes=all_doge_tx_hashes,
+                                merged_net_name=merged_net_name,  # Store network name for block found message
+                                merged_net_symbol=merged_net_symbol,  # Store network symbol for block found message
                             )}))
                         else:
                             # getblocktemplate succeeded but no auxpow - shouldn't happen
@@ -835,7 +847,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     if pow_hash <= header['bits'].target:
                         print
                         print '#' * 70
-                        print '### DASH BLOCK FOUND! ###'
+                        print '### PARENT NETWORK BLOCK FOUND! ###'
+                        print '### Network: %s (%s) ###' % (self.node.net.PARENT.NAME, self.node.net.PARENT.SYMBOL)
                         print '#' * 70
                         print 'Time:        %s' % time.strftime('%Y-%m-%d %H:%M:%S')
                         print 'Miner:       %s' % user
@@ -884,10 +897,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     # 2. pow_hash < both targets: Valid LTC + DOGE blocks (full win)
                     # 3. pow_hash < header['bits'].target only: Valid LTC block only
                     
-                    # Debug: log the comparison
-                    if pow_hash <= aux_work['target']:
-                        print >>sys.stderr, 'Dogecoin block candidate: pow_hash=%064x target=%064x ratio=%.2f%%' % (
-                            pow_hash, aux_work['target'], float(pow_hash) / float(aux_work['target']) * 100)
+                    # Debug: Uncomment to trace merged block candidates
+                    # if pow_hash <= aux_work['target']:
+                    #     print >>sys.stderr, 'Dogecoin block candidate: pow_hash=%064x target=%064x ratio=%.2f%%' % (
+                    #         pow_hash, aux_work['target'], float(pow_hash) / float(aux_work['target']) * 100)
                     
                     if pow_hash <= aux_work['target']:
                         # Hash meets Dogecoin difficulty - submit auxpow block
@@ -902,13 +915,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             merged_addrs = getattr(self, '_current_merged_addresses', {})
                             dogecoin_address = merged_addrs.get('dogecoin')
                             
-                            print >>sys.stderr, '[DEBUG] Building Dogecoin auxpow block'
-                            print >>sys.stderr, '[DEBUG] Litecoin pow_hash: %064x' % pow_hash
-                            print >>sys.stderr, '[DEBUG] Dogecoin target: %064x' % aux_work['target']
-                            print >>sys.stderr, '[DEBUG] Meets target: %s (%.2f%%)' % (
-                                pow_hash <= aux_work['target'],
-                                float(pow_hash) / float(aux_work['target']) * 100
-                            )
+                            # Debug: Uncomment to trace auxpow block building
+                            # print >>sys.stderr, '[DEBUG] Building Dogecoin auxpow block'
+                            # print >>sys.stderr, '[DEBUG] Litecoin pow_hash: %064x' % pow_hash
+                            # print >>sys.stderr, '[DEBUG] Dogecoin target: %064x' % aux_work['target']
+                            # print >>sys.stderr, '[DEBUG] Meets target: %s (%.2f%%)' % (
+                            #     pow_hash <= aux_work['target'],
+                            #     float(pow_hash) / float(aux_work['target']) * 100
+                            # )
                             
                             # PHASE C: Build Dogecoin block for submission using pre-calculated data
                             # Use the header and transactions we built BEFORE mining (Phase A)
@@ -921,30 +935,31 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 doge_coinbase = aux_work['doge_coinbase']
                                 doge_tx_hashes = aux_work['doge_tx_hashes']
                                 
-                                print >>sys.stderr, '[DEBUG] Using pre-built Dogecoin header from Phase A'
-                                print >>sys.stderr, '[DEBUG] Dogecoin merkle root: %064x' % doge_header['merkle_root']
-                                print >>sys.stderr, '[DEBUG] Dogecoin nonce (should be 0): %d' % doge_header['nonce']
-                                print >>sys.stderr, '[DEBUG] Dogecoin block hash from aux_work: %064x' % aux_work['hash']
+                                # Debug: Uncomment to trace Dogecoin header verification
+                                # print >>sys.stderr, '[DEBUG] Using pre-built Dogecoin header from Phase A'
+                                # print >>sys.stderr, '[DEBUG] Dogecoin merkle root: %064x' % doge_header['merkle_root']
+                                # print >>sys.stderr, '[DEBUG] Dogecoin nonce (should be 0): %d' % doge_header['nonce']
+                                # print >>sys.stderr, '[DEBUG] Dogecoin block hash from aux_work: %064x' % aux_work['hash']
                                 
                                 # Verify: Calculate what the Dogecoin block hash should be
                                 doge_header_packed_check = bitcoin_data.block_header_type.pack(doge_header)
                                 doge_block_hash_check = bitcoin_data.hash256(doge_header_packed_check)
-                                print >>sys.stderr, '[DEBUG] Dogecoin block hash (recalculated): %064x' % doge_block_hash_check
-                                print >>sys.stderr, '[DEBUG] Do they match? %s' % (doge_block_hash_check == aux_work['hash'])
+                                # print >>sys.stderr, '[DEBUG] Dogecoin block hash (recalculated): %064x' % doge_block_hash_check
+                                # print >>sys.stderr, '[DEBUG] Do they match? %s' % (doge_block_hash_check == aux_work['hash'])
                                 
                                 # DON'T update nonce - in AuxPoW, child block nonce stays 0
                                 # The actual mining work is done on the parent (Litecoin) block
                                 # doge_header['nonce'] should already be 0 from Phase A
                                 
-                                # Debug: Compare coinbase transactions
-                                print >>sys.stderr, '[DEBUG] new_gentx type: %s' % type(new_gentx)
-                                print >>sys.stderr, '[DEBUG] gentx type: %s' % type(gentx)
+                                # Debug: Uncomment to trace coinbase transaction handling
+                                # print >>sys.stderr, '[DEBUG] new_gentx type: %s' % type(new_gentx)
+                                # print >>sys.stderr, '[DEBUG] gentx type: %s' % type(gentx)
                                 # Use the DIRECT concatenation for hash (new_packed_gentx from line 595)
                                 # NOT pack(new_gentx) which may differ due to unpack/repack!
-                                print >>sys.stderr, '[DEBUG] Using direct concatenation (new_packed_gentx) for hash'
-                                print >>sys.stderr, '[DEBUG] new_packed_gentx length: %d bytes' % len(new_packed_gentx)
-                                print >>sys.stderr, '[DEBUG] packed_gentx length: %d bytes' % len(packed_gentx)
-                                print >>sys.stderr, '[DEBUG] new_packed_gentx == packed_gentx: %s' % (new_packed_gentx == packed_gentx)
+                                # print >>sys.stderr, '[DEBUG] Using direct concatenation (new_packed_gentx) for hash'
+                                # print >>sys.stderr, '[DEBUG] new_packed_gentx length: %d bytes' % len(new_packed_gentx)
+                                # print >>sys.stderr, '[DEBUG] packed_gentx length: %d bytes' % len(packed_gentx)
+                                # print >>sys.stderr, '[DEBUG] new_packed_gentx == packed_gentx: %s' % (new_packed_gentx == packed_gentx)
                                 
                                 # Calculate Litecoin coinbase hash using txid (stripped, no witness)
                                 # This matches auxpow serialization which uses tx_id_type
@@ -953,12 +968,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 
                                 # CRITICAL: Verify that tx_id_type.pack(new_gentx) produces correct hash
                                 packed_coinbase_for_auxpow = bitcoin_data.tx_id_type.pack(new_gentx)
-                                print >>sys.stderr, '[DEBUG] new_packed_gentx length: %d' % len(new_packed_gentx)
-                                print >>sys.stderr, '[DEBUG] packed_coinbase_for_auxpow length: %d' % len(packed_coinbase_for_auxpow)
-                                print >>sys.stderr, '[DEBUG] ltc_coinbase_hash (txid): %064x' % ltc_coinbase_hash
-                                
-                                print >>sys.stderr, '[DEBUG] Litecoin coinbase txid (from new_gentx): %064x' % ltc_coinbase_hash
-                                print >>sys.stderr, '[DEBUG] Litecoin coinbase txid (from gentx): %064x' % ltc_coinbase_hash_from_original
+                                # Debug: Uncomment to trace coinbase hash calculation
+                                # print >>sys.stderr, '[DEBUG] new_packed_gentx length: %d' % len(new_packed_gentx)
+                                # print >>sys.stderr, '[DEBUG] packed_coinbase_for_auxpow length: %d' % len(packed_coinbase_for_auxpow)
+                                # print >>sys.stderr, '[DEBUG] ltc_coinbase_hash (txid): %064x' % ltc_coinbase_hash
+                                # print >>sys.stderr, '[DEBUG] Litecoin coinbase txid (from new_gentx): %064x' % ltc_coinbase_hash
+                                # print >>sys.stderr, '[DEBUG] Litecoin coinbase txid (from gentx): %064x' % ltc_coinbase_hash_from_original
                                 
                                 # Build the ACTUAL Litecoin block's transaction list
                                 # This is what gets submitted to the Litecoin network (see line 627)
@@ -970,44 +985,47 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 # Calculate the REAL Litecoin block's merkle root
                                 ltc_block_merkle_root = bitcoin_data.merkle_hash(ltc_tx_hashes)
                                 
-                                print >>sys.stderr, '[DEBUG] Litecoin block has %d transactions' % len(ltc_tx_list)
-                                print >>sys.stderr, '[DEBUG] Litecoin block merkle root (calculated): %064x' % ltc_block_merkle_root
-                                print >>sys.stderr, '[DEBUG] P2Pool share merkle root (from header): %064x' % header['merkle_root']
-                                print >>sys.stderr, '[DEBUG] Are they the same? %s' % (ltc_block_merkle_root == header['merkle_root'])
+                                # Debug: Uncomment to trace merkle root calculation
+                                # print >>sys.stderr, '[DEBUG] Litecoin block has %d transactions' % len(ltc_tx_list)
+                                # print >>sys.stderr, '[DEBUG] Litecoin block merkle root (calculated): %064x' % ltc_block_merkle_root
+                                # print >>sys.stderr, '[DEBUG] P2Pool share merkle root (from header): %064x' % header['merkle_root']
+                                # print >>sys.stderr, '[DEBUG] Are they the same? %s' % (ltc_block_merkle_root == header['merkle_root'])
                                 
                                 # CRITICAL: Use ba['merkle_link'] which was saved when this job was created!
                                 # The miner's header merkle_root was computed using ba['merkle_link']
                                 # NOT the current merkle_link (which may have changed)
                                 ltc_coinbase_merkle_branch = ba['merkle_link']
                                 
-                                print >>sys.stderr, '[DEBUG] Using ba[merkle_link] from job (branch length: %d)' % len(ltc_coinbase_merkle_branch['branch'])
+                                # Debug: Uncomment to trace merkle link verification
+                                # print >>sys.stderr, '[DEBUG] Using ba[merkle_link] from job (branch length: %d)' % len(ltc_coinbase_merkle_branch['branch'])
                                 
                                 # Verify: coinbase_hash + ba['merkle_link'] should equal header['merkle_root']
                                 calculated_root = bitcoin_data.check_merkle_link(ltc_coinbase_hash, ltc_coinbase_merkle_branch)
-                                print >>sys.stderr, '[DEBUG] Calculated merkle root from ba[merkle_link]: %064x' % calculated_root
-                                print >>sys.stderr, '[DEBUG] Header merkle root: %064x' % header['merkle_root']
-                                print >>sys.stderr, '[DEBUG] Do they MATCH? %s' % (calculated_root == header['merkle_root'])
+                                # print >>sys.stderr, '[DEBUG] Calculated merkle root from ba[merkle_link]: %064x' % calculated_root
+                                # print >>sys.stderr, '[DEBUG] Header merkle root: %064x' % header['merkle_root']
+                                # print >>sys.stderr, '[DEBUG] Do they MATCH? %s' % (calculated_root == header['merkle_root'])
                                 
                                 # Use the header as-is - merkle_root should match ba['merkle_link']
                                 litecoin_header_for_auxpow = header.copy()
                                 
-                                print >>sys.stderr, '[DEBUG] Litecoin auxpow header merkle_root: %064x' % litecoin_header_for_auxpow['merkle_root']
-                                print >>sys.stderr, '[DEBUG] Merkle roots match coinbase branch? %s' % (header['merkle_root'] == calculated_root)
+                                # print >>sys.stderr, '[DEBUG] Litecoin auxpow header merkle_root: %064x' % litecoin_header_for_auxpow['merkle_root']
+                                # print >>sys.stderr, '[DEBUG] Merkle roots match coinbase branch? %s' % (header['merkle_root'] == calculated_root)
                                 
                                 # Calculate the auxiliary chain merkle link
                                 # This is the merkle branch from the Dogecoin block hash to the aux merkle root
                                 # The aux merkle root is embedded in the Litecoin coinbase
                                 aux_merkle_link = bitcoin_data.calculate_merkle_link(hashes, index)
                                 
-                                print >>sys.stderr, '[DEBUG] Aux merkle link: index=%d, branch_length=%d' % (index, len(aux_merkle_link['branch']))
-                                print >>sys.stderr, '[DEBUG] Aux merkle hashes tree size: %d' % len(hashes)
-                                for i, h in enumerate(hashes):
-                                    print >>sys.stderr, '[DEBUG]   hashes[%d] = %064x' % (i, h)
+                                # Debug: Uncomment to trace aux merkle link calculation
+                                # print >>sys.stderr, '[DEBUG] Aux merkle link: index=%d, branch_length=%d' % (index, len(aux_merkle_link['branch']))
+                                # print >>sys.stderr, '[DEBUG] Aux merkle hashes tree size: %d' % len(hashes)
+                                # for i, h in enumerate(hashes):
+                                #     print >>sys.stderr, '[DEBUG]   hashes[%d] = %064x' % (i, h)
                                 
                                 # Verify the aux merkle link leads to the correct root
                                 aux_merkle_root_check = bitcoin_data.check_merkle_link(aux_work['hash'], aux_merkle_link)
-                                print >>sys.stderr, '[DEBUG] Aux merkle root (from link): %064x' % aux_merkle_root_check
-                                print >>sys.stderr, '[DEBUG] Aux merkle root (expected): %064x' % bitcoin_data.merkle_hash(hashes)
+                                # print >>sys.stderr, '[DEBUG] Aux merkle root (from link): %064x' % aux_merkle_root_check
+                                # print >>sys.stderr, '[DEBUG] Aux merkle root (expected): %064x' % bitcoin_data.merkle_hash(hashes)
                                 
                                 # Reconstruct Dogecoin block using pre-built header and transactions
                                 # The doge_coinbase and transactions were locked in during Phase A
@@ -1047,52 +1065,52 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 # because CBlock serialization includes auxpow in the header section
                                 header_packed = bitcoin_data.block_header_type.pack(merged_block['header'])
                                 
-                                # Debug: Check Dogecoin block header bits vs our comparison
-                                doge_header_target = merged_block['header']['bits'].target
-                                doge_version = merged_block['header']['version']
-                                print >>sys.stderr, 'Dogecoin block version=0x%x (auxpow bit set: %s)' % (
-                                    doge_version, 
-                                    'YES' if (doge_version & 0x100) else 'NO'
-                                )
-                                print >>sys.stderr, 'Dogecoin block header bits.target=%064x' % doge_header_target
-                                print >>sys.stderr, 'aux_work target=%064x' % aux_work['target']
-                                print >>sys.stderr, 'Litecoin POW hash=%064x' % pow_hash
-                                # Use integer division to avoid float overflow
-                                ratio_pct = (pow_hash * 100) // doge_header_target if doge_header_target > 0 else 0
-                                print >>sys.stderr, 'Does LTC hash meet DOGE header target? %s (ratio=%d%%)' % (
-                                    pow_hash <= doge_header_target,
-                                    ratio_pct
-                                )
+                                # Debug: Uncomment to trace Dogecoin block header target verification
+                                # doge_header_target = merged_block['header']['bits'].target
+                                # doge_version = merged_block['header']['version']
+                                # print >>sys.stderr, 'Dogecoin block version=0x%x (auxpow bit set: %s)' % (
+                                #     doge_version, 
+                                #     'YES' if (doge_version & 0x100) else 'NO'
+                                # )
+                                # print >>sys.stderr, 'Dogecoin block header bits.target=%064x' % doge_header_target
+                                # print >>sys.stderr, 'aux_work target=%064x' % aux_work['target']
+                                # print >>sys.stderr, 'Litecoin POW hash=%064x' % pow_hash
+                                # # Use integer division to avoid float overflow
+                                # ratio_pct = (pow_hash * 100) // doge_header_target if doge_header_target > 0 else 0
+                                # print >>sys.stderr, 'Does LTC hash meet DOGE header target? %s (ratio=%d%%)' % (
+                                #     pow_hash <= doge_header_target,
+                                #     ratio_pct
+                                # )
                                 
                                 # Debug: Show Litecoin header details
                                 ltc_header_packed = bitcoin_data.block_header_type.pack(litecoin_header_for_auxpow)
                                 ltc_header_hash_from_packed = self.node.net.PARENT.POW_FUNC(ltc_header_packed)
-                                print >>sys.stderr, '[DEBUG] Litecoin header in auxpow:'
-                                print >>sys.stderr, '[DEBUG]   version: 0x%08x' % litecoin_header_for_auxpow['version']
-                                print >>sys.stderr, '[DEBUG]   previous_block: %064x' % litecoin_header_for_auxpow['previous_block']
-                                print >>sys.stderr, '[DEBUG]   merkle_root: %064x' % litecoin_header_for_auxpow['merkle_root']
-                                print >>sys.stderr, '[DEBUG]   timestamp: %d' % litecoin_header_for_auxpow['timestamp']
-                                print >>sys.stderr, '[DEBUG]   bits: 0x%08x' % litecoin_header_for_auxpow['bits'].bits
-                                print >>sys.stderr, '[DEBUG]   nonce: 0x%08x' % litecoin_header_for_auxpow['nonce']
-                                print >>sys.stderr, '[DEBUG]   POW hash (recalculated): %064x' % ltc_header_hash_from_packed
-                                print >>sys.stderr, '[DEBUG]   POW hash (original): %064x' % pow_hash
-                                print >>sys.stderr, '[DEBUG]   Do they match? %s' % (ltc_header_hash_from_packed == pow_hash)
+                                # Debug: Uncomment to trace Litecoin header in auxpow
+                                # print >>sys.stderr, '[DEBUG] Litecoin header in auxpow:'
+                                # print >>sys.stderr, '[DEBUG]   version: 0x%08x' % litecoin_header_for_auxpow['version']
+                                # print >>sys.stderr, '[DEBUG]   previous_block: %064x' % litecoin_header_for_auxpow['previous_block']
+                                # print >>sys.stderr, '[DEBUG]   merkle_root: %064x' % litecoin_header_for_auxpow['merkle_root']
+                                # print >>sys.stderr, '[DEBUG]   timestamp: %d' % litecoin_header_for_auxpow['timestamp']
+                                # print >>sys.stderr, '[DEBUG]   bits: 0x%08x' % litecoin_header_for_auxpow['bits'].bits
+                                # print >>sys.stderr, '[DEBUG]   nonce: 0x%08x' % litecoin_header_for_auxpow['nonce']
+                                # print >>sys.stderr, '[DEBUG]   POW hash (recalculated): %064x' % ltc_header_hash_from_packed
+                                # print >>sys.stderr, '[DEBUG]   POW hash (original): %064x' % pow_hash
+                                # print >>sys.stderr, '[DEBUG]   Do they match? %s' % (ltc_header_hash_from_packed == pow_hash)
                                 
                                 auxpow_packed = bitcoin_data.aux_pow_type.pack(auxpow)
                                 
-                                # DEBUG: What coinbase hash does the packed auxpow produce?
-                                # Extract the coinbase tx from the packed auxpow
-                                packed_coinbase_in_auxpow = bitcoin_data.tx_id_type.pack(new_gentx)
-                                coinbase_hash_from_auxpow = bitcoin_data.hash256(packed_coinbase_in_auxpow)
-                                print >>sys.stderr, '[DEBUG] Coinbase hash (from new_packed_gentx): %064x' % ltc_coinbase_hash
-                                print >>sys.stderr, '[DEBUG] Coinbase hash (from tx_id_type.pack): %064x' % coinbase_hash_from_auxpow
-                                print >>sys.stderr, '[DEBUG] Do auxpow coinbase hashes match? %s' % (ltc_coinbase_hash == coinbase_hash_from_auxpow)
-                                print >>sys.stderr, '[DEBUG] packed_coinbase_in_auxpow length: %d' % len(packed_coinbase_in_auxpow)
-                                print >>sys.stderr, '[DEBUG] new_packed_gentx length: %d' % len(new_packed_gentx)
-                                if packed_coinbase_in_auxpow != new_packed_gentx:
-                                    print >>sys.stderr, '[ERROR] Coinbase bytes MISMATCH in auxpow!'
-                                    print >>sys.stderr, '[DEBUG] tx_id_type.pack(new_gentx)[:100]: %s' % packed_coinbase_in_auxpow[:100].encode('hex')
-                                    print >>sys.stderr, '[DEBUG] new_packed_gentx[:100]: %s' % new_packed_gentx[:100].encode('hex')
+                                # Debug: Uncomment to trace coinbase hash in auxpow
+                                # packed_coinbase_in_auxpow = bitcoin_data.tx_id_type.pack(new_gentx)
+                                # coinbase_hash_from_auxpow = bitcoin_data.hash256(packed_coinbase_in_auxpow)
+                                # print >>sys.stderr, '[DEBUG] Coinbase hash (from new_packed_gentx): %064x' % ltc_coinbase_hash
+                                # print >>sys.stderr, '[DEBUG] Coinbase hash (from tx_id_type.pack): %064x' % coinbase_hash_from_auxpow
+                                # print >>sys.stderr, '[DEBUG] Do auxpow coinbase hashes match? %s' % (ltc_coinbase_hash == coinbase_hash_from_auxpow)
+                                # print >>sys.stderr, '[DEBUG] packed_coinbase_in_auxpow length: %d' % len(packed_coinbase_in_auxpow)
+                                # print >>sys.stderr, '[DEBUG] new_packed_gentx length: %d' % len(new_packed_gentx)
+                                # if packed_coinbase_in_auxpow != new_packed_gentx:
+                                #     print >>sys.stderr, '[ERROR] Coinbase bytes MISMATCH in auxpow!'
+                                #     print >>sys.stderr, '[DEBUG] tx_id_type.pack(new_gentx)[:100]: %s' % packed_coinbase_in_auxpow[:100].encode('hex')
+                                #     print >>sys.stderr, '[DEBUG] new_packed_gentx[:100]: %s' % new_packed_gentx[:100].encode('hex')
                                 
                                 # Pack transactions
                                 import StringIO
@@ -1104,54 +1122,67 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 complete_block = header_packed + auxpow_packed + txs_packed
                                 complete_block_hex = complete_block.encode('hex')
                                 
-                                # Debug: Show what we're submitting
-                                print >>sys.stderr, 'Submitting Dogecoin auxpow block:'
-                                print >>sys.stderr, '  Block hex length: %d bytes' % len(complete_block)
-                                print >>sys.stderr, '  Header (first 80 bytes): %s' % complete_block[:80].encode('hex')
-                                print >>sys.stderr, '  Bits field in header (bytes 72-76): %s' % complete_block[72:76].encode('hex')
-                                print >>sys.stderr, '  Parent header nonce in auxpow: 0x%08x' % header['nonce']
-                                
-                                # Decode bits to verify
-                                import struct
-                                bits_packed = struct.unpack('<I', complete_block[72:76])[0]
-                                print >>sys.stderr, '  Bits as uint32 (little-endian): 0x%08x' % bits_packed
-                                
-                                # Dump auxpow structure for debugging
-                                print >>sys.stderr, '  [DEBUG] Full block hex (for manual decode):'
-                                print >>sys.stderr, '  %s' % complete_block_hex
-                                print >>sys.stderr, '  [DEBUG] Auxpow packed length: %d bytes' % len(auxpow_packed)
-                                print >>sys.stderr, '  [DEBUG] Auxpow hex: %s' % auxpow_packed.encode('hex')
+                                # Debug: Uncomment to trace block submission details
+                                # print >>sys.stderr, 'Submitting Dogecoin auxpow block:'
+                                # print >>sys.stderr, '  Block hex length: %d bytes' % len(complete_block)
+                                # print >>sys.stderr, '  Header (first 80 bytes): %s' % complete_block[:80].encode('hex')
+                                # print >>sys.stderr, '  Bits field in header (bytes 72-76): %s' % complete_block[72:76].encode('hex')
+                                # print >>sys.stderr, '  Parent header nonce in auxpow: 0x%08x' % header['nonce']
+                                # import struct
+                                # bits_packed = struct.unpack('<I', complete_block[72:76])[0]
+                                # print >>sys.stderr, '  Bits as uint32 (little-endian): 0x%08x' % bits_packed
+                                # print >>sys.stderr, '  [DEBUG] Full block hex (for manual decode):'
+                                # print >>sys.stderr, '  %s' % complete_block_hex
+                                # print >>sys.stderr, '  [DEBUG] Auxpow packed length: %d bytes' % len(auxpow_packed)
+                                # print >>sys.stderr, '  [DEBUG] Auxpow hex: %s' % auxpow_packed.encode('hex')
                                 
                                 # Compare parent header in auxpow with what we hashed
                                 parent_header_in_auxpow = bitcoin_data.block_header_type.pack(header).encode('hex')
                                 if hasattr(self, '_last_hashed_header_hex'):
                                     if parent_header_in_auxpow == self._last_hashed_header_hex:
-                                        print >>sys.stderr, '  [OK] Parent header matches hashed header'
+                                        pass  # Debug: Uncomment to verify - print >>sys.stderr, '  [OK] Parent header matches hashed header'
                                     else:
                                         print >>sys.stderr, '  [ERROR] Parent header MISMATCH!'
                                         print >>sys.stderr, '    Hashed:  %s' % self._last_hashed_header_hex
                                         print >>sys.stderr, '    In aux:  %s' % parent_header_in_auxpow
                                 
                                 # Submit via submitblock (modified Dogecoin with getblocktemplate auxpow support)
-                                print 'Submitting multiaddress merged block via submitblock...'
-                                print 'Block size: %d bytes (header + auxpow + %d txs)' % (len(complete_block), len(merged_block['txs']))
-                                print '[DEBUG] About to call rpc_submitblock with %d byte hex string' % (len(complete_block_hex),)
-                                print '[DEBUG] Block hex (first 200 chars): %s...' % (complete_block_hex[:200],)
+                                # Debug: Uncomment to trace submission
+                                # print 'Submitting multiaddress merged block via submitblock...'
+                                # print 'Block size: %d bytes (header + auxpow + %d txs)' % (len(complete_block), len(merged_block['txs']))
+                                # print '[DEBUG] About to call rpc_submitblock with %d byte hex string' % (len(complete_block_hex),)
+                                # print '[DEBUG] Block hex (first 200 chars): %s...' % (complete_block_hex[:200],)
                                 df = deferral.retry('Error submitting multiaddress merged block: (will retry)', 10, 10)(
                                     aux_work['merged_proxy'].rpc_submitblock
                                 )(complete_block_hex)
                                 
                                 @df.addCallback
                                 def _(result, aux_work=aux_work):
-                                    print '[DEBUG] rpc_submitblock returned: %r (type: %s)' % (result, type(result))
+                                    # Debug: Uncomment to trace RPC result - print '[DEBUG] rpc_submitblock returned: %r (type: %s)' % (result, type(result))
                                     if result is None or result == True:
-                                        print 'Multiaddress merged block accepted!'
+                                        print
+                                        print '#' * 70
+                                        print '### MERGED NETWORK BLOCK FOUND! ###'
+                                        # Get merged network info from aux_work
+                                        merged_net_name = aux_work.get('merged_net_name', 'Unknown')
+                                        merged_net_symbol = aux_work.get('merged_net_symbol', 'UNKNOWN')
+                                        print '### Network: %s (%s) ###' % (merged_net_name, merged_net_symbol)
+                                        print '#' * 70
+                                        print 'Time:        %s' % time.strftime('%Y-%m-%d %H:%M:%S')
+                                        print 'Miner:       %s' % user
+                                        print 'Block hash:  %064x' % aux_work['hash']
+                                        print 'POW hash:    %064x' % pow_hash
+                                        print 'Target:      %064x' % aux_work['target']
+                                        print 'Txs:         %d' % len(merged_block['txs'])
+                                        print 'Block size:  %d bytes' % len(complete_block)
+                                        print '#' * 70
+                                        print
                                     else:
                                         print >>sys.stderr, 'Multiaddress merged block rejected: %s' % (result,)
                                 
                                 @df.addErrback
                                 def _(err):
-                                    print >>sys.stderr, '[DEBUG] rpc_submitblock raised error: %s' % (err,)
+                                    # Debug: Uncomment to trace RPC errors - print >>sys.stderr, '[DEBUG] rpc_submitblock raised error: %s' % (err,)
                                     log.err(err, 'Error submitting multiaddress merged block:')
                                     
                             except Exception as e:
