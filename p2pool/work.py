@@ -443,7 +443,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
         print " Next address rotation in : %fs" % (time.time()-c+self.args.timeaddresses)
 
     def get_user_details(self, username):
-        print '[DEBUG] get_user_details called with username:', repr(username)
+        # Debug: Uncomment to trace user details lookup
+        #print '[DEBUG] get_user_details called with username:', repr(username)
         contents = re.split('([+/])', username)
         assert len(contents) % 2 == 1
 
@@ -469,7 +470,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 elif '_' in merged_addr:
                     merged_addr, worker = merged_addr.split('_', 1)
                 merged_addresses['dogecoin'] = merged_addr
-                print '[DEBUG] Using miner dogecoin address:', merged_addr
+                # Debug: Uncomment to trace merged address usage
+                #print '[DEBUG] Using miner dogecoin address:', merged_addr
         
         # Parse worker name from primary address if not already set
         if not worker:
@@ -519,16 +521,18 @@ class WorkerBridge(worker_interface.WorkerBridge):
         if worker:
             user = user + '.' + worker
 
-        print '[DEBUG] get_user_details returning: user=%r, merged_addresses=%r' % (user, merged_addresses)
+        # Debug: Uncomment to trace user details processing
+        #print '[DEBUG] get_user_details returning: user=%r, merged_addresses=%r' % (user, merged_addresses)
         return user, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses
 
     def preprocess_request(self, user):
-        print '[DEBUG] preprocess_request called with user:', repr(user)
+        # Debug: Uncomment to trace preprocess flow
+        #print '[DEBUG] preprocess_request called with user:', repr(user)
         # Removed peer connection check - allow solo mining
         if time.time() > self.current_work.value['last_update'] + 60:
             raise jsonrpc.Error_for_code(-12345)(u'lost contact with coind')
         username, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses = self.get_user_details(user)
-        print '[DEBUG] preprocess_request returning 5 values: username=%r' % (username,)
+        #print '[DEBUG] preprocess_request returning 5 values: username=%r' % (username,)
         return username, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses
 
     def _estimate_local_hash_rate(self):
@@ -556,7 +560,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
         return addr_hash_rates
 
     def get_work(self, user, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses=None):
-        print '[DEBUG] get_work called with user=%r, merged_addresses=%r' % (user, merged_addresses)
+        # Debug: Uncomment to trace get_work calls
+        #print '[DEBUG] get_work called with user=%r, merged_addresses=%r' % (user, merged_addresses)
         global print_throttle
         t0 = time.time()  # Benchmarking start
         
