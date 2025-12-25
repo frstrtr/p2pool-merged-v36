@@ -651,25 +651,35 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     )
 
         if True:
+            # Build share_data differently based on share version
+            # VERSION >= 34 uses 'address' (string), VERSION < 34 uses 'pubkey_hash' (int)
+            share_data_base = dict(
+                previous_share_hash=self.node.best_share_var.value,
+                coinbase=(script.create_push_script([
+                    self.current_work.value['height'],
+                    ] + ([mm_data] if mm_data else []) + [
+                ]) + self.current_work.value['coinbaseflags'] + getattr(self.node.net, 'COINBASEEXT', b''))[:100],
+                nonce=random.randrange(2**32),
+                subsidy=self.current_work.value['subsidy'],
+                donation=math.perfect_round(65535*self.donation_percentage/100),
+                stale_info=(lambda (orphans, doas), total, (orphans_recorded_in_chain, doas_recorded_in_chain):
+                    'orphan' if orphans > orphans_recorded_in_chain else
+                    'doa' if doas > doas_recorded_in_chain else
+                    None
+                )(*self.get_stale_counts()),
+                desired_version=(share_type.SUCCESSOR if share_type.SUCCESSOR is not None else share_type).VOTING_VERSION,
+            )
+            
+            if share_type.VERSION >= 34:
+                # Newer share versions use 'address' as a string
+                share_data_base['address'] = bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT)
+            else:
+                # Older share versions use 'pubkey_hash' as an integer  
+                share_data_base['pubkey_hash'] = pubkey_hash
+            
             share_info, gentx, other_transaction_hashes, get_share = share_type.generate_transaction(
                 tracker=self.node.tracker,
-                share_data=dict(
-                    previous_share_hash=self.node.best_share_var.value,
-                    coinbase=(script.create_push_script([
-                        self.current_work.value['height'],
-                        ] + ([mm_data] if mm_data else []) + [
-                    ]) + self.current_work.value['coinbaseflags'] + getattr(self.node.net, 'COINBASEEXT', b''))[:100],
-                    nonce=random.randrange(2**32),
-                    pubkey_hash=pubkey_hash,
-                    subsidy=self.current_work.value['subsidy'],
-                    donation=math.perfect_round(65535*self.donation_percentage/100),
-                    stale_info=(lambda (orphans, doas), total, (orphans_recorded_in_chain, doas_recorded_in_chain):
-                        'orphan' if orphans > orphans_recorded_in_chain else
-                        'doa' if doas > doas_recorded_in_chain else
-                        None
-                    )(*self.get_stale_counts()),
-                    desired_version=(share_type.SUCCESSOR if share_type.SUCCESSOR is not None else share_type).VOTING_VERSION,
-                ),
+                share_data=share_data_base,
                 block_target=self.current_work.value['bits'].target,
                 desired_timestamp=int(time.time() + 0.5),
                 desired_target=desired_share_target,
