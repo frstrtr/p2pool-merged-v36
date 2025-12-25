@@ -49,28 +49,29 @@ def prefix_to_hash_link(prefix, const_ending=''):
     return dict(state=x.state, extra_data=extra_data, length=x.length//8)
 
 def check_hash_link(hash_link, data, const_ending=''):
-    import sys
-    print >>sys.stderr, '[CHECK_HASH_LINK] hash_link[length]: %d' % hash_link['length']
-    print >>sys.stderr, '[CHECK_HASH_LINK] hash_link[state]: %s (len=%d)' % (hash_link['state'].encode('hex'), len(hash_link['state']))
-    print >>sys.stderr, '[CHECK_HASH_LINK] hash_link[extra_data]: %s (len=%d)' % (hash_link['extra_data'].encode('hex'), len(hash_link['extra_data']))
-    print >>sys.stderr, '[CHECK_HASH_LINK] data: %s (len=%d)' % (data.encode('hex'), len(data))
-    print >>sys.stderr, '[CHECK_HASH_LINK] const_ending: %s (len=%d)' % (const_ending.encode('hex'), len(const_ending))
+    # Debug: Uncomment to trace hash_link validation (confirmed working)
+    # import sys
+    # print >>sys.stderr, '[CHECK_HASH_LINK] hash_link[length]: %d' % hash_link['length']
+    # print >>sys.stderr, '[CHECK_HASH_LINK] hash_link[state]: %s (len=%d)' % (hash_link['state'].encode('hex'), len(hash_link['state']))
+    # print >>sys.stderr, '[CHECK_HASH_LINK] hash_link[extra_data]: %s (len=%d)' % (hash_link['extra_data'].encode('hex'), len(hash_link['extra_data']))
+    # print >>sys.stderr, '[CHECK_HASH_LINK] data: %s (len=%d)' % (data.encode('hex'), len(data))
+    # print >>sys.stderr, '[CHECK_HASH_LINK] const_ending: %s (len=%d)' % (const_ending.encode('hex'), len(const_ending))
     
     extra_length = hash_link['length'] % (512//8)
     assert len(hash_link['extra_data']) == max(0, extra_length - len(const_ending))
     extra = (hash_link['extra_data'] + const_ending)[len(hash_link['extra_data']) + len(const_ending) - extra_length:]
     assert len(extra) == extra_length
     
-    print >>sys.stderr, '[CHECK_HASH_LINK] extra_length: %d' % extra_length
-    print >>sys.stderr, '[CHECK_HASH_LINK] extra: %s' % extra.encode('hex')
-    print >>sys.stderr, '[CHECK_HASH_LINK] About to reconstruct hash with:'
-    print >>sys.stderr, '[CHECK_HASH_LINK]   state: %s' % hash_link['state'].encode('hex')
-    print >>sys.stderr, '[CHECK_HASH_LINK]   extra: %s' % extra.encode('hex')
-    print >>sys.stderr, '[CHECK_HASH_LINK]   length*8: %d' % (8*hash_link['length'])
-    print >>sys.stderr, '[CHECK_HASH_LINK]   data to hash: %s' % data.encode('hex')
+    # print >>sys.stderr, '[CHECK_HASH_LINK] extra_length: %d' % extra_length
+    # print >>sys.stderr, '[CHECK_HASH_LINK] extra: %s' % extra.encode('hex')
+    # print >>sys.stderr, '[CHECK_HASH_LINK] About to reconstruct hash with:'
+    # print >>sys.stderr, '[CHECK_HASH_LINK]   state: %s' % hash_link['state'].encode('hex')
+    # print >>sys.stderr, '[CHECK_HASH_LINK]   extra: %s' % extra.encode('hex')
+    # print >>sys.stderr, '[CHECK_HASH_LINK]   length*8: %d' % (8*hash_link['length'])
+    # print >>sys.stderr, '[CHECK_HASH_LINK]   data to hash: %s' % data.encode('hex')
     
     result = pack.IntType(256).unpack(hashlib.sha256(sha256.sha256(data, (hash_link['state'], extra, 8*hash_link['length'])).digest()).digest())
-    print >>sys.stderr, '[CHECK_HASH_LINK] Reconstructed gentx_hash: %064x' % result
+    # print >>sys.stderr, '[CHECK_HASH_LINK] Reconstructed gentx_hash: %064x' % result
     return result
 
 # shares
@@ -370,16 +371,16 @@ class BaseShare(object):
                         ) for addr in dests if amounts[addr] and addr != donation_address]
         payouts.append({'script': DONATION_SCRIPT, 'value': amounts[donation_address]})
         
-        # Debug: Show payout details
-        import sys
-        print >>sys.stderr, '[PAYOUT DEBUG] Number of payout outputs: %d' % len(payouts)
-        for i, payout in enumerate(payouts):
-            script_address = 'unknown'
-            try:
-                script_address = bitcoin_data.script2_to_address(payout['script'], net.PARENT)[:20] + '...'
-            except:
-                pass
-            print >>sys.stderr, '[PAYOUT DEBUG]   Output %d: value=%d, script_len=%d, addr=%s' % (i, payout['value'], len(payout['script']), script_address)
+        # Debug: Uncomment to trace payout structure (confirmed working)
+        # import sys
+        # print >>sys.stderr, '[PAYOUT DEBUG] Number of payout outputs: %d' % len(payouts)
+        # for i, payout in enumerate(payouts):
+        #     script_address = 'unknown'
+        #     try:
+        #         script_address = bitcoin_data.script2_to_address(payout['script'], net.PARENT)[:20] + '...'
+        #     except:
+        #         pass
+        #     print >>sys.stderr, '[PAYOUT DEBUG]   Output %d: value=%d, script_len=%d, addr=%s' % (i, payout['value'], len(payout['script']), script_address)
 
         gentx = dict(
             version=1,
@@ -399,27 +400,29 @@ class BaseShare(object):
             lock_time=0,
         )
         
-        # Debug: Show gentx details during creation
-        import sys
-        print >>sys.stderr, '[GENTX CREATION] coinbase script length: %d bytes' % len(share_data['coinbase'])
-        print >>sys.stderr, '[GENTX CREATION] coinbase script hex: %s' % share_data['coinbase'].encode('hex')
-        print >>sys.stderr, '[GENTX CREATION] num payouts: %d' % len(payouts)
-        print >>sys.stderr, '[GENTX CREATION] total outputs: %d' % (len(gentx['tx_outs']))
+        # Debug: Uncomment to trace gentx creation (confirmed working)
+        # import sys
+        # print >>sys.stderr, '[GENTX CREATION] coinbase script length: %d bytes' % len(share_data['coinbase'])
+        # print >>sys.stderr, '[GENTX CREATION] coinbase script hex: %s' % share_data['coinbase'].encode('hex')
+        # print >>sys.stderr, '[GENTX CREATION] num payouts: %d' % len(payouts)
+        # print >>sys.stderr, '[GENTX CREATION] total outputs: %d' % (len(gentx['tx_outs']))
         
         # DEBUG: Verify gentx_before_refhash structure
         packed_gentx = bitcoin_data.tx_id_type.pack(gentx)
         cutoff_prefix = packed_gentx[:-32-8-4]  # Remove ref_hash + nonce + lock_time
-        print >>sys.stderr, '[GENTX DEBUG] Total packed length: %d bytes' % len(packed_gentx)
-        print >>sys.stderr, '[GENTX DEBUG] Prefix length (after cut): %d bytes' % len(cutoff_prefix)
-        print >>sys.stderr, '[GENTX DEBUG] gentx_before_refhash length: %d bytes' % len(cls.gentx_before_refhash)
-        print >>sys.stderr, '[GENTX DEBUG] Last 50 bytes of prefix: %s' % cutoff_prefix[-50:].encode('hex')
-        print >>sys.stderr, '[GENTX DEBUG] gentx_before_refhash: %s' % cls.gentx_before_refhash.encode('hex')
+        # Debug: Uncomment to trace gentx validation (confirmed working)
+        #print >>sys.stderr, '[GENTX DEBUG] Total packed length: %d bytes' % len(packed_gentx)
+        #print >>sys.stderr, '[GENTX DEBUG] Prefix length (after cut): %d bytes' % len(cutoff_prefix)
+        #print >>sys.stderr, '[GENTX DEBUG] gentx_before_refhash length: %d bytes' % len(cls.gentx_before_refhash)
+        #print >>sys.stderr, '[GENTX DEBUG] Last 50 bytes of prefix: %s' % cutoff_prefix[-50:].encode('hex')
+        #print >>sys.stderr, '[GENTX DEBUG] gentx_before_refhash: %s' % cls.gentx_before_refhash.encode('hex')
         if not cutoff_prefix.endswith(cls.gentx_before_refhash):
-            print >>sys.stderr, '[GENTX DEBUG] ERROR: Prefix does NOT end with gentx_before_refhash!'
-            print >>sys.stderr, '[GENTX DEBUG] Expected ending: %s' % cls.gentx_before_refhash.encode('hex')
-            print >>sys.stderr, '[GENTX DEBUG] Actual ending:   %s' % cutoff_prefix[-len(cls.gentx_before_refhash):].encode('hex')
-        else:
-            print >>sys.stderr, '[GENTX DEBUG] OK: Prefix ends with gentx_before_refhash'
+            # Keep ERROR logs - these indicate actual problems
+            print >>sys.stderr, '[GENTX ERROR] Prefix does NOT end with gentx_before_refhash!'
+            print >>sys.stderr, '[GENTX ERROR] Expected ending: %s' % cls.gentx_before_refhash.encode('hex')
+            print >>sys.stderr, '[GENTX ERROR] Actual ending:   %s' % cutoff_prefix[-len(cls.gentx_before_refhash):].encode('hex')
+        #else:
+            #print >>sys.stderr, '[GENTX DEBUG] OK: Prefix ends with gentx_before_refhash'
         
         if segwit_activated:
             gentx['marker'] = 0
@@ -519,10 +522,10 @@ class BaseShare(object):
                     n.add(tx_count)
             assert n == set(range(len(self.share_info['new_transaction_hashes'])))
         
-        # Debug: Show coinbase during validation
-        import sys
-        print >>sys.stderr, '[VALIDATION] coinbase script length: %d bytes' % len(self.share_info['share_data']['coinbase'])
-        print >>sys.stderr, '[VALIDATION] coinbase script hex: %s' % self.share_info['share_data']['coinbase'].encode('hex')
+        # Debug: Uncomment to trace share validation (confirmed working)
+        # import sys
+        # print >>sys.stderr, '[VALIDATION] coinbase script length: %d bytes' % len(self.share_info['share_data']['coinbase'])
+        # print >>sys.stderr, '[VALIDATION] coinbase script hex: %s' % self.share_info['share_data']['coinbase'].encode('hex')
         
         self.gentx_hash = check_hash_link(
             self.hash_link,
