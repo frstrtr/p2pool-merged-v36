@@ -435,6 +435,7 @@ class BaseShare(object):
                 last_txout_nonce=last_txout_nonce,
                 hash_link=prefix_to_hash_link(bitcoin_data.tx_id_type.pack(gentx)[:-32-8-4], cls.gentx_before_refhash),
                 merkle_link=bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0),
+                actual_header_merkle_root=header['merkle_root'],  # Pass the actual mined merkle_root for merged mining
             ))
             assert share.header == header # checks merkle_root
             return share
@@ -528,8 +529,20 @@ class BaseShare(object):
             self.get_ref_hash(net, self.share_info, contents['ref_merkle_link']) + pack.IntType(64).pack(self.contents['last_txout_nonce']) + pack.IntType(32).pack(0),
             self.gentx_before_refhash,
         )
-        merkle_root = bitcoin_data.check_merkle_link(self.gentx_hash, self.share_info['segwit_data']['txid_merkle_link'] if segwit_activated else self.merkle_link)
+        # For merged mining, use the actual mined merkle_root if provided (contains merged mining commitment)
+        # Otherwise reconstruct it from gentx_hash and merkle_link (normal p2pool operation)
+        if 'actual_header_merkle_root' in contents:
+            merkle_root = contents['actual_header_merkle_root']
+        else:
+            merkle_root = bitcoin_data.check_merkle_link(self.gentx_hash, self.share_info['segwit_data']['txid_merkle_link'] if segwit_activated else self.merkle_link)
         self.header = dict(self.min_header, merkle_root=merkle_root)
+        
+        # DEBUG: Check if header merkle_root matches what we calculated
+        import sys
+        print >>sys.stderr, '[SHARE __init__] Calculated merkle_root: %064x' % merkle_root
+        print >>sys.stderr, '[SHARE __init__] gentx_hash: %064x' % self.gentx_hash
+        print >>sys.stderr, '[SHARE __init__] merkle_link branches: %d' % len(self.merkle_link['branch'])
+        
         self.pow_hash = net.PARENT.POW_FUNC(bitcoin_data.block_header_type.pack(self.header))
         self.hash = self.header_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(self.header))
         

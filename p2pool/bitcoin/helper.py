@@ -167,8 +167,7 @@ def submit_block_rpc(block, ignore_failure, coind, coind_work, net):
 
 def submit_block(block, ignore_failure, node):
     submit_block_p2p(block, node.factory, node.net)
-    submit_block_rpc(block, ignore_failure, node.coind, node.coind_work,
-                     node.net)
+    return submit_block_rpc(block, ignore_failure, node.bitcoind, node.bitcoind_work, node.net)
 
 @defer.inlineCallbacks
 def check_block_header(coind, block_hash):

@@ -152,16 +152,29 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 # 4. Storage overhead: Each share grows with per-chain address data
                                 # Current approach (auto-conversion) avoids protocol changes and works
                                 # for 99% of use cases where miners control same keys across chains.
-                                previous_share = self.node.tracker.items[self.node.best_share_var.value] if self.node.best_share_var.value is not None else None
+                                previous_share = self.node.tracker.items.get(self.node.best_share_var.value) if self.node.best_share_var.value is not None else None
                                 
-                                if previous_share is not None:
-                                    # Get PPLNS weights from share chain (same logic as parent chain in data.py)
-                                    target = bitcoin_data.FloatingIntegerType().unpack(template['bits'].decode('hex'))
-                                    weights, total_weight, donation_weight = self.node.tracker.get_cumulative_weights(
-                                        previous_share.share_data['previous_share_hash'],
-                                        max(0, min(template['height'], self.node.net.REAL_CHAIN_LENGTH) - 1),
-                                        65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(target),
-                                    )
+                                # Initialize variables in case of exception
+                                weights = {}
+                                total_weight = 0
+                                donation_weight = 0
+                                shareholders = {}
+                                
+                                # Skip PPLNS when there are no previous shares (bootstrap phase)
+                                # Allow previous_share_hash to be None - get_cumulative_weights handles it
+                                try:
+                                    if (previous_share is not None and 
+                                        hasattr(previous_share, 'share_data')):
+                                        # Get PPLNS weights from share chain (same logic as parent chain in data.py)
+                                        # Use the target from auxpow (already parsed as integer)
+                                        # Note: previous_share_hash can be None for first share - skiplist handles it
+                                        target = int(target_hex, 16)
+                                        prev_hash = previous_share.share_data.get('previous_share_hash')
+                                        weights, total_weight, donation_weight = self.node.tracker.get_cumulative_weights(
+                                            prev_hash,  # Can be None for first share
+                                            max(0, min(template['height'], self.node.net.REAL_CHAIN_LENGTH) - 1),
+                                            65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(target),
+                                        )
                                     
                                     # Determine the correct merged chain network for address conversion
                                     # We detect based on chainid: Dogecoin chainid = 98 (0x62)
@@ -199,24 +212,30 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             print >>sys.stderr, '[MERGED] Warning: Could not convert script to address: %s' % e
                                     
                                     print >>sys.stderr, '[MERGED] Using PPLNS distribution with %d shareholders from share chain' % len(shareholders)
-                                else:
-                                    # Fallback: No shares yet, use single address mode
+                                except (KeyError, AttributeError, TypeError) as e:
+                                    # Fall back to single address mode if PPLNS calculation fails
+                                    # This is expected during bootstrap when share chain is empty or incomplete
+                                    pass  # Silently fall back - normal during bootstrap
+                                    previous_share = None  # Force fallback path
+                                
+                                if previous_share is None:
+                                    # Fallback: No shares yet or PPLNS failed, use single address mode
                                     # Need to convert to merged chain address format
-                                    print >>sys.stderr, '[MERGED] Entering no-shares fallback path, chainid=%s' % chainid
+                                    pass  # Suppressed: print >>sys.stderr, '[MERGED] Entering no-shares fallback path, chainid=%s' % chainid
                                     if chainid == 98:  # Dogecoin
                                         # Check for 't' prefix in symbol (e.g., tLTC) or 'test' in name
                                         parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
                                         is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
                                         if is_testnet:
                                             merged_addr_net = dogecoin_testnet_net
-                                            print >>sys.stderr, '[MERGED] FALLBACK: Set merged_addr_net = dogecoin_testnet_net: %s' % merged_addr_net
+                                            pass  # Suppressed: print >>sys.stderr, '[MERGED] FALLBACK: Set merged_addr_net = dogecoin_testnet_net: %s' % merged_addr_net
                                         else:
                                             merged_addr_net = dogecoin_net
-                                            print >>sys.stderr, '[MERGED] FALLBACK: Set merged_addr_net = dogecoin_net: %s' % merged_addr_net
+                                            pass  # Suppressed: print >>sys.stderr, '[MERGED] FALLBACK: Set merged_addr_net = dogecoin_net: %s' % merged_addr_net
                                         if merged_addr_net is None:
                                             merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
-                                            print >>sys.stderr, '[MERGED] FALLBACK: merged_addr_net was None, using parent: %s' % merged_addr_net
-                                        print >>sys.stderr, '[MERGED] FALLBACK: Final merged_addr_net: SYMBOL=%s, ADDRESS_VERSION=%d' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION)
+                                            pass  # Suppressed: print >>sys.stderr, '[MERGED] FALLBACK: merged_addr_net was None, using parent: %s' % merged_addr_net
+                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] FALLBACK: Final merged_addr_net: SYMBOL=%s, ADDRESS_VERSION=%d' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION)
                                     else:
                                         merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
                                         print >>sys.stderr, '[MERGED] FALLBACK: Using parent chain (unknown chainid): %s' % merged_addr_net
@@ -228,7 +247,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             self.my_pubkey_hash, merged_addr_net.ADDRESS_VERSION,
                                             -1, merged_addr_net)
                                     shareholders = {mining_address: 1.0} if mining_address else {}
-                                    print >>sys.stderr, '[MERGED] No share chain yet, using single address: %s' % mining_address
+                                    pass  # Suppressed: print >>sys.stderr, '[MERGED] No share chain yet, using single address: %s' % mining_address
                                 
                                 # Setup merged chain network for address operations
                                 # Must be done BEFORE node operator address handling
@@ -252,18 +271,18 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     if self.merged_operator_address:
                                         # Use explicitly provided merged chain address
                                         node_operator_address = self.merged_operator_address
-                                        print >>sys.stderr, '[MERGED] Using provided node operator address: %s' % node_operator_address
+                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] Using provided node operator address: %s' % node_operator_address
                                     else:
                                         # Convert pubkey_hash to merged chain address format (NOT parent chain!)
                                         node_operator_address = bitcoin_data.pubkey_hash_to_address(
                                             self.my_pubkey_hash, merged_addr_net.ADDRESS_VERSION,
                                             -1, merged_addr_net)
-                                        print >>sys.stderr, '[MERGED] Converted node operator address to merged chain: %s' % node_operator_address
+                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] Converted node operator address to merged chain: %s' % node_operator_address
                                 
                                 # Build coinbase with P2Pool donation and node fee
                                 # Pass parent_net for automatic address conversion (LTC -> DOGE)
                                 parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
-                                print >>sys.stderr, '[MERGED] Calling build_merged_coinbase with net=%s (ADDRESS_VERSION=%d), parent_net=%s' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION, parent_net.SYMBOL)
+                                pass  # Suppressed: print >>sys.stderr, '[MERGED] Calling build_merged_coinbase with net=%s (ADDRESS_VERSION=%d), parent_net=%s' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION, parent_net.SYMBOL)
                                 doge_coinbase_tx = merged_mining.build_merged_coinbase(
                                     template, shareholders, merged_addr_net, self.donation_percentage,
                                     node_operator_address, self.worker_fee, parent_net)
@@ -273,7 +292,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 
                                 # Step 2: Calculate Dogecoin merkle root
                                 doge_merkle_root = bitcoin_data.merkle_hash(all_doge_tx_hashes)
-                                print '[DEBUG] Calculated Dogecoin merkle root: %064x' % doge_merkle_root
+                                pass  # Suppressed: print '[DEBUG] Calculated Dogecoin merkle root: %064x' % doge_merkle_root
                                 
                                 # Step 3-4: Build Dogecoin header with real merkle root and hash it
                                 doge_header = dict(
@@ -286,7 +305,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 )
                                 doge_header_packed = bitcoin_data.block_header_type.pack(doge_header)
                                 doge_block_hash = bitcoin_data.hash256(doge_header_packed)
-                                print '[DEBUG] Calculated Dogecoin block hash for LTC coinbase commitment: %064x' % doge_block_hash
+                                pass  # Suppressed: print '[DEBUG] Calculated Dogecoin block hash for LTC coinbase commitment: %064x' % doge_block_hash
                             except Exception as e:
                                 print >>sys.stderr, '[ERROR] Failed to build Dogecoin block (v2-FIXED): %s' % e
                                 import traceback
@@ -297,7 +316,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             # This hash will be embedded in the Litecoin coinbase via mm_data
                             # NOW with actual block hash for merged mining commitment
                             parsed_target = pack.IntType(256).unpack(target_hex.decode('hex'))
-                            print '[DEBUG] Dogecoin target from template: %064x' % parsed_target
+                            pass  # Suppressed: print '[DEBUG] Dogecoin target from template: %064x' % parsed_target
                             self.merged_work.set(math.merge_dicts(self.merged_work.value, {chainid: dict(
                                 template=template,
                                 hash=doge_block_hash,  # CRITICAL: This hash gets embedded in Litecoin coinbase
@@ -344,7 +363,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         @self.merged_work.changed.watch
         def _(new_merged_work):
-            print 'Got new merged mining work!'
+            pass  # Suppress spam: Got new merged mining work!
 
         # COMBINE WORK
 
@@ -775,6 +794,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
             print >>sys.stderr, '[WORK DEBUG] header[merkle_root]: %064x' % header['merkle_root']
             print >>sys.stderr, '[WORK DEBUG] calculated merkle_root: %064x' % work_merkle_root
             print >>sys.stderr, '[WORK DEBUG] MATCH: %s' % (work_merkle_root == header['merkle_root'])
+            
+            # CRITICAL FIX: Update header with recalculated merkle_root
+            # The header from stratum has merkle_root based on the template coinbase,
+            # but we've modified the coinbase with the miner's coinbase_nonce.
+            # We MUST use the recalculated merkle_root for correct pow_hash!
+            if work_merkle_root != header['merkle_root']:
+                print >>sys.stderr, '[CRITICAL] Merkle root mismatch! Updating header with recalculated value.'
+                print >>sys.stderr, '[CRITICAL]   Old: %064x' % header['merkle_root']
+                print >>sys.stderr, '[CRITICAL]   New: %064x' % work_merkle_root
+            header['merkle_root'] = work_merkle_root
 
             header_hash = self.node.net.PARENT.BLOCKHASH_FUNC(bitcoin_data.block_header_type.pack(header))
             pow_hash = self.node.net.PARENT.POW_FUNC(bitcoin_data.block_header_type.pack(header))
@@ -816,7 +845,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         print '#' * 70
                         print
                     # Submit block and add error callback to catch any failures
-                    block_submission = helper.submit_block(dict(header=header, txs=[new_gentx] + other_transactions), False, self.node.factory, self.node.bitcoind, self.node.bitcoind_work, self.node.net)
+                    block_submission = helper.submit_block(dict(header=header, txs=[new_gentx] + other_transactions), False, self.node)
                     @block_submission.addErrback
                     def block_submit_error(err):
                         print >>sys.stderr, '*** CRITICAL: Block submission failed! ***'
@@ -1141,7 +1170,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # P2Pool share creation - re-enabled for PERSIST=False bootstrap
             # Note: Stratum miners change coinbase_nonce which modifies gentx.
             # Share.__init__ reconstructs gentx and this should now work correctly.
-            if pow_hash <= share_info['bits'].target and header_hash not in received_header_hashes:
+            # CRITICAL: Only attempt share creation if merkle_root matches current work template!
+            # If work_merkle_root != header['merkle_root'], the submitted work is stale (from old template)
+            if pow_hash <= share_info['bits'].target and header_hash not in received_header_hashes and work_merkle_root == header['merkle_root']:
                 print >>sys.stderr, '[DEBUG] Attempting to create P2Pool share:'
                 print >>sys.stderr, '  pow_hash: %064x' % pow_hash
                 print >>sys.stderr, '  target:   %064x' % share_info['bits'].target
@@ -1172,6 +1203,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
                 self.node.tracker.add(share)
                 self.node.set_best_share()
+            elif pow_hash <= share_info['bits'].target and work_merkle_root != header['merkle_root']:
+                # Stale work - silently skip
+                pass
 
                 try:
                     if (pow_hash <= header['bits'].target or p2pool.DEBUG) and self.node.p2p_node is not None:
