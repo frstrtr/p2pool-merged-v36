@@ -971,6 +971,31 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         print >>sys.stderr, '[MERGED CHECK] pow_hash=%064x' % pow_hash
                         print >>sys.stderr, '[MERGED CHECK] parent_target=%064x (met: %s)' % (header['bits'].target, pow_hash <= header['bits'].target)
                         print >>sys.stderr, '[MERGED CHECK] merged_target=%064x (met: %s)' % (aux_work['target'], pow_hash <= aux_work['target'])
+                        
+                        # TWIN BLOCK DETECTION: Same POW hash accepted by BOTH chains!
+                        if pow_hash <= aux_work['target']:
+                            merged_net_name = aux_work.get('merged_net_name', 'Merged Chain')
+                            merged_net_symbol = aux_work.get('merged_net_symbol', 'MERGED')
+                            print
+                            print '*' * 70
+                            print '*** TWIN BLOCK FOUND! ***'
+                            print '*** Same POW hash accepted by BOTH chains! ***'
+                            print '*' * 70
+                            print 'Time:         %s' % time.strftime('%Y-%m-%d %H:%M:%S')
+                            print 'Miner:        %s' % user
+                            print 'POW Hash:     %064x' % pow_hash
+                            print
+                            print 'Parent Chain: %s (%s)' % (self.node.net.PARENT.NAME, self.node.net.PARENT.SYMBOL)
+                            print '  Block hash: %064x' % header_hash
+                            print '  Target:     %064x' % header['bits'].target
+                            print
+                            print 'Merged Chain: %s (%s)' % (merged_net_name, merged_net_symbol)
+                            print '  Block hash: %064x' % aux_work['hash']
+                            print '  Target:     %064x' % aux_work['target']
+                            print '*' * 70
+                            print 'This proves merged mining is working - one hash, two blockchains!'
+                            print '*' * 70
+                            print
                     
                     # Debug: Uncomment to trace merged block candidates
                     # if pow_hash <= aux_work['target']:
