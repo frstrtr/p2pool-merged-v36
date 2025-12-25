@@ -16,13 +16,16 @@ import hashlib
 DOGE_RPC_USER = "dogeuser"
 DOGE_RPC_PASS = "dogepass123"
 DOGE_RPC_URL = "http://127.0.0.1:44555/"
-P2POOL_LOG = "/tmp/p2pool_new.log"
+P2POOL_LOG = "/tmp/p2pool_final_working.log"
 
 # Mining addresses
 # Litecoin testnet (parent chain): mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
 # Dogecoin testnet (merged chain): nZj5sSzP9NSYLRBbWUTz4tConRSSeuYQvY (same pubkey_hash, different ADDRESS_VERSION)
 LTC_MINING_ADDRESS = "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h"  # Parent chain
-DOGE_MINING_ADDRESS = "nZj5sSzP9NSYLRBbWUTz4tConRSSeuYQvY"  # Merged mining payouts (NEW - correctly converted)
+DOGE_MINING_ADDRESS = "nZj5sSzP9NSYLRBbWUTz4tConRSSeuYQvY"  # Merged mining payouts (auto-converted)
+
+# Node operator address (receives node fee % from merged mining)
+NODE_OPERATOR_ADDRESS = "nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB"  # --merged-operator-address
 
 # OLD address used before address conversion fix (Dec 24, 2024)
 # This is where historical blocks paid out (LTC address was used directly in DOGE coinbase)
@@ -177,6 +180,63 @@ def get_submission_stats():
         return stats
     except Exception as e:
         return None
+
+def get_p2pool_share_stats():
+    """Get P2Pool share statistics from logs"""
+    try:
+        # Count total shares
+        cmd_shares = "grep -c 'GOT SHARE' " + P2POOL_LOG + " 2>/dev/null || echo 0"
+        total_shares = int(run_ssh_command(cmd_shares))
+        
+        # Get recent shares (last 5)
+        cmd_recent = "grep 'GOT SHARE' " + P2POOL_LOG + " | tail -5"
+        recent_output = run_ssh_command(cmd_recent)
+        
+        recent_shares = []
+        for line in recent_output.split('\n'):
+            if 'GOT SHARE' in line:
+                try:
+                    # Parse: "2025-12-25 06:48:45.918342 GOT SHARE! mm3suEPoj... dd1bda5e prev c7a4df62 age 0.89s"
+                    parts = line.split('GOT SHARE!')
+                    if len(parts) >= 2:
+                        timestamp = parts[0].split('>')[0].strip().split()[1][:8]  # HH:MM:SS
+                        share_info = parts[1].strip().split()
+                        address = share_info[0][:12] + "..." if share_info else "unknown"
+                        share_hash = share_info[1][:8] if len(share_info) > 1 else "unknown"
+                        age = share_info[-1] if 's' in share_info[-1] else "?"
+                        recent_shares.append({
+                            'time': timestamp,
+                            'address': address,
+                            'hash': share_hash,
+                            'age': age
+                        })
+                except:
+                    continue
+        
+        # Calculate share rate (shares in last minute)
+        cmd_rate = "grep 'GOT SHARE' " + P2POOL_LOG + " | tail -100 | head -1"
+        first_line = run_ssh_command(cmd_rate)
+        cmd_last = "grep 'GOT SHARE' " + P2POOL_LOG + " | tail -1"
+        last_line = run_ssh_command(cmd_last)
+        
+        shares_per_min = 0
+        if first_line and last_line and total_shares >= 2:
+            try:
+                first_time = datetime.strptime(first_line.split('>')[0].strip().split()[1], "%H:%M:%S.%f")
+                last_time = datetime.strptime(last_line.split('>')[0].strip().split()[1], "%H:%M:%S.%f")
+                time_span = (last_time - first_time).total_seconds()
+                if time_span > 0:
+                    shares_per_min = (min(100, total_shares) / time_span) * 60
+            except:
+                pass
+        
+        return {
+            'total': total_shares,
+            'recent': recent_shares,
+            'rate': shares_per_min
+        }
+    except Exception as e:
+        return {'total': 0, 'recent': [], 'rate': 0, 'error': str(e)}
 
 def check_accepted_blocks_orphan_status():
     """Check which of our accepted blocks are still in the blockchain vs orphaned"""
@@ -437,9 +497,9 @@ def clear_screen():
 
 def print_header():
     """Print dashboard header"""
-    print("=" * 80)
-    print(" P2POOL DOGECOIN TESTNET MERGED MINING MONITOR".center(80))
-    print("=" * 80)
+    print("=" * 120)
+    print(" P2POOL LITECOIN+DOGECOIN MERGED MINING MONITOR".center(120))
+    print("=" * 120)
     print()
 
 def print_network_stats(info):
@@ -448,73 +508,74 @@ def print_network_stats(info):
         print("⚠️  Unable to fetch network info")
         return
     
-    print("📊 NETWORK STATS")
-    print("-" * 80)
-    print(f"  Block Height:     {info['blocks']:,}")
-    print(f"  Difficulty:       {info['difficulty']:.10f}")
-    print(f"  Network Hashrate: {info['networkhashps']/1000:.1f} KH/s")
-    print(f"  Chain:            {info.get('chain', 'unknown')}")
+    print("📊 DOGECOIN TESTNET NETWORK")
+    print(f"  Height: {info['blocks']:,}  |  Difficulty: {info['difficulty']:.10f}  |  Hashrate: {info['networkhashps']/1000:.1f} KH/s  |  Chain: {info.get('chain', 'unknown')}")
     print()
 
-def print_mining_stats(candidates, balance, local_stats, donation_info, address_balance=None, old_address_balance=None, donation_balance=None):
-    """Print our mining statistics"""
-    print("⛏️  MINING STATS")
-    print("-" * 80)
-    print(f"  Total Candidates: {candidates}")
-    print(f"  Candidate Rate:   {local_stats['candidates_per_min']:.2f} per minute")
-    print(f"  Network Share:    ~{local_stats['network_share']:.2f}% (estimated)")
+def print_combined_stats(total_candidates, balance, local_stats, share_stats, address_balance=None, node_op_balance=None):
+    """Print mining stats and P2Pool shares side by side"""
+    print("⛏️  MINING STATS                                           🔗 P2POOL SHARES (Litecoin)")
+    print("-" * 120)
     
-    # Show wallet balance
+    # Left column: Mining stats
+    left_lines = []
+    left_lines.append(f"  DOGE Candidates: {total_candidates:>6}                                ")
+    left_lines.append(f"  Candidate Rate:  {local_stats['candidates_per_min']:>6.1f}/min                          ")
+    left_lines.append(f"  Network Share:   {local_stats['network_share']:>6.2f}%                            ")
     if balance is not None:
-        print(f"  Wallet Balance:   {balance:,.1f} DOGE (total)")
+        left_lines.append(f"  Wallet Balance:  {balance:>8.1f} DOGE                        ")
     else:
-        print(f"  Wallet Balance:   N/A")
+        left_lines.append(f"  Wallet Balance:  {'N/A':>8}                                ")
     
-    # Show OLD address balance (historical blocks before fix)
-    if old_address_balance is not None and old_address_balance > 0:
-        print(f"  Old Address:      {old_address_balance:,.1f} DOGE ({OLD_DOGE_MINING_ADDRESS}) [pre-fix]")
+    # Right column: Share stats
+    right_lines = []
+    if not share_stats or share_stats.get('total', 0) == 0:
+        right_lines.append("  Total: 0 (waiting for hashrate estimation)")
+        right_lines.append("  Rate:  0.0/min")
+        right_lines.append("")
+        right_lines.append("")
+    else:
+        right_lines.append(f"  Total: {share_stats['total']:>6}  |  Rate: {share_stats['rate']:>6.1f}/min")
+        right_lines.append(f"  Latest Shares:")
+        for s in reversed(share_stats['recent'][-2:]):  # Show last 2
+            right_lines.append(f"    {s['time']} {s['hash']} {s['age']}")
+        # Pad if needed
+        while len(right_lines) < 4:
+            right_lines.append("")
     
-    # Show NEW address balance (blocks after address conversion fix)
+    # Print side by side
+    for i in range(max(len(left_lines), len(right_lines))):
+        left = left_lines[i] if i < len(left_lines) else " " * 60
+        right = right_lines[i] if i < len(right_lines) else ""
+        print(left + right)
+    
+    print()
+    print("  📍 ADDRESSES:")
+    print(f"     LTC (parent):  {LTC_MINING_ADDRESS}  →  DOGE (merged): {DOGE_MINING_ADDRESS}")
+    print(f"     Node Operator: {NODE_OPERATOR_ADDRESS}", end="")
+    if node_op_balance is not None:
+        print(f"  ({node_op_balance:,.1f} DOGE)")
+    else:
+        print()
+    
     if address_balance is not None:
-        print(f"  New Address:      {address_balance:,.1f} DOGE ({DOGE_MINING_ADDRESS})")
-    else:
-        print(f"  New Address:      Check explorer: {EXPLORER_URL}/address/{DOGE_MINING_ADDRESS}")
-    
-    # Show P2Pool donation address balance
-    print(f"\n  💰 P2Pool Donation ({DONATION_ADDRESS_DOGE_TESTNET}):")
-    if donation_balance is not None:
-        print(f"     Balance:        {donation_balance:,.1f} DOGE")
-    else:
-        print(f"     Check:          {EXPLORER_URL}/address/{DONATION_ADDRESS_DOGE_TESTNET}")
-    
-    if donation_info and donation_info.get('outputs', 0) > 0:
-        print(f"     Recent blocks:  {donation_info['outputs']} outputs, {donation_info['total']:,.1f} DOGE")
+        print(f"     Miner Balance: {address_balance:,.1f} DOGE")
     print()
 
 def print_submission_stats(stats, orphan_status):
     """Print block submission statistics with orphan analysis"""
-    print("📤 BLOCK SUBMISSION STATS")
-    print("-" * 80)
+    print("📤 DOGECOIN BLOCK SUBMISSIONS")
+    print("-" * 120)
     if not stats:
-        print("  Unable to fetch submission stats")
+        print("  No submissions yet (waiting for hash to meet Dogecoin target)")
     else:
         total = sum(stats.values())
-        print(f"  Total Submissions: {total}")
-        print(f"  ✅ Accepted:       {stats['accepted']} ({stats['accepted']*100//max(1,total)}%) [Multiaddress merged]")
-        print(f"  ⏱️  Too Late:        {stats['inconclusive']} ({stats['inconclusive']*100//max(1,total)}%) [Racing with network]")
-        print(f"  🔄 Duplicate:      {stats['duplicate']}")
-        print(f"  ❌ Errors:         {stats['bad_cb_height'] + stats['other']}")
-        
-        if orphan_status and orphan_status.get('total_accepted', 0) > 0:
-            print(f"\n  🔍 ORPHAN ANALYSIS (last {orphan_status['checked_blocks']} blocks scanned):")
-            print(f"     Still in Chain: {orphan_status['in_chain']} blocks (have donation script)")
-            print(f"     Orphaned:       {orphan_status['orphaned']} blocks (removed from chain)")
-            print(f"     Orphan Rate:    {orphan_status['orphaned']*100//max(1,orphan_status['total_accepted'])}%")
-            
-            if orphan_status['in_chain'] > 0:
-                print(f"\n     💰 Immature coinbase outputs: Check with minconf=0")
-            else:
-                print(f"\n     ⚠️  ALL accepted blocks were orphaned! (Testnet too fast)")
+        if total == 0:
+            print("  No submissions yet (waiting for hash to meet Dogecoin target)")
+        else:
+            print(f"  Total: {total}  |  ✅ Accepted: {stats['accepted']} ({stats['accepted']*100//max(1,total)}%)  |  " +
+                  f"⏱️  Too Late: {stats['inconclusive']} ({stats['inconclusive']*100//max(1,total)}%)  |  " +
+                  f"🔄 Duplicate: {stats['duplicate']}  |  ❌ Errors: {stats['bad_cb_height'] + stats['other']}")
     print()
 
 def print_recent_candidates(candidates_list):
@@ -522,40 +583,76 @@ def print_recent_candidates(candidates_list):
     # Filter to show candidates that are very close to or exceeded block target
     qualifying_candidates = [c for c in candidates_list if c['ratio'] >= 95.0]
     
-    print("🎯 RECENT CANDIDATES (≥95% to Target)")
-    print("-" * 80)
+    print("🎯 RECENT CANDIDATES (≥95% to Dogecoin Target)")
+    print("-" * 120)
     if not qualifying_candidates:
         print("  No qualifying candidates yet (need ≥95% to target)...")
     else:
-        print(f"  {'Time':<12} {'Hash':<22} {'% to Target':>12}")
-        print("  " + "-" * 78)
-        for c in reversed(qualifying_candidates):  # Most recent first
-            ratio_str = f"{c['ratio']:.2f}%"
-            # Highlight 100%+ candidates with a marker
-            marker = " ✓" if c['ratio'] >= 100.0 else ""
-            print(f"  {c['time']:<12} {c['hash']:<22} {ratio_str:>12}{marker}")
+        # Print in rows of 3
+        print(f"  {'Time':<12} {'Hash':<22} {'% to Target':>12}     {'Time':<12} {'Hash':<22} {'% to Target':>12}")
+        print("  " + "-" * 118)
+        recent = list(reversed(qualifying_candidates[-6:]))  # Show last 6, most recent first
+        for i in range(0, len(recent), 2):
+            c1 = recent[i]
+            ratio_str1 = f"{c1['ratio']:.2f}%"
+            marker1 = " ✓" if c1['ratio'] >= 100.0 else ""
+            line = f"  {c1['time']:<12} {c1['hash']:<22} {ratio_str1:>12}{marker1}"
+            
+            if i + 1 < len(recent):
+                c2 = recent[i + 1]
+                ratio_str2 = f"{c2['ratio']:.2f}%"
+                marker2 = " ✓" if c2['ratio'] >= 100.0 else ""
+                line += f"     {c2['time']:<12} {c2['hash']:<22} {ratio_str2:>12}{marker2}"
+            
+            print(line)
     print()
 
 def print_mined_blocks(blocks):
-    """Print our mined blocks"""
-    print("✅ MINED BLOCKS (Last 10 blocks scanned)")
-    print("-" * 80)
+    """Print our mined blocks compactly"""
+    print("✅ MINED BLOCKS (Last 10)")
+    print("-" * 120)
     if not blocks:
-        print("  No blocks found in last 10 blocks")
-        print("  (Testnet competition: ~658 KH/s, 0.26s block time)")
+        print("  No blocks found yet (Testnet: ~658 KH/s, 0.26s block time) - waiting...")
     else:
-        print(f"  {'Height':<10} {'Time':<10} {'Confs':<7} {'Outs':<5} {'Block Hash':<20}")
-        print("  " + "-" * 78)
-        for b in blocks[:5]:  # Show top 5
-            print(f"  {b['height']:<10} {b['time']:<10} {b['confirmations']:<7} {b['outputs']:<5} {b['hash']:<20}")
-            print(f"     🔗 {b['explorer']}")
+        # Show in compact table format - 2 blocks per row
+        print(f"  {'Height':<8} {'Hash':<22} {'Time':<12} {'Confs':<6}     {'Height':<8} {'Hash':<22} {'Time':<12} {'Confs':<6}")
+        print("  " + "-" * 118)
+        recent = blocks[:6]  # Show top 6
+        for i in range(0, len(recent), 2):
+            b1 = recent[i]
+            line = f"  {b1['height']:<8} {b1['hash']:<22} {b1['time']:<12} {b1['confirmations']:<6}"
+            
+            if i + 1 < len(recent):
+                b2 = recent[i + 1]
+                line += f"     {b2['height']:<8} {b2['hash']:<22} {b2['time']:<12} {b2['confirmations']:<6}"
+            
+            print(line)
+    print()
+
+def print_p2pool_shares(share_stats):
+    """Print P2Pool share statistics"""
+    print("🔗 P2POOL SHARES (Litecoin Share Chain)")
+    print("-" * 80)
+    if not share_stats or share_stats.get('total', 0) == 0:
+        print("  No P2Pool shares found yet...")
+        print("  (Waiting for hashrate estimation - ~50 pseudoshares needed)")
+    else:
+        print(f"  Total Shares:    {share_stats['total']}")
+        print(f"  Share Rate:      {share_stats['rate']:.1f} per minute")
+        
+        if share_stats.get('recent'):
+            print(f"\n  Recent Shares:")
+            print(f"  {'Time':<10} {'Address':<16} {'Hash':<10} {'Age':<8}")
+            print("  " + "-" * 44)
+            for s in reversed(share_stats['recent'][-5:]):  # Show last 5
+                print(f"  {s['time']:<10} {s['address']:<16} {s['hash']:<10} {s['age']:<8}")
     print()
 
 def print_footer(update_time):
     """Print dashboard footer"""
-    print("-" * 80)
+    print("-" * 120)
     print(f"Last update: {update_time.strftime('%Y-%m-%d %H:%M:%S')} | Press Ctrl+C to exit")
-    print("=" * 80)
+    print("=" * 120)
 
 def main():
     """Main monitoring loop"""
@@ -581,6 +678,9 @@ def main():
                 # Get submission statistics (fast - just grep counts)
                 submission_stats = get_submission_stats()
                 
+                # Get P2Pool share statistics
+                share_stats = get_p2pool_share_stats()
+                
                 # Skip slow orphan check - too slow over SSH
                 orphan_status = None
                 
@@ -601,11 +701,14 @@ def main():
                 # Donation address balance (new P2PKH donation script)
                 donation_balance = get_received_by_address(DONATION_ADDRESS_DOGE_TESTNET)
                 
+                # Node operator address balance
+                node_op_balance = get_received_by_address(NODE_OPERATOR_ADDRESS)
+                
                 # Now clear and display everything at once
                 clear_screen()
                 print_header()
                 print_network_stats(network_info)
-                print_mining_stats(total_candidates, balance, local_stats, donation_info, address_balance, old_address_balance, donation_balance)
+                print_combined_stats(total_candidates, balance, local_stats, share_stats, address_balance, node_op_balance)
                 print_submission_stats(submission_stats, orphan_status)
                 print_recent_candidates(recent)
                 print_mined_blocks(mined_blocks)

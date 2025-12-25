@@ -711,6 +711,57 @@ def run():
         signal.signal(signal.SIGUSR1, sigusr1)
     deferral.RobustLoopingCall(logfile.reopen).start(5)
     
+    # Check SSL support and log informational message
+    # SSL/TLS is optional in P2Pool and only needed for:
+    # 1. HTTPS RPC connections (--bitcoind-rpc-ssl flag) - rarely used, HTTP is standard
+    # 2. HTTPS block explorer links - just text URLs, no actual connections made
+    # 3. Twisted HTTP client redirect handling - fails gracefully if SSL unavailable
+    # 
+    # For Litecoin/Dogecoin merged mining, SSL is not required as:
+    # - Both daemons use HTTP RPC by default
+    # - P2Pool share chain uses custom binary protocol (not HTTP/HTTPS)
+    # - Merged mining data embedded in coinbase, no external connections
+    try:
+        from OpenSSL import SSL
+        print "SSL support: Available (OpenSSL library loaded)"
+    except ImportError:
+        print "SSL support: Not available (OpenSSL library not installed)"
+        print "  This is normal and does not affect P2Pool functionality."
+        print "  P2Pool will use HTTP for all RPC connections."
+        print "  If you need HTTPS RPC support in the future, install: pyopenssl and cryptography"
+    print
+    
+    class SSLErrorFilter(object):
+        """Filter out harmless SSL import errors from Twisted HTTP client.
+        
+        Twisted's HTTP client tries to import OpenSSL when handling 301/302 redirects
+        to support HTTPS. If OpenSSL is not available, it logs an ImportError but
+        continues working fine with HTTP. This filter suppresses these repetitive
+        error messages to keep logs clean.
+        
+        Future maintainers: If you need HTTPS support, install pyopenssl and cryptography
+        packages. For PyPy on Ubuntu 24.04+, you may need to handle OpenSSL 3.x compatibility.
+        """
+        def emit(self, eventDict):
+            if not eventDict.get("isError"):
+                return
+            
+            # Check if this is the known harmless OpenSSL import error
+            if 'failure' in eventDict:
+                tb = eventDict['failure'].getTraceback()
+                # Filter: Twisted trying to import OpenSSL for redirect handling
+                if 'from OpenSSL import SSL' in tb and 'ImportError: No module named OpenSSL' in tb:
+                    # Suppress this specific error - it's expected and harmless
+                    return
+            
+            # For all other errors, pass through using the default formatting
+            if 'failure' in eventDict:
+                log.textFromEventDict(eventDict)
+                sys.stderr.write(log.textFromEventDict(eventDict) + '\n')
+    
+    # Install our SSL error filter
+    log.addObserver(SSLErrorFilter().emit)
+    
     class ErrorReporter(object):
         def __init__(self):
             self.last_sent = None
@@ -718,6 +769,12 @@ def run():
         def emit(self, eventDict):
             if not eventDict["isError"]:
                 return
+            
+            # Also filter SSL errors from bug reporter
+            if 'failure' in eventDict:
+                tb = eventDict['failure'].getTraceback()
+                if 'from OpenSSL import SSL' in tb and 'ImportError: No module named OpenSSL' in tb:
+                    return
             
             if self.last_sent is not None and time.time() < self.last_sent + 5:
                 return

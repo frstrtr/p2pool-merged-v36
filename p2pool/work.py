@@ -641,7 +641,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         self.current_work.value['height'],
                         ] + ([mm_data] if mm_data else []) + [
                     ]) + self.current_work.value['coinbaseflags'] + getattr(self.node.net, 'COINBASEEXT', b''))[:100],
-                    coinbase_payload=self.current_work.value.get('coinbase_payload', b''),
                     nonce=random.randrange(2**32),
                     pubkey_hash=pubkey_hash,
                     subsidy=self.current_work.value['subsidy'],
@@ -652,8 +651,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         None
                     )(*self.get_stale_counts()),
                     desired_version=(share_type.SUCCESSOR if share_type.SUCCESSOR is not None else share_type).VOTING_VERSION,
-                    payment_amount=self.current_work.value.get('payment_amount', 0),
-                    packed_payments=self.current_work.value.get('packed_payments', b''),
                 ),
                 block_target=self.current_work.value['bits'].target,
                 desired_timestamp=int(time.time() + 0.5),

@@ -2,9 +2,113 @@
 
 This document summarizes the fixes made to support high-hashrate ASIC miners (particularly Antminer D9 with ~1.7 TH/s each, ~10 TH/s total for 6 miners).
 
+**Release v1.2.1** - Share Version Switchover & SSL Handling (December 25, 2025)
 **Release v1.2.0** - Litecoin+Dogecoin Merged Mining (December 25, 2025)
 **Release v1.1.0** - Dash Platform support + Protocol v1700 (December 13, 2025)
 **Release v1.0.0** - First stable release with full ASIC support (December 11, 2025)
+
+## v1.2.1 - Share Version Switchover & SSL Handling (December 25, 2025)
+
+### Critical Fixes for Litecoin Share Compatibility
+
+**Files:** `p2pool/work.py`, `p2pool/main.py`
+
+#### Share Version Switchover Bug Fix
+
+**Problem:** When P2Pool hit the 95% threshold to upgrade share versions, it crashed with `AssertionError` during share packing. The error occurred because the share_data dict contained Dash-specific fields that don't exist in Litecoin's share structure.
+
+**Root Cause:** The code was passing three Dash-specific fields in `share_data`:
+- `payment_amount` - Reserved for Dash masternode/superblock payments
+- `packed_payments` - List of masternode/superblock payee addresses and amounts
+- `coinbase_payload` - Dash DIP2/DIP3 special transaction payload
+
+These fields are part of the p2pool-dash share structure for Dash cryptocurrency, but Litecoin uses a different share format without these fields. When the share packing code tried to serialize the share_data dict, it failed because Litecoin's `share_info_type` doesn't include these fields.
+
+**Solution:** Removed the three Dash-specific fields from `work.py` line ~635-655:
+```python
+# BEFORE (with Dash fields):
+share_data=dict(
+    previous_share_hash=self.node.best_share_var.value,
+    coinbase=...,
+    coinbase_payload=self.current_work.value.get('coinbase_payload', b''),  # REMOVED
+    nonce=random.randrange(2**32),
+    pubkey_hash=pubkey_hash,
+    subsidy=self.current_work.value['subsidy'],
+    donation=...,
+    stale_info=...,
+    desired_version=...,
+    payment_amount=self.current_work.value.get('payment_amount', 0),  # REMOVED
+    packed_payments=self.current_work.value.get('packed_payments', b''),  # REMOVED
+),
+
+# AFTER (Litecoin-compatible):
+share_data=dict(
+    previous_share_hash=self.node.best_share_var.value,
+    coinbase=...,
+    nonce=random.randrange(2**32),
+    pubkey_hash=pubkey_hash,
+    subsidy=self.current_work.value['subsidy'],
+    donation=...,
+    stale_info=...,
+    desired_version=...,
+),
+```
+
+**Impact:** P2Pool now successfully upgrades share versions at 95% threshold without crashing. Share chain continues growing normally through version transitions.
+
+#### SSL Error Handling & Documentation
+
+**Problem:** Twisted's HTTP client was generating repetitive `ImportError: No module named OpenSSL` errors that cluttered logs. These errors occurred when Twisted tried to handle HTTP 301/302 redirects.
+
+**Root Cause:** The cryptography and pyOpenSSL packages were removed (they weren't needed for P2Pool's core functionality and had glibc compatibility issues with PyPy snap on Ubuntu 24.04). However, Twisted's HTTP client still tried to import OpenSSL for HTTPS redirect support, logging errors each time.
+
+**Solution:** Added comprehensive SSL handling in `main.py`:
+
+1. **Startup SSL Check** (lines ~713-727):
+   - Detects if OpenSSL is available
+   - Prints clear informational message explaining SSL is optional
+   - Documents when/how to install if needed
+
+2. **SSLErrorFilter Class** (lines ~729-756):
+   - Custom log observer that filters out repetitive OpenSSL import errors
+   - Includes detailed docstring for future maintainers
+   - Explains why SSL isn't needed for P2Pool core functionality
+
+3. **Bug Reporter Filter** (lines ~767-772):
+   - Prevents SSL errors from being sent to automatic bug reporting service
+
+4. **Comprehensive Documentation:**
+   ```python
+   # SSL/TLS is optional in P2Pool and only needed for:
+   # 1. HTTPS RPC connections (--bitcoind-rpc-ssl flag) - rarely used
+   # 2. HTTPS block explorer links - just text URLs, no connections
+   # 3. Twisted HTTP client redirect handling - fails gracefully
+   # 
+   # For Litecoin/Dogecoin merged mining, SSL is not required:
+   # - Both daemons use HTTP RPC by default
+   # - P2Pool share chain uses custom binary protocol
+   # - Merged mining data embedded in coinbase
+   ```
+
+**Impact:** Clean, professional logs with clear startup messaging. No more error spam. Future maintainers have clear guidance on SSL usage.
+
+#### Share Persistence Compatibility
+
+**Issue:** Old shares saved with Dash-specific fields were incompatible with new code after removing those fields.
+
+**Solution:** Share loading gracefully handles incompatible formats via exception handling in `data.py` line ~1103. Old shares are skipped (logged as "HARMLESS error"), and new shares are saved in correct Litecoin format.
+
+**User Action:** Backup old shares file if needed:
+```bash
+mv data/litecoin_testnet/shares.0 shares.0.backup-dash-fields
+```
+
+#### Testing Results
+- ✅ Share version switchover successful at 95% threshold
+- ✅ 230+ verified shares loading correctly from disk after restart
+- ✅ Clean logs with informational SSL status message
+- ✅ No more repetitive OpenSSL ImportError spam
+- ✅ Merged mining operational with proper share persistence
 
 ## v1.2.0 - Litecoin+Dogecoin Merged Mining (December 25, 2025)
 
