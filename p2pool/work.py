@@ -188,37 +188,50 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
                                         if is_testnet:
                                             merged_addr_net = dogecoin_testnet_net
-                                            # print >>sys.stderr, '[MERGED] Setting merged_addr_net = dogecoin_testnet_net: %s' % merged_addr_net
                                         else:
                                             merged_addr_net = dogecoin_net
-                                            # print >>sys.stderr, '[MERGED] Setting merged_addr_net = dogecoin_net: %s' % merged_addr_net
                                         if merged_addr_net is None:
                                             print >>sys.stderr, '[MERGED] Warning: Dogecoin network module not available, using parent chain addresses'
                                             merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
-                                        # print >>sys.stderr, '[MERGED] Final merged_addr_net: SYMBOL=%s, ADDRESS_VERSION=%d' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION)
                                     else:
                                         # Unknown chain - fallback to parent network (may produce wrong addresses!)
-                                        # print >>sys.stderr, '[MERGED] Warning: Unknown chainid %d, using parent chain address format' % chainid
                                         merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
                                     
-                                    # Convert weights (script -> weight) to shareholders (address -> fraction)
+                                    # Convert weights (address/script -> weight) to shareholders (merged_address -> fraction)
+                                    # In VERSION >= 34, the key is an address string (from share.address)
+                                    # In older versions, the key is a P2PKH script that needs conversion
                                     shareholders = {}
-                                    for script, weight in weights.iteritems():
+                                    for key, weight in weights.iteritems():
                                         try:
-                                            # Convert script to address for merged chain network
-                                            # script is P2PKH: OP_DUP OP_HASH160 <20 bytes pubkey_hash> OP_EQUALVERIFY OP_CHECKSIG
-                                            address = bitcoin_data.script2_to_address(script, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                            # Check if key is already an address string (VERSION >= 34)
+                                            # Address strings are alphanumeric and 25-35 chars for base58, or longer for bech32
+                                            # Script bytes would have non-printable characters
+                                            key_is_address = len(key) >= 25 and len(key) <= 100 and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' for c in key)
+                                            
+                                            if key_is_address:
+                                                # VERSION >= 34: key is already a parent chain address string
+                                                # Need to convert to merged chain address
+                                                parent_address = key
+                                                # Decode parent address to get pubkey_hash
+                                                parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                                # address_to_pubkey_hash returns (pubkey_hash, version, witver)
+                                                pubkey_hash_tuple = bitcoin_data.address_to_pubkey_hash(parent_address, parent_net)
+                                                pubkey_hash = pubkey_hash_tuple[0]  # Extract just the pubkey_hash
+                                                # Re-encode as merged chain address
+                                                merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                            else:
+                                                # Older VERSION: key is P2PKH script
+                                                merged_address = bitcoin_data.script2_to_address(key, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                            
                                             fraction = float(weight) / float(total_weight) if total_weight > 0 else 0
-                                            shareholders[address] = fraction
+                                            shareholders[merged_address] = fraction
                                         except Exception as e:
-                                            # print >>sys.stderr, '[MERGED] Warning: Could not convert script to address: %s' % e
-                                            pass
+                                            print >>sys.stderr, '[MERGED] Warning: Could not convert key to address: %s' % e
                                     
                                     print >>sys.stderr, '[MERGED] Using PPLNS distribution with %d shareholders from share chain' % len(shareholders)
                                 except (KeyError, AttributeError, TypeError) as e:
                                     # Fall back to single address mode if PPLNS calculation fails
                                     # This is expected during bootstrap when share chain is empty or incomplete
-                                    pass  # Silently fall back - normal during bootstrap
                                     previous_share = None  # Force fallback path
                                 
                                 if previous_share is None:
@@ -607,7 +620,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
             mm_data = ''
             mm_later = []
 
-        tx_hashes = [bitcoin_data.hash256(bitcoin_data.tx_type.pack(tx)) for tx in self.current_work.value['transactions']]
+        # CRITICAL: Use txid (stripped hash without SegWit witness) for merkle root calculation!
+        # For SegWit transactions, the merkle root uses txid (not wtxid).
+        # get_txid() uses tx_id_type which strips the witness data before hashing.
+        tx_hashes = [bitcoin_data.get_txid(tx) for tx in self.current_work.value['transactions']]
         tx_map = dict(zip(tx_hashes, self.current_work.value['transactions']))
 
         previous_share = self.node.tracker.items[self.node.best_share_var.value] if self.node.best_share_var.value is not None else None
@@ -807,6 +823,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 new_gentx['marker'] = gentx['marker']
                 new_gentx['flag'] = gentx['flag']
                 new_gentx['witness'] = gentx['witness']
+                print >>sys.stderr, '[SEGWIT] Restored witness data to new_gentx: marker=%s, flag=%s, witness_len=%d' % (
+                    new_gentx.get('marker'), new_gentx.get('flag'), len(new_gentx.get('witness', [])))
+            else:
+                print >>sys.stderr, '[SEGWIT] Original gentx has no SegWit data: marker=%s, flag=%s' % (
+                    gentx.get('marker'), gentx.get('flag'))
 
             # Debug: Print work.py's calculation for comparison with stratum
             # Show what we're actually using to construct new_packed_gentx
@@ -916,6 +937,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     # 1. pow_hash < aux_work['target'] only: Valid DOGE block (partial win)
                     # 2. pow_hash < both targets: Valid LTC + DOGE blocks (full win)
                     # 3. pow_hash < header['bits'].target only: Valid LTC block only
+                    
+                    # Log when parent block found - check if merged block should also be submitted
+                    if pow_hash <= header['bits'].target:
+                        print >>sys.stderr, '[MERGED CHECK] Parent block found! Checking merged chain...'
+                        print >>sys.stderr, '[MERGED CHECK] pow_hash=%064x' % pow_hash
+                        print >>sys.stderr, '[MERGED CHECK] parent_target=%064x (met: %s)' % (header['bits'].target, pow_hash <= header['bits'].target)
+                        print >>sys.stderr, '[MERGED CHECK] merged_target=%064x (met: %s)' % (aux_work['target'], pow_hash <= aux_work['target'])
                     
                     # Debug: Uncomment to trace merged block candidates
                     # if pow_hash <= aux_work['target']:
