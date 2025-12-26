@@ -1882,13 +1882,13 @@
                     var baseLuck = luckData.current_luck_trend;
                     
                     // Fetch network difficulty and pool hashrate to calculate pool block time for decay
-                    d3.json('../web/graph_data/network_difficulty/last_day', function(netDiffData) {
+                    d3.json('../web/network_difficulty?period=day', function(netDiffData) {
                         d3.json('../local_stats', function(localStats) {
                             var currentLuck = baseLuck; // Default to non-decayed
                             
                             // Calculate pool block time for realistic decay
                             if (netDiffData && netDiffData.length > 0 && localStats && localStats.pool_hash_rate) {
-                                var lastNetDiff = netDiffData[netDiffData.length - 1][1];
+                                var lastNetDiff = netDiffData[netDiffData.length - 1].network_diff;
                                 var poolHashrate = localStats.pool_hash_rate;
                                 
                                 if (lastNetDiff > 0 && poolHashrate > 0) {
@@ -1921,14 +1921,14 @@
                 var thirtyDayBlocks = luckData.blocks.filter(function(b) { return b.ts >= thirtyDaysAgo && b.luck; });
 
                 // Fetch network difficulty and pool hashrate for sophisticated decay calculation
-                d3.json('../web/graph_data/network_difficulty/last_day', function(netDiffData) {
+                d3.json('../web/network_difficulty?period=day', function(netDiffData) {
                     d3.json('../local_stats', function(localStats) {
                         var currentRoundLuck = null;
                         
                         // Calculate decayed current round luck if we have the data
                         if (luckData.current_luck_trend && luckData.time_since_last_block && 
                             netDiffData && netDiffData.length > 0 && localStats && localStats.pool_hash_rate) {
-                            var lastNetDiff = netDiffData[netDiffData.length - 1][1];
+                            var lastNetDiff = netDiffData[netDiffData.length - 1].network_diff;
                             var poolHashrate = localStats.pool_hash_rate;
                             
                             if (lastNetDiff > 0 && poolHashrate > 0) {
