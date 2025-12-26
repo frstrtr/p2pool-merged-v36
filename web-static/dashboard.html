@@ -2611,6 +2611,9 @@
             var blocksSeries = chart.series.find(function(s) { return s.name === 'Blocks'; });
             if (!blocksSeries || !blocksSeries.points) return;
             
+            // Don't draw bars if Blocks series is hidden
+            if (!blocksSeries.visible) return;
+            
             var plotTop = chart.plotTop;
             var plotHeight = chart.plotHeight;
             var plotBottom = plotTop + plotHeight;
