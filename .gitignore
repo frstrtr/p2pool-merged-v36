@@ -16,3 +16,8 @@ ltc_scrypt.so
 .github/
 enable_opnsense_ssh.sh
 block_history.json
+
+# Log files
+log*.txt
+log*.log
+*.log
