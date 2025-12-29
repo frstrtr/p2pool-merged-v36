@@ -2,6 +2,7 @@
 
 This document summarizes the fixes made to support high-hashrate ASIC miners (particularly Antminer D9 with ~1.7 TH/s each, ~10 TH/s total for 6 miners).
 
+**Release v1.4.5** - Protocol Version & Bootstrap Nodes Update (December 29, 2025)
 **Release v1.4.4** - Stratum Statistics & Connected Miners API (December 29, 2025)
 **Release v1.4.3** - Bug Fixes from Production Logs (December 26, 2025)
 **Release v1.4.2** - Vardiff Critical Bug Fix (December 26, 2025)
@@ -11,6 +12,40 @@ This document summarizes the fixes made to support high-hashrate ASIC miners (pa
 **Release v1.2.0** - Litecoin+Dogecoin Merged Mining (December 25, 2025)
 **Release v1.1.0** - Dash Platform support + Protocol v1700 (December 13, 2025)
 **Release v1.0.0** - First stable release with full ASIC support (December 11, 2025)
+
+## v1.4.5 - Protocol Version & Bootstrap Nodes Update (December 29, 2025)
+
+### Critical Fix: 50% Orphan Rate Due to Network Isolation
+
+**Problem:** Node had 50% share orphan rate because it was running on a separate, isolated share chain with 0 P2P peers connected.
+
+**Root Cause Analysis:**
+- All legacy bootstrap nodes offline
+- Protocol version 3501 incompatible with active network running 3502
+- Share chain diverged (absheight 16,862 vs network's 25,903,165)
+
+**Solution:**
+
+1. **Updated Protocol Version** (`p2pool/p2p.py`):
+   ```python
+   class Protocol(p2protocol.Protocol):
+       VERSION = 3502  # Updated from 3501 to match active network
+   ```
+
+2. **Updated Bootstrap Nodes** (`p2pool/networks/litecoin.py`):
+   ```python
+   BOOTSTRAP_ADDRS = [
+       # Active nodes discovered 2025 (protocol 3502)
+       'ml.toom.im',           # jtoomim's node - healthy, 1.5% orphan rate
+       '31.25.241.224',        # peer from ml.toom.im
+       '20.106.76.227',        # peer from ml.toom.im
+       '83.221.211.116',       # peer from ml.toom.im
+       # Legacy nodes (may be offline)
+       ...
+   ]
+   ```
+
+**Impact:** Node should now connect to the active Litecoin p2pool network and sync proper share chain.
 
 ## v1.4.4 - Stratum Statistics & Connected Miners API (December 29, 2025)
 
