@@ -25,7 +25,7 @@ def fragment(f, **kwargs):
         fragment(f, **dict((k, v[len(v)//2:]) for k, v in kwargs.iteritems()))
 
 class Protocol(p2protocol.Protocol):
-    VERSION = 3501
+    VERSION = 3502  # Updated to match active Litecoin p2pool network (ml.toom.im)
     
     max_remembered_txs_size = 25000000
     
