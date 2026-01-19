@@ -118,6 +118,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         self.my_share_hashes = set()
         self.my_doa_share_hashes = set()
+        
+        # Track recently found merged mined blocks
+        self.recent_merged_blocks = []
 
         self.address_throttle = 0
         self.address = None  # Dynamic address, set later if --dynamic-address used
@@ -1412,6 +1415,23 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         print 'Block size:  %d bytes' % len(complete_block)
                                         print '#' * 70
                                         print
+                                        
+                                        # Record merged block find
+                                        self.recent_merged_blocks.append(dict(
+                                            ts=time.time(),
+                                            hash='%064x' % aux_work['hash'],
+                                            pow_hash='%064x' % pow_hash,
+                                            target='%064x' % aux_work['target'],
+                                            network=merged_net_name,
+                                            symbol=merged_net_symbol,
+                                            miner=user,
+                                            chainid=aux_work.get('chainid', 0),
+                                            txs=len(merged_block['txs']),
+                                            size=len(complete_block),
+                                        ))
+                                        # Keep only last 100 merged blocks
+                                        if len(self.recent_merged_blocks) > 100:
+                                            self.recent_merged_blocks = self.recent_merged_blocks[-100:]
                                     else:
                                         print >>sys.stderr, 'Multiaddress merged block rejected: %s' % (result,)
                                 
@@ -1449,11 +1469,31 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     auxpow_hex,
                                 )
                             @df.addCallback
-                            def _(result, aux_work=aux_work):
+                            def _(result, aux_work=aux_work, pow_hash=pow_hash, user=user):
                                 if result != (pow_hash <= aux_work['target']):
                                     print >>sys.stderr, 'Merged block submittal result: %s Expected: %s' % (result, pow_hash <= aux_work['target'])
                                 else:
                                     print 'Merged block submittal result: %s' % (result,)
+                                    # Record merged block find if successful
+                                    if result == True:
+                                        # Get network info - for single-address mode we may not have full info
+                                        chainid = aux_work.get('chainid', 0)
+                                        merged_net_name = aux_work.get('merged_net_name', 'Dogecoin' if chainid == 98 else 'Unknown')
+                                        merged_net_symbol = aux_work.get('merged_net_symbol', 'DOGE' if chainid == 98 else 'UNKNOWN')
+                                        
+                                        self.recent_merged_blocks.append(dict(
+                                            ts=time.time(),
+                                            hash='%064x' % aux_work['hash'],
+                                            pow_hash='%064x' % pow_hash,
+                                            target='%064x' % aux_work['target'],
+                                            network=merged_net_name,
+                                            symbol=merged_net_symbol,
+                                            miner=user,
+                                            chainid=chainid,
+                                        ))
+                                        # Keep only last 100 merged blocks
+                                        if len(self.recent_merged_blocks) > 100:
+                                            self.recent_merged_blocks = self.recent_merged_blocks[-100:]
                             @df.addErrback
                             def _(err):
                                 log.err(err, 'Error submitting merged block:')
