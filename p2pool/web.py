@@ -322,8 +322,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         share='%064x' % s.hash,
     ) for s in node.tracker.get_chain(node.best_share_var.value, min(node.tracker.get_height(node.best_share_var.value), node.net.CHAIN_LENGTH)) if s.pow_hash <= s.header['bits'].target]))
     
-    # Merged mined blocks endpoint
-    web_root.putChild('recent_merged_blocks', WebInterface(lambda: wb.recent_merged_blocks[::-1]))  # Return in reverse order (newest first)
+    # Merged mined blocks endpoint - only show verified blocks (not orphaned or pending)
+    web_root.putChild('recent_merged_blocks', WebInterface(lambda: [b for b in wb.recent_merged_blocks[::-1] if b.get('verified') == True]))
     
     web_root.putChild('uptime', WebInterface(lambda: time.time() - start_time))
     web_root.putChild('stale_rates', WebInterface(lambda: p2pool_data.get_stale_counts(node.tracker, node.best_share_var.value, decent_height(), rates=True)))
