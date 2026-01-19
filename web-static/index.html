@@ -144,6 +144,29 @@
                             return '⏳ Pending';
                         });
                 });
+                
+                // Merged mining blocks
+                d3.json('../recent_merged_blocks', function(merged_blocks) {
+                    if (!merged_blocks || merged_blocks.length === 0) {
+                        d3.select('#merged_blocks_section').style('display', 'none');
+                        return;
+                    }
+                    d3.select('#merged_blocks_section').style('display', 'block');
+                    var tr = d3.select('#merged_blocks').selectAll().data(merged_blocks).enter().append('tr');
+                    tr.append('td').text(function(block){return new Date(1000*block.ts).toString()});
+                    tr.append('td')
+                        .style('font-weight', 'bold')
+                        .style('color', '#6f42c1')
+                        .text(function(block){return block.symbol || block.network || 'AUX'});
+                    tr.append('td').text(function(block){return block.chainid || '-'});
+                    tr.append('td').text(function(block){return block.hash ? block.hash.substring(0, 16) + '...' : '-'});
+                    tr.append('td').text(function(block){return block.miner || '-'});
+                    tr.append('td').text(function(block){return block.txs || '-'});
+                    tr.append('td')
+                        .style('color', '#28a745')
+                        .style('font-weight', 'bold')
+                        .text('✓ Submitted');
+                });
             });
             
             d3.json('../web/best_share_hash', function(c) {
@@ -188,6 +211,14 @@
         <table border="1" id="blocks">
             <tr><th>time</th><th>number</th><th>hash/explorer link</th><th>share</th><th>luck</th><th>status</th></tr>
         </table>
+        
+        <div id="merged_blocks_section" style="display:none;">
+            <h2>Merged Mining Blocks found recently:</h2>
+            <p>Blocks found on auxiliary chains via merged mining.</p>
+            <table border="1" id="merged_blocks">
+                <tr><th>time</th><th>network</th><th>chain id</th><th>hash</th><th>miner</th><th>txs</th><th>status</th></tr>
+            </table>
+        </div>
         
         <h2>Payouts if a block were found NOW:</h2>
         <table border="1" id="payouts">
