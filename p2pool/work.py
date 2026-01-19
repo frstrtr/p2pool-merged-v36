@@ -729,7 +729,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 size=size,
                 nonce=0,
             ))
-            mm_later = [(aux_work, mm_hashes.index(aux_work['hash']), mm_hashes) for chain_id, aux_work in self.merged_work.value.iteritems()]
+            # Include chain_id in mm_later tuple for merged block recording
+            mm_later = [(dict(aux_work, chainid=chain_id), mm_hashes.index(aux_work['hash']), mm_hashes) for chain_id, aux_work in self.merged_work.value.iteritems()]
             
             # Debug: Uncomment to trace merged mining data in coinbase (prints frequently)
             # print >>sys.stderr, '[DEBUG] Merged mining data being embedded in Litecoin coinbase:'
