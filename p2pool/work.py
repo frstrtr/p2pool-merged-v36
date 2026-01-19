@@ -1482,12 +1482,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         merged_net_name = aux_work.get('merged_net_name', 'Dogecoin' if chainid == 98 else 'Unknown')
                                         merged_net_symbol = aux_work.get('merged_net_symbol', 'DOGE' if chainid == 98 else 'UNKNOWN')
                                         
+                                        # Detect testnet from parent chain symbol
+                                        parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
+                                        is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
+                                        
                                         # Convert miner address to merged chain format
                                         miner_merged_address = user  # Default to original
                                         try:
                                             if chainid == 98:  # Dogecoin
-                                                parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
-                                                is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
                                                 merged_net = dogecoin_testnet_net if is_testnet else dogecoin_net
                                                 if merged_net:
                                                     parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
@@ -1498,7 +1500,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         except Exception as e:
                                             pass  # Keep original address on error
                                         
-                                        self.recent_merged_blocks.append(dict(
+                                        # Create block record
+                                        block_record = dict(
                                             ts=time.time(),
                                             hash='%064x' % aux_work['hash'],
                                             pow_hash='%064x' % pow_hash,
@@ -1508,10 +1511,30 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             miner=miner_merged_address,
                                             miner_parent=user,  # Also store original parent chain address
                                             chainid=chainid,
-                                        ))
+                                            is_testnet=is_testnet,
+                                            verified=None,  # None=pending, True=confirmed, False=orphaned
+                                        )
+                                        self.recent_merged_blocks.append(block_record)
                                         # Keep only last 100 merged blocks
                                         if len(self.recent_merged_blocks) > 100:
                                             self.recent_merged_blocks = self.recent_merged_blocks[-100:]
+                                        
+                                        # For testnet: async verification after a delay
+                                        if is_testnet and 'merged_proxy' in aux_work:
+                                            @deferral.delay(5.0)  # Wait 5 seconds for block propagation
+                                            def verify_block():
+                                                verify_df = aux_work['merged_proxy'].rpc_getblock('%064x' % pow_hash)
+                                                @verify_df.addCallback
+                                                def on_verify(block_info):
+                                                    # Block found in chain - mark as verified
+                                                    block_record['verified'] = True
+                                                    print 'Merged block VERIFIED in chain: %064x' % pow_hash
+                                                @verify_df.addErrback
+                                                def on_verify_fail(err):
+                                                    # Block not found - mark as orphaned
+                                                    block_record['verified'] = False
+                                                    print >>sys.stderr, 'Merged block orphaned (not in chain): %064x' % pow_hash
+                                            verify_block()
                             @df.addErrback
                             def _(err):
                                 log.err(err, 'Error submitting merged block:')

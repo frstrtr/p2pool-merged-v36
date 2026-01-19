@@ -193,9 +193,25 @@
                     tr.append('td').text(function(block){return block.miner || '-'});
                     tr.append('td').text(function(block){return block.txs || '-'});
                     tr.append('td')
-                        .style('color', '#28a745')
+                        .style('color', function(block){
+                            if (block.is_testnet) {
+                                // Testnet: show verification status
+                                if (block.verified === true) return '#28a745';  // Green for verified
+                                if (block.verified === false) return '#dc3545';  // Red for orphaned
+                                return '#ffc107';  // Yellow for pending verification
+                            }
+                            return '#17a2b8';  // Blue for mainnet (submitted)
+                        })
                         .style('font-weight', 'bold')
-                        .text('✓ Submitted');
+                        .text(function(block){
+                            if (block.is_testnet) {
+                                // Testnet: show verification status
+                                if (block.verified === true) return '✓ Verified';
+                                if (block.verified === false) return '✗ Orphaned';
+                                return '⏳ Verifying...';
+                            }
+                            return '↑ Submitted';  // Mainnet: just show submitted
+                        });
                 });
             });
             
