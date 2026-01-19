@@ -500,6 +500,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         'traffic_rate': graph.DataStreamDescription(dataview_descriptions, is_gauge=False, multivalues=True),
         'getwork_latency': graph.DataStreamDescription(dataview_descriptions),
         'memory_usage': graph.DataStreamDescription(dataview_descriptions),
+        'connected_miners': graph.DataStreamDescription(dataview_descriptions),
+        'unique_miner_count': graph.DataStreamDescription(dataview_descriptions),
+        'worker_count': graph.DataStreamDescription(dataview_descriptions),
     }, hd_obj)
     x = deferral.RobustLoopingCall(lambda: _atomic_write(hd_path, json.dumps(hd.to_obj())))
     x.start(100)
@@ -566,8 +569,17 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             hd.datastreams['memory_usage'].add_datum(t, memory.resident())
         except:
             if p2pool.DEBUG:
-                traceback.print_exc()
-    x = deferral.RobustLoopingCall(add_point)
+                traceback.print_exc()        
+        # Track connected miners and worker counts
+        try:
+            connected_miners_count = len(miner_hash_rates)
+            unique_miners = set(miner_hash_rates.keys())
+            hd.datastreams['connected_miners'].add_datum(t, connected_miners_count)
+            hd.datastreams['unique_miner_count'].add_datum(t, len(unique_miners))
+            hd.datastreams['worker_count'].add_datum(t, connected_miners_count)
+        except:
+            if p2pool.DEBUG:
+                traceback.print_exc()    x = deferral.RobustLoopingCall(add_point)
     x.start(5)
     stop_event.watch(x.stop)
     @node.bitcoind_work.changed.watch
