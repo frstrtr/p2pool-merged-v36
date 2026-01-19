@@ -1521,20 +1521,20 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         
                                         # For testnet: async verification after a delay
                                         if is_testnet and 'merged_proxy' in aux_work:
-                                            @deferral.delay(5.0)  # Wait 5 seconds for block propagation
-                                            def verify_block():
-                                                verify_df = aux_work['merged_proxy'].rpc_getblock('%064x' % pow_hash)
+                                            def verify_block(block_rec, proxy, phash):
+                                                verify_df = proxy.rpc_getblock('%064x' % phash)
                                                 @verify_df.addCallback
                                                 def on_verify(block_info):
                                                     # Block found in chain - mark as verified
-                                                    block_record['verified'] = True
-                                                    print 'Merged block VERIFIED in chain: %064x' % pow_hash
+                                                    block_rec['verified'] = True
+                                                    print 'Merged block VERIFIED in chain: %064x' % phash
                                                 @verify_df.addErrback
                                                 def on_verify_fail(err):
                                                     # Block not found - mark as orphaned
-                                                    block_record['verified'] = False
-                                                    print >>sys.stderr, 'Merged block orphaned (not in chain): %064x' % pow_hash
-                                            verify_block()
+                                                    block_rec['verified'] = False
+                                                    print >>sys.stderr, 'Merged block orphaned (not in chain): %064x' % phash
+                                            # Use reactor.callLater to delay verification by 5 seconds
+                                            reactor.callLater(5.0, verify_block, block_record, aux_work['merged_proxy'], pow_hash)
                             @df.addErrback
                             def _(err):
                                 log.err(err, 'Error submitting merged block:')
