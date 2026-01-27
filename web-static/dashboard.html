@@ -2283,7 +2283,7 @@
             
             function tryRender() {
                 loadCount++;
-                if (loadCount === 6) {  // Now loading 6 resources: hashrate, worker_count, unique_miner_count, connected_miners, blocks, network_difficulty
+                if (loadCount === 6) {  // Loading 6 resources: hashrate, worker_count, unique_miner_count, connected_miners, blocks, network_difficulty
                     graphData = hashrateData;
                     graphMinerData = minerCountData;
                     graphUniqueMinersData = uniqueMinerCountData;
@@ -2364,6 +2364,84 @@
         var hashrateChart = null;
         var workerCountData = null;
         var uniqueMinerCountData = null;
+
+        // Draw difficulty ratio bars behind block diamonds
+        // Shows how much "extra" difficulty each block had vs network difficulty
+        function drawDiffRatioBars(chart) {
+            // Remove any existing ratio bars
+            if (chart.diffRatioBars) {
+                chart.diffRatioBars.forEach(function(bar) {
+                    if (bar && bar.destroy) bar.destroy();
+                });
+            }
+            chart.diffRatioBars = [];
+            
+            // Find the Blocks series
+            var blocksSeries = chart.series.find(function(s) { return s.name === 'Blocks'; });
+            if (!blocksSeries || !blocksSeries.points) return;
+            
+            // Don't draw bars if Blocks series is hidden
+            if (!blocksSeries.visible) return;
+            
+            var plotTop = chart.plotTop;
+            var plotHeight = chart.plotHeight;
+            
+            blocksSeries.points.forEach(function(point) {
+                if (!point.block) return;
+                var b = point.block;
+                
+                // Calculate diff ratio
+                if (!b.actual_hash_difficulty || !b.network_difficulty || b.network_difficulty <= 0) return;
+                var diffRatio = b.actual_hash_difficulty / b.network_difficulty;
+                if (diffRatio <= 1) return; // No bar for ratio <= 1
+                
+                // Log2 scale: height based on log2(ratio)
+                // ratio 2x = 1 unit, 4x = 2 units, 8x = 3 units, 16x = 4 units, etc.
+                var logRatio = Math.log2(diffRatio);
+                var maxLogRatio = 6; // Cap at 64x (log2(64) = 6)
+                logRatio = Math.min(logRatio, maxLogRatio);
+                
+                // Scale to pixels: max height ~80px
+                var maxBarHeight = 80;
+                var barHeight = (logRatio / maxLogRatio) * maxBarHeight;
+                
+                // Get point position
+                var x = point.plotX + chart.plotLeft;
+                var y = point.plotY + plotTop;
+                
+                // Bar width (matches diamond visual width)
+                var barWidth = 4;
+                
+                // Diamond radius is 5px, so offset bar start to diamond center
+                var diamondRadius = 5;
+                
+                // Color based on ratio
+                var barColor;
+                if (diffRatio >= 10) {
+                    barColor = 'rgba(255, 0, 255, 0.7)'; // Magenta for exceptional
+                } else if (diffRatio >= 5) {
+                    barColor = 'rgba(0, 255, 255, 0.6)'; // Cyan for great
+                } else if (diffRatio >= 2) {
+                    barColor = 'rgba(0, 255, 136, 0.5)'; // Green for good
+                } else {
+                    barColor = 'rgba(255, 255, 255, 0.3)'; // White for minor
+                }
+                
+                // Draw bar extending downward from diamond center
+                var barX = x - barWidth / 2;
+                var barY = y + diamondRadius; // Start just below diamond center
+                
+                // Create SVG rect
+                var bar = chart.renderer.rect(barX, barY, barWidth, barHeight, 0)
+                    .attr({
+                        fill: barColor,
+                        zIndex: 2 // Behind markers (markers are zIndex 3)
+                    })
+                    .add();
+                
+                chart.diffRatioBars.push(bar);
+            });
+        }
 
         function renderHashrateGraph(data, minerData, uniqueMinersData, connectedData, blocks, networkDiffSamples) {
             var container = document.getElementById('hashrate-graph');
@@ -2521,6 +2599,10 @@
             });
             
             // Interpolate luck trend to align with hashrate time boundaries
+            // Use exponential decay toward 0 after the last known block luck,
+            // based on target block time (150s for Litecoin). This reflects rising expected work
+            // with no found block: luck drifts down as time passes without a hit.
+            var targetBlockTimeMs = 150000; // 2.5 minutes (Litecoin target block time)
             if (luckTrendData.length > 0) {
                 // Sort by time
                 luckTrendData.sort(function(a, b) { return a[0] - b[0]; });
@@ -2547,10 +2629,32 @@
                     }
                 }
                 
-                // Add interpolated point at maxTime if last point is before maxTime
+                // Add interpolated point at maxTime with exponential decay toward 0
                 if (luckTrendData[luckTrendData.length - 1][0] < maxTime) {
-                    // Extend the last value to maxTime
-                    luckTrendData.push([maxTime, luckTrendData[luckTrendData.length - 1][1]]);
+                    var lastTime = luckTrendData[luckTrendData.length - 1][0];
+                    var lastLuckVal = luckTrendData[luckTrendData.length - 1][1];
+                    var decay = Math.exp(-(maxTime - lastTime) / targetBlockTimeMs);
+                    var decayedLuck = lastLuckVal * decay;
+                    luckTrendData.push([maxTime, decayedLuck]);
+                }
+            } else if (luckTrendData.length === 0 && sortedBlocks.length > 0) {
+                // Edge case: No blocks in time window, but blocks exist before it
+                // Find the most recent block with luck before minTime
+                var lastBlockBeforeWindow = null;
+                for (var i = sortedBlocks.length - 1; i >= 0; i--) {
+                    var bt = sortedBlocks[i].ts * 1000;
+                    if (bt < minTime && sortedBlocks[i].luck !== undefined) {
+                        lastBlockBeforeWindow = sortedBlocks[i];
+                        break;
+                    }
+                }
+                
+                if (lastBlockBeforeWindow) {
+                    // Draw line from minTime to maxTime with exponential decay toward 0
+                    var lastLuck = lastBlockBeforeWindow.luck;
+                    luckTrendData.push([minTime, lastLuck]);
+                    var decay = Math.exp(-(maxTime - minTime) / targetBlockTimeMs);
+                    luckTrendData.push([maxTime, lastLuck * decay]);
                 }
             }
             
@@ -2584,6 +2688,7 @@
             
             // Display current worker count and unique miner count
             var currentWorkerCount = minerCount.length > 0 ? minerCount[minerCount.length - 1][1] : 0;
+            currentWorkerCount = (currentWorkerCount === null || currentWorkerCount === undefined) ? 0 : currentWorkerCount;
             var uniqueMiners = [];
             if (uniqueMinerCountData && uniqueMinerCountData.length > 0) {
                 for (var i = 0; i < uniqueMinerCountData.length; i++) {
@@ -2595,6 +2700,7 @@
                 }
             }
             var currentUniqueMinerCount = uniqueMiners.length > 0 ? uniqueMiners[uniqueMiners.length - 1][1] : 0;
+            currentUniqueMinerCount = (currentUniqueMinerCount === null || currentUniqueMinerCount === undefined) ? 0 : currentUniqueMinerCount;
             document.getElementById('graph-miners').textContent = currentWorkerCount + '/' + currentUniqueMinerCount;
             
             if (avgLuck !== null) {
@@ -2625,7 +2731,11 @@
                     marginLeft: 80,
                     panning: { enabled: true, type: 'x' },
                     panKey: 'shift',
-                    zoomType: 'x'
+                    zoomType: 'x',
+                    events: {
+                        load: function() { drawDiffRatioBars(this); },
+                        redraw: function() { drawDiffRatioBars(this); }
+                    }
                 },
                 credits: { enabled: false },
                 title: { text: null },
@@ -3046,6 +3156,10 @@
             });
             
             // Interpolate luck trend to align with hashrate time boundaries
+            // Use exponential decay toward 0 after the last known block luck,
+            // based on target block time (150s for Litecoin). This reflects rising expected work
+            // with no found block: luck drifts down as time passes without a hit.
+            var targetBlockTimeMs = 150000; // 2.5 minutes (Litecoin target block time)
             if (luckTrendData.length > 0) {
                 // Sort by time
                 luckTrendData.sort(function(a, b) { return a[0] - b[0]; });
@@ -3072,10 +3186,32 @@
                     }
                 }
                 
-                // Add interpolated point at maxTime if last point is before maxTime
+                // Add interpolated point at maxTime with exponential decay toward 0
                 if (luckTrendData[luckTrendData.length - 1][0] < maxTime) {
-                    // Extend the last value to maxTime
-                    luckTrendData.push([maxTime, luckTrendData[luckTrendData.length - 1][1]]);
+                    var lastTime = luckTrendData[luckTrendData.length - 1][0];
+                    var lastLuckVal = luckTrendData[luckTrendData.length - 1][1];
+                    var decay = Math.exp(-(maxTime - lastTime) / targetBlockTimeMs);
+                    var decayedLuck = lastLuckVal * decay;
+                    luckTrendData.push([maxTime, decayedLuck]);
+                }
+            } else if (luckTrendData.length === 0 && sortedBlocks.length > 0) {
+                // Edge case: No blocks in time window, but blocks exist before it
+                // Find the most recent block with luck before minTime
+                var lastBlockBeforeWindow = null;
+                for (var i = sortedBlocks.length - 1; i >= 0; i--) {
+                    var bt = sortedBlocks[i].ts * 1000;
+                    if (bt < minTime && sortedBlocks[i].luck !== undefined) {
+                        lastBlockBeforeWindow = sortedBlocks[i];
+                        break;
+                    }
+                }
+                
+                if (lastBlockBeforeWindow) {
+                    // Draw line from minTime to maxTime with exponential decay toward 0
+                    var lastLuck = lastBlockBeforeWindow.luck;
+                    luckTrendData.push([minTime, lastLuck]);
+                    var decay = Math.exp(-(maxTime - minTime) / targetBlockTimeMs);
+                    luckTrendData.push([maxTime, lastLuck * decay]);
                 }
             }
             
@@ -3106,7 +3242,9 @@
             
             // Display current worker count and unique miner count in fullscreen
             var fsWorkerCount = minerCount.length > 0 ? minerCount[minerCount.length - 1][1] : 0;
+            fsWorkerCount = (fsWorkerCount === null || fsWorkerCount === undefined) ? 0 : fsWorkerCount;
             var fsUniqueMinerCount = uniqueMinerCount.length > 0 ? uniqueMinerCount[uniqueMinerCount.length - 1][1] : 0;
+            fsUniqueMinerCount = (fsUniqueMinerCount === null || fsUniqueMinerCount === undefined) ? 0 : fsUniqueMinerCount;
             document.getElementById('fs-graph-miners').textContent = fsWorkerCount + '/' + fsUniqueMinerCount;
             
             if (fsAvgLuck !== null) {
@@ -3128,7 +3266,11 @@
                     marginLeft: 80,
                     panning: { enabled: true, type: 'x' },
                     panKey: 'shift',
-                    zoomType: 'x'
+                    zoomType: 'x',
+                    events: {
+                        load: function() { drawDiffRatioBars(this); },
+                        redraw: function() { drawDiffRatioBars(this); }
+                    }
                 },
                 credits: { enabled: false },
                 title: { text: null },
