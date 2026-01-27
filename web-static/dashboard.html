@@ -273,22 +273,23 @@
         
         th {
             text-align: left;
-            padding: 8px 10px;
+            padding: 6px 8px;
             background: var(--darker);
             color: var(--text-muted);
-            font-size: 0.8rem;
+            font-size: 0.7rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             font-weight: 600;
+            white-space: nowrap;
         }
         
         th:first-child { border-radius: 8px 0 0 8px; }
         th:last-child { border-radius: 0 8px 8px 0; }
         
         td {
-            padding: 8px 10px;
+            padding: 6px 8px;
             border-bottom: 1px solid var(--border);
-            font-size: 0.9rem;
+            font-size: 0.8rem;
         }
         
         tr:last-child td {
@@ -303,11 +304,22 @@
             color: var(--primary);
             text-decoration: none;
             font-family: 'Monaco', 'Consolas', monospace;
-            font-size: 0.85rem;
+            font-size: 0.72rem;
+            display: inline-block;
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            vertical-align: middle;
         }
         
         .hash-link:hover {
             text-decoration: underline;
+        }
+        
+        /* Full address on hover tooltip */
+        .hash-link[title]:hover {
+            max-width: none;
         }
         
         /* Scrollable table wrapper */
@@ -347,10 +359,27 @@
         .amount {
             font-family: 'Monaco', 'Consolas', monospace;
             font-weight: 600;
+            font-size: 0.75rem;
+            white-space: nowrap;
         }
         
         .amount.highlight {
             color: var(--success);
+        }
+        
+        /* Merged payout sub-rows */
+        .merged-payout-row td {
+            font-size: 0.72rem;
+            padding: 4px 8px;
+        }
+        
+        .merged-payout-row .hash-link {
+            font-size: 0.68rem;
+            max-width: 160px;
+        }
+        
+        .merged-payout-row .amount {
+            font-size: 0.7rem;
         }
         
         /* Block status styles */
@@ -1176,6 +1205,7 @@
                 <div class="section-header">
                     <h2>💵 Current Payouts</h2>
                     <span class="badge"><span id="payouts_total">0</span> <span class="symbol-small">DASH</span></span>
+                    <span class="badge" id="merged_payouts_badge" style="display: none; background: #6f42c1; margin-left: 8px;"><span id="merged_payouts_total">0</span> <span id="merged_payouts_symbol">AUX</span></span>
                 </div>
                 <div class="table-scroll">
                     <table id="payouts">
@@ -1614,6 +1644,7 @@
                     .attr('class', 'hash-link')
                     .attr('href', function(b) { return currency_info.block_explorer_url_prefix + b.hash; })
                     .attr('target', '_blank')
+                    .attr('title', function(b) { return b.hash; })
                     .text(function(b) { return '...' + b.hash.substr(-8); });
                 tr.append('td')
                     .attr('class', function(b) {
@@ -1625,8 +1656,10 @@
                     })
                     .text(function(b) {
                         if (b.luck_method === 'first_block') return '1st';  // First block indicator
-                        if (!b.luck) return '-';
-                        return d3.format('.0f')(b.luck) + '%';
+                        if (b.luck === undefined || b.luck === null) return '-';
+                        // Show decimal for very small luck values
+                        if (b.luck < 1) return d3.format('.2f')(b.luck) + '%';
+                        return b.luck < 1 ? d3.format('.2f')(b.luck) : d3.format('.0f')(b.luck) + '%';
                     })
                     .attr('title', function(b) {
                         if (b.luck_method === 'first_block') {
@@ -1903,46 +1936,115 @@
         }
 
         function loadPayouts() {
-            d3.json('../current_payouts', function(pays) {
+            // Use the merged payouts endpoint to get both main chain and merged chain info
+            d3.json('../current_merged_payouts', function(mergedPays) {
                 d3.select('#payouts_loading').style('display', 'none');
                 // Clear existing rows before adding new data
                 d3.select('#payouts tbody').selectAll('tr').remove();
                 
-                if (!pays) return;
+                if (!mergedPays) {
+                    // Fallback to old endpoint if merged endpoint fails
+                    d3.json('../current_payouts', function(pays) {
+                        if (!pays) return;
+                        renderSimplePayouts(pays);
+                    });
+                    return;
+                }
                 
+                // Build array sorted by amount
                 var arr = [];
-                for (var i in pays) arr.push(i);
-                arr.sort(function(a, b) { return pays[b] - pays[a]; });
+                for (var addr in mergedPays) arr.push(addr);
+                arr.sort(function(a, b) { return mergedPays[b].amount - mergedPays[a].amount; });
                 
                 // Limit to top 20 for display
                 var display = arr.slice(0, 20);
+                
+                // Calculate totals
+                var total = d3.sum(arr, function(addr) { return mergedPays[addr].amount; });
+                d3.select('#payouts_total').text(d3.format('.4f')(total));
+                
+                // Calculate merged totals if any
+                var mergedTotal = 0;
+                var mergedSymbol = null;
+                arr.forEach(function(addr) {
+                    var entry = mergedPays[addr];
+                    if (entry.merged && entry.merged.length > 0) {
+                        entry.merged.forEach(function(m) {
+                            mergedTotal += m.amount;
+                            if (!mergedSymbol) mergedSymbol = m.symbol;
+                        });
+                    }
+                });
+                
+                if (mergedTotal > 0 && mergedSymbol) {
+                    d3.select('#merged_payouts_badge').style('display', 'inline');
+                    d3.select('#merged_payouts_total').text(d3.format('.4f')(mergedTotal));
+                    d3.select('#merged_payouts_symbol').text(mergedSymbol);
+                }
                 
                 d3.json('../payout_addrs', function(addrs) {
                     var totamount = 0;
                     if (addrs) {
                         for (var i in addrs) {
-                            totamount += (addrs[i] in pays ? pays[addrs[i]] : 0);
+                            var addr = addrs[i];
+                            totamount += (addr in mergedPays ? mergedPays[addr].amount : 0);
                         }
                     }
                     d3.select('#payout_totamount').text(d3.format('.4f')(totamount));
                 });
                 
-                var total = d3.sum(arr, function(addr) { return pays[addr]; });
-                d3.select('#payouts_total').text(d3.format('.4f')(total));
+                var tbody = d3.select('#payouts tbody');
                 
-                var tr = d3.select('#payouts tbody').selectAll('tr').data(display).enter().append('tr');
-                tr.append('td').append('a')
-                    .attr('class', 'hash-link')
-                    .attr('href', function(addr) { return currency_info.address_explorer_url_prefix + addr; })
-                    .attr('target', '_blank')
-                    .text(function(addr) { return addr; });
-                tr.append('td')
-                    .style('text-align', 'right')
-                    .attr('class', 'amount')
-                    .text(function(addr) { return d3.format('.8f')(pays[addr]); });
+                // Render each payout with optional merged sub-row
+                display.forEach(function(addr) {
+                    var entry = mergedPays[addr];
+                    
+                    // Main row for parent chain
+                    var mainRow = tbody.append('tr');
+                    mainRow.append('td').append('a')
+                        .attr('class', 'hash-link')
+                        .attr('href', currency_info.address_explorer_url_prefix + addr)
+                        .attr('target', '_blank')
+                        .attr('title', addr)
+                        .text(addr);
+                    mainRow.append('td')
+                        .style('text-align', 'right')
+                        .attr('class', 'amount')
+                        .text(d3.format('.8f')(entry.amount));
+                    
+                    // Sub-rows for merged chain addresses
+                    if (entry.merged && entry.merged.length > 0) {
+                        entry.merged.forEach(function(merged) {
+                            var subRow = tbody.append('tr')
+                                .attr('class', 'merged-payout-row')
+                                .style('background', 'rgba(111, 66, 193, 0.1)');
+                            
+                            var addrCell = subRow.append('td')
+                                .style('padding-left', '20px');
+                            addrCell.append('span')
+                                .style('color', '#6f42c1')
+                                .style('font-weight', 'bold')
+                                .style('margin-right', '6px')
+                                .style('font-size', '0.7rem')
+                                .text('↳ ' + merged.symbol);
+                            addrCell.append('a')
+                                .attr('class', 'hash-link')
+                                .attr('href', getMergedExplorerUrl(merged.symbol, merged.address))
+                                .attr('target', '_blank')
+                                .attr('title', merged.address)
+                                .text(merged.address);
+                            
+                            subRow.append('td')
+                                .style('text-align', 'right')
+                                .style('color', '#6f42c1')
+                                .attr('class', 'amount')
+                                .text(d3.format('.2f')(merged.amount));
+                        });
+                    }
+                });
                 
                 if (arr.length > 20) {
-                    var more = d3.select('#payouts tbody').append('tr');
+                    var more = tbody.append('tr');
                     more.append('td')
                         .attr('colspan', '2')
                         .style('text-align', 'center')
@@ -1950,6 +2052,48 @@
                         .text('+ ' + (arr.length - 20) + ' more addresses');
                 }
             });
+        }
+        
+        function getMergedExplorerUrl(symbol, address) {
+            // Block explorers for merged mining chains
+            var explorers = {
+                'tDOGE': 'https://blockexplorer.one/dogecoin/testnet/address/',
+                'DOGE': 'https://blockexplorer.one/dogecoin/mainnet/address/',
+            };
+            var prefix = explorers[symbol] || '#';
+            return prefix + address;
+        }
+        
+        function renderSimplePayouts(pays) {
+            // Fallback simple payout rendering
+            var arr = [];
+            for (var i in pays) arr.push(i);
+            arr.sort(function(a, b) { return pays[b] - pays[a]; });
+            
+            var display = arr.slice(0, 20);
+            var total = d3.sum(arr, function(addr) { return pays[addr]; });
+            d3.select('#payouts_total').text(d3.format('.4f')(total));
+            
+            var tr = d3.select('#payouts tbody').selectAll('tr').data(display).enter().append('tr');
+            tr.append('td').append('a')
+                .attr('class', 'hash-link')
+                .attr('href', function(addr) { return currency_info.address_explorer_url_prefix + addr; })
+                .attr('target', '_blank')
+                .attr('title', function(addr) { return addr; })
+                .text(function(addr) { return addr; });
+            tr.append('td')
+                .style('text-align', 'right')
+                .attr('class', 'amount')
+                .text(function(addr) { return d3.format('.8f')(pays[addr]); });
+            
+            if (arr.length > 20) {
+                var more = d3.select('#payouts tbody').append('tr');
+                more.append('td')
+                    .attr('colspan', '2')
+                    .style('text-align', 'center')
+                    .style('color', 'var(--text-muted)')
+                    .text('+ ' + (arr.length - 20) + ' more addresses');
+            }
         }
         
         function loadPeers() {
@@ -2327,7 +2471,7 @@
                 // Check if block is within selected time window (exact range for alignment)
                 if (blockTime >= minTime && blockTime <= maxTime) {
                     // For luck trend, collect blocks with luck data within time window
-                    if (b.luck) {
+                    if (b.luck !== undefined && b.luck !== null) {
                         luckTrendData.push([blockTime, b.luck]);
                         validLucks.push(b.luck);
                     }
@@ -2357,7 +2501,7 @@
                     
                     // Determine color based on luck
                     var color = '#10b981'; // Default green (good luck >= 100%)
-                    if (b.luck) {
+                    if (b.luck !== undefined && b.luck !== null) {
                         if (b.luck >= 100) {
                             color = '#10b981'; // Green - good luck
                         } else if (b.luck >= 75) {
@@ -2553,9 +2697,10 @@
                             var s = '<b>' + Highcharts.dateFormat('%b %e, %H:%M:%S', this.x) + '</b><br/>';
                             s += '<span style="color:#00ff88">◆</span> <b>Block Found!</b><br/>';
                             s += 'Height: <b>' + (b.number || '?') + '</b><br/>';
-                            if (b.luck) {
+                            if (b.luck !== undefined && b.luck !== null) {
                                 var luckColor = b.luck >= 100 ? '#00ff88' : (b.luck >= 75 ? '#ffc107' : '#ff6b6b');
-                                s += 'Luck: <b style="color:' + luckColor + '">' + d3.format('.0f')(b.luck) + '%</b><br/>';
+                                var luckFormat = b.luck < 1 ? d3.format('.2f')(b.luck) : b.luck < 1 ? d3.format('.2f')(b.luck) : d3.format('.0f')(b.luck);
+                                s += 'Luck: <b style="color:' + luckColor + '">' + luckFormat + '%</b><br/>';
                             } else if (b.luck_method === 'first_block') {
                                 s += 'Luck: <b style="color:#888">1st block</b><br/>';
                             }
@@ -2681,9 +2826,9 @@
                             var b = this.block;
                             var s = '<span style="color:#00ff88">◆</span> <b>Block Found!</b><br/>';
                             s += 'Height: <b>' + (b.number || b.block_height || '?') + '</b><br/>';
-                            if (b.luck) {
+                            if (b.luck !== undefined && b.luck !== null) {
                                 var luckColor = b.luck >= 100 ? '#00ff88' : (b.luck >= 75 ? '#ffc107' : '#ff6b6b');
-                                s += 'Luck: <b style="color:' + luckColor + '">' + d3.format('.0f')(b.luck) + '%</b><br/>';
+                                s += 'Luck: <b style="color:' + luckColor + '">' + b.luck < 1 ? d3.format('.2f')(b.luck) : d3.format('.0f')(b.luck) + '%</b><br/>';
                             } else if (b.luck_method === 'first_block') {
                                 s += 'Luck: <b>1st block</b><br/>';
                             }
@@ -2851,7 +2996,7 @@
                 // Check if block is within selected time window (exact range for alignment)
                 if (blockTime >= minTime && blockTime <= maxTime) {
                     // For luck trend, collect blocks with luck data within time window
-                    if (b.luck) {
+                    if (b.luck !== undefined && b.luck !== null) {
                         luckTrendData.push([blockTime, b.luck]);
                         validLucks.push(b.luck);
                     }
@@ -2881,7 +3026,7 @@
                     
                     // Determine color based on luck
                     var color = '#10b981'; // Default green (good luck >= 100%)
-                    if (b.luck) {
+                    if (b.luck !== undefined && b.luck !== null) {
                         if (b.luck >= 100) {
                             color = '#10b981'; // Green - good luck
                         } else if (b.luck >= 75) {
@@ -3050,9 +3195,9 @@
                             var s = '<b>' + Highcharts.dateFormat('%b %e, %H:%M:%S', this.x) + '</b><br/>';
                             s += '<span style="color:#00ff88">◆</span> <b>Block Found!</b><br/>';
                             s += 'Height: <b>' + (b.number || '?') + '</b><br/>';
-                            if (b.luck) {
+                            if (b.luck !== undefined && b.luck !== null) {
                                 var luckColor = b.luck >= 100 ? '#00ff88' : (b.luck >= 75 ? '#ffc107' : '#ff6b6b');
-                                s += 'Luck: <b style="color:' + luckColor + '">' + d3.format('.0f')(b.luck) + '%</b><br/>';
+                                s += 'Luck: <b style="color:' + luckColor + '">' + b.luck < 1 ? d3.format('.2f')(b.luck) : d3.format('.0f')(b.luck) + '%</b><br/>';
                             } else if (b.luck_method === 'first_block') {
                                 s += 'Luck: <b style="color:#888">1st block</b><br/>';
                             }
@@ -3192,9 +3337,9 @@
                             var b = this.block;
                             var s = '<span style="color:#00ff88">◆</span> <b>Block Found!</b><br/>';
                             s += 'Height: <b>' + (b.number || b.block_height || '?') + '</b><br/>';
-                            if (b.luck) {
+                            if (b.luck !== undefined && b.luck !== null) {
                                 var luckColor = b.luck >= 100 ? '#00ff88' : (b.luck >= 75 ? '#ffc107' : '#ff6b6b');
-                                s += 'Luck: <b style="color:' + luckColor + '">' + d3.format('.0f')(b.luck) + '%</b><br/>';
+                                s += 'Luck: <b style="color:' + luckColor + '">' + b.luck < 1 ? d3.format('.2f')(b.luck) : d3.format('.0f')(b.luck) + '%</b><br/>';
                             } else if (b.luck_method === 'first_block') {
                                 s += 'Luck: <b>1st block</b><br/>';
                             }

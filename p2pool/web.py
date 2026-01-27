@@ -210,6 +210,102 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root.putChild('current_payouts', WebInterface(lambda: dict(
         (address, value/1e8) for address, value
             in node.get_current_txouts().iteritems())))
+    
+    # Import merged chain networks for address conversion
+    try:
+        from p2pool.bitcoin.networks import dogecoin_testnet as dogecoin_testnet_net
+        from p2pool.bitcoin.networks import dogecoin as dogecoin_net
+    except ImportError:
+        dogecoin_testnet_net = None
+        dogecoin_net = None
+    
+    def get_current_merged_payouts():
+        """
+        Get current payouts with derived merged chain addresses.
+        Returns dict: {parent_address: {amount: X, merged: [{network: Y, symbol: Z, address: A, amount: B}, ...]}}
+        """
+        from p2pool.work import is_pubkey_hash_address
+        
+        # Get main chain payouts (in satoshis for proportion calculation)
+        main_payouts_satoshis = dict((address, value) for address, value in node.get_current_txouts().iteritems())
+        main_payouts = dict((address, value/1e8) for address, value in main_payouts_satoshis.iteritems())
+        
+        # Calculate total main chain payout for proportion calculation
+        total_main_satoshis = sum(main_payouts_satoshis.values())
+        
+        # Check if we have merged work active
+        merged_chains = []
+        if hasattr(wb, 'merged_work') and wb.merged_work.value:
+            for chainid, aux_work in wb.merged_work.value.iteritems():
+                merged_net_name = aux_work.get('merged_net_name', 'Unknown')
+                merged_net_symbol = aux_work.get('merged_net_symbol', 'AUX')
+                
+                # Get merged chain block reward from template
+                merged_reward = 0
+                template = aux_work.get('template')
+                if template and 'coinbasevalue' in template:
+                    merged_reward = template['coinbasevalue']
+                
+                # Determine the merged chain network for address conversion
+                merged_addr_net = None
+                if chainid == 98:  # Dogecoin
+                    parent_symbol = getattr(node.net.PARENT, 'SYMBOL', '') if hasattr(node.net, 'PARENT') else ''
+                    is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
+                    if is_testnet and dogecoin_testnet_net:
+                        merged_addr_net = dogecoin_testnet_net
+                    elif dogecoin_net:
+                        merged_addr_net = dogecoin_net
+                
+                if merged_addr_net:
+                    merged_chains.append({
+                        'chainid': chainid,
+                        'network': merged_net_name,
+                        'symbol': merged_net_symbol,
+                        'addr_net': merged_addr_net,
+                        'reward': merged_reward,
+                    })
+        
+        # Build result with merged addresses for each parent address
+        result = {}
+        parent_net = node.net.PARENT if hasattr(node.net, 'PARENT') else node.net
+        
+        for parent_address, amount in main_payouts.iteritems():
+            entry = {
+                'amount': amount,
+                'merged': []
+            }
+            
+            # Try to derive merged chain addresses
+            for chain in merged_chains:
+                try:
+                    is_convertible, pubkey_hash, error_msg = is_pubkey_hash_address(parent_address, parent_net)
+                    if is_convertible and pubkey_hash is not None:
+                        merged_address = bitcoin_data.pubkey_hash_to_address(
+                            pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
+                        
+                        # Calculate merged payout proportionally
+                        # Same proportion of merged reward as main chain payout
+                        if total_main_satoshis > 0 and chain['reward'] > 0:
+                            proportion = main_payouts_satoshis[parent_address] / float(total_main_satoshis)
+                            merged_amount = (chain['reward'] * proportion) / 1e8
+                        else:
+                            merged_amount = 0
+                        
+                        entry['merged'].append({
+                            'network': chain['network'],
+                            'symbol': chain['symbol'],
+                            'address': merged_address,
+                            'amount': merged_amount,
+                        })
+                except Exception as e:
+                    # Skip addresses that can't be converted
+                    pass
+            
+            result[parent_address] = entry
+        
+        return result
+    
+    web_root.putChild('current_merged_payouts', WebInterface(get_current_merged_payouts))
     web_root.putChild('patron_sendmany', WebInterface(get_patron_sendmany, 'text/plain'))
     web_root.putChild('global_stats', WebInterface(get_global_stats))
     web_root.putChild('local_stats', WebInterface(get_local_stats))
@@ -315,19 +411,345 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     
     web_root.putChild('connected_miners', WebInterface(get_connected_miners))
     
-    web_root.putChild('recent_blocks', WebInterface(lambda: [dict(
-        ts=s.timestamp,
-        hash='%064x' % s.header_hash,
-        number=p2pool_data.parse_bip0034(s.share_data['coinbase'])[0],
-        share='%064x' % s.hash,
-    ) for s in node.tracker.get_chain(node.best_share_var.value, min(node.tracker.get_height(node.best_share_var.value), node.net.CHAIN_LENGTH)) if s.pow_hash <= s.header['bits'].target]))
+    # Block history storage - persisted to disk
+    block_history = []
+    block_history_path = os.path.join(datadir_path, 'block_history')
     
-    # Merged mined blocks endpoint - only show verified blocks (not orphaned or pending)
-    web_root.putChild('recent_merged_blocks', WebInterface(lambda: [b for b in wb.recent_merged_blocks[::-1] if b.get('verified') == True]))
+    # Load existing block history
+    if os.path.exists(block_history_path):
+        try:
+            with open(block_history_path, 'rb') as f:
+                block_history = json.loads(f.read())
+                print('Loaded %d historical blocks from disk' % len(block_history))
+        except Exception as e:
+            log.err(None, 'Error loading block history:')
+    
+    # Set to track known block hashes (avoid duplicates)
+    known_block_hashes = set(b['hash'] for b in block_history)
+    
+    def save_block_history():
+        """Save block history to disk"""
+        try:
+            # Keep last 1000 blocks
+            while len(block_history) > 1000:
+                oldest = block_history.pop(0)
+                known_block_hashes.discard(oldest['hash'])
+            _atomic_write(block_history_path, json.dumps(block_history))
+        except Exception as e:
+            log.err(None, 'Error saving block history:')
+    
+    def add_block_to_history(block_info):
+        """Add a new block to history if not already known"""
+        block_hash = block_info['hash']
+        if block_hash not in known_block_hashes:
+            block_history.append(block_info)
+            known_block_hashes.add(block_hash)
+            # Sort by timestamp descending
+            block_history.sort(key=lambda x: x['ts'], reverse=True)
+            return True
+        return False
+    
+    def get_recent_blocks():
+        """Get recent blocks found by the pool with luck and timing info"""
+        try:
+            # Get pool hashrate for luck calculations
+            height = node.tracker.get_height(node.best_share_var.value)
+            if height < 10:
+                return block_history  # Return historical blocks if tracker not ready
+            
+            lookbehind = min(height, 720)
+            pool_hashrate = p2pool_data.get_pool_attempts_per_second(node.tracker, node.best_share_var.value, lookbehind)
+            
+            # Find all blocks in the current tracker chain
+            chain_length = min(height, node.net.CHAIN_LENGTH)
+            tracker_blocks = []
+            for s in node.tracker.get_chain(node.best_share_var.value, chain_length):
+                if s.pow_hash <= s.header['bits'].target:
+                    tracker_blocks.append(s)
+            
+            # Build block info for each block in tracker
+            new_blocks_added = False
+            for i, s in enumerate(tracker_blocks):
+                block_hash = '%064x' % s.header_hash
+                
+                # Skip if already in history
+                if block_hash in known_block_hashes:
+                    # Update verification status
+                    for b in block_history:
+                        if b['hash'] == block_hash:
+                            is_verified = s.hash in node.tracker.verified.items
+                            b['verified'] = is_verified
+                            b['status'] = 'confirmed' if is_verified else 'pending'
+                            break
+                    continue
+                
+                is_verified = s.hash in node.tracker.verified.items
+                block_info = {
+                    'ts': s.timestamp,
+                    'hash': block_hash,
+                    'number': p2pool_data.parse_bip0034(s.share_data['coinbase'])[0],
+                    'share': '%064x' % s.hash,
+                    'network_difficulty': bitcoin_data.target_to_difficulty(s.header['bits'].target),
+                    'share_difficulty': bitcoin_data.target_to_difficulty(s.target),
+                    'actual_hash_difficulty': bitcoin_data.target_to_difficulty(s.pow_hash),
+                    'verified': is_verified,
+                    'status': 'confirmed' if is_verified else 'pending',
+                    'pool_hashrate_at_find': pool_hashrate,
+                }
+                
+                # Calculate expected time based on difficulty and pool hashrate
+                if pool_hashrate > 0:
+                    expected_hashes = bitcoin_data.target_to_average_attempts(s.header['bits'].target)
+                    expected_time = expected_hashes / pool_hashrate
+                    block_info['expected_time'] = expected_time
+                
+                # Calculate time_to_find based on previous block
+                if i + 1 < len(tracker_blocks):
+                    prev_block = tracker_blocks[i + 1]
+                    time_to_find = s.timestamp - prev_block.timestamp
+                    block_info['time_to_find'] = time_to_find
+                    
+                    if pool_hashrate > 0 and expected_time > 0 and time_to_find > 0:
+                        luck = (expected_time / time_to_find) * 100
+                        block_info['luck'] = luck
+                        block_info['luck_method'] = 'simple_avg'
+                else:
+                    block_info['luck_method'] = 'first_block'
+                
+                if add_block_to_history(block_info):
+                    new_blocks_added = True
+                    print('Added new block to history: height=%s hash=%s' % (block_info['number'], block_hash[:16]))
+            
+            # Save to disk if new blocks were added
+            if new_blocks_added:
+                save_block_history()
+            
+            # Calculate pool average luck from all blocks with luck data
+            total_luck = 0
+            luck_count = 0
+            for b in block_history:
+                if b.get('luck'):
+                    total_luck += b['luck']
+                    luck_count += 1
+            
+            # Return a copy with pool_avg_luck added to first block
+            result = list(block_history)
+            if result and luck_count > 0:
+                result[0] = dict(result[0])
+                result[0]['pool_avg_luck'] = total_luck / luck_count
+            
+            return result
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return block_history  # Return what we have on error
+    
+    web_root.putChild('recent_blocks', WebInterface(get_recent_blocks))
+    
+    # Merged block history storage - persisted to disk
+    merged_block_history_path = os.path.join(datadir_path, 'merged_block_history')
+    merged_known_hashes = set()
+    
+    # Load existing merged block history
+    if os.path.exists(merged_block_history_path):
+        try:
+            with open(merged_block_history_path, 'rb') as f:
+                loaded_merged = json.loads(f.read())
+                # Merge with any existing blocks in wb.recent_merged_blocks
+                for b in loaded_merged:
+                    if b.get('hash') not in merged_known_hashes:
+                        wb.recent_merged_blocks.append(b)
+                        merged_known_hashes.add(b.get('hash'))
+                print('Loaded %d historical merged blocks from disk' % len(loaded_merged))
+        except Exception as e:
+            log.err(None, 'Error loading merged block history:')
+    
+    # Initialize known hashes from any existing blocks
+    for b in wb.recent_merged_blocks:
+        if b.get('hash'):
+            merged_known_hashes.add(b.get('hash'))
+    
+    def save_merged_block_history():
+        """Save merged block history to disk"""
+        try:
+            # Keep last 500 merged blocks
+            while len(wb.recent_merged_blocks) > 500:
+                oldest = wb.recent_merged_blocks.pop(0)
+                merged_known_hashes.discard(oldest.get('hash'))
+            _atomic_write(merged_block_history_path, json.dumps(wb.recent_merged_blocks))
+        except Exception as e:
+            log.err(None, 'Error saving merged block history:')
+    
+    # Periodically save merged blocks
+    x_merged = deferral.RobustLoopingCall(save_merged_block_history)
+    x_merged.start(60)  # Save every 60 seconds
+    stop_event.watch(x_merged.stop)
+    
+    # Merged mined blocks endpoint - show verified and pending blocks (not orphaned)
+    web_root.putChild('recent_merged_blocks', WebInterface(lambda: [b for b in wb.recent_merged_blocks[::-1] if b.get('verified') != False]))
     
     # All merged blocks endpoint - for debugging (includes orphaned and pending)
     web_root.putChild('all_merged_blocks', WebInterface(lambda: wb.recent_merged_blocks[::-1]))
     
+    # Merged mining stats endpoint
+    def get_merged_stats():
+        """Get merged mining statistics"""
+        blocks = wb.recent_merged_blocks
+        
+        # Get current merged block value
+        merged_block_value = 0
+        merged_symbol = ''
+        try:
+            if hasattr(wb, 'merged_work') and wb.merged_work and hasattr(wb.merged_work, 'value') and wb.merged_work.value:
+                for chain_id, chain in wb.merged_work.value.iteritems():
+                    if 'template' in chain and chain['template']:
+                        template = chain['template']
+                        merged_block_value = template.get('coinbasevalue', 0) / 1e8
+                        merged_symbol = chain.get('symbol', 'AUX')
+                        break
+        except Exception as e:
+            print "[MERGED STATS] Error getting merged work: %s" % e
+        
+        if not blocks:
+            return {
+                'total_blocks': 0,
+                'verified_blocks': 0,
+                'pending_blocks': 0,
+                'orphaned_blocks': 0,
+                'networks': {},
+                'block_value': merged_block_value,
+                'symbol': merged_symbol,
+            }
+        
+        verified = len([b for b in blocks if b.get('verified') == True])
+        pending = len([b for b in blocks if b.get('verified') is None])
+        orphaned = len([b for b in blocks if b.get('verified') == False])
+        
+        # Group by network
+        networks = {}
+        for b in blocks:
+            net = b.get('network', 'Unknown')
+            if net not in networks:
+                networks[net] = {'total': 0, 'verified': 0, 'pending': 0, 'orphaned': 0, 'symbol': b.get('symbol', '?')}
+            networks[net]['total'] += 1
+            if b.get('verified') == True:
+                networks[net]['verified'] += 1
+            elif b.get('verified') is None:
+                networks[net]['pending'] += 1
+            else:
+                networks[net]['orphaned'] += 1
+        
+        return {
+            'total_blocks': len(blocks),
+            'verified_blocks': verified,
+            'pending_blocks': pending,
+            'orphaned_blocks': orphaned,
+            'networks': networks,
+            'recent': [b for b in blocks[-5:][::-1]],  # Last 5 blocks
+            'block_value': merged_block_value,
+            'symbol': merged_symbol,
+        }
+    
+    web_root.putChild('merged_stats', WebInterface(get_merged_stats))
+    
+    # Node info endpoint for miner configuration display
+    def get_node_info():
+        """Get node connection info for miners"""
+        try:
+            # Try to get external IP
+            external_ip = None
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                external_ip = s.getsockname()[0]
+                s.close()
+            except:
+                external_ip = "127.0.0.1"
+            
+            return {
+                'external_ip': external_ip,
+                'worker_port': node.net.WORKER_PORT,
+                'p2p_port': node.net.P2P_PORT,
+                'network': node.net.NAME,
+                'symbol': node.net.PARENT.SYMBOL,
+            }
+        except Exception as e:
+            return {'error': str(e)}
+    
+    web_root.putChild('node_info', WebInterface(get_node_info))
+    
+    # Luck statistics endpoint
+    def get_luck_stats():
+        """Get pool luck statistics"""
+        try:
+            # Get recent blocks from tracker
+            height = node.tracker.get_height(node.best_share_var.value)
+            if height < 10:
+                return {'luck_available': False, 'blocks': [], 'current_luck_trend': None}
+            
+            lookbehind = min(height, 720)
+            
+            # Calculate current round luck
+            # Shares since last block / expected shares
+            pool_hashrate = p2pool_data.get_pool_attempts_per_second(node.tracker, node.best_share_var.value, lookbehind)
+            if pool_hashrate > 0:
+                expected_time = bitcoin_data.target_to_average_attempts(node.bitcoind_work.value['bits'].target) / pool_hashrate
+                # Get time since last block found
+                blocks_found = [s for s in node.tracker.get_chain(node.best_share_var.value, lookbehind) if s.pow_hash <= s.header['bits'].target]
+                if blocks_found:
+                    time_since_last = time.time() - blocks_found[0].timestamp
+                    current_luck = (expected_time / max(time_since_last, 1)) * 100
+                else:
+                    current_luck = None
+            else:
+                current_luck = None
+            
+            # Build blocks list with luck values
+            blocks = []
+            for s in node.tracker.get_chain(node.best_share_var.value, lookbehind):
+                if s.pow_hash <= s.header['bits'].target:
+                    blocks.append({
+                        'ts': s.timestamp,
+                        'hash': '%064x' % s.header_hash,
+                        'luck': 100,  # Placeholder - would need actual calculation
+                    })
+            
+            return {
+                'luck_available': True,
+                'current_luck_trend': current_luck,
+                'blocks': blocks[:20],  # Last 20 blocks
+            }
+        except Exception as e:
+            return {'luck_available': False, 'error': str(e), 'blocks': []}
+    
+    web_root.putChild('luck_stats', WebInterface(get_luck_stats))
+    
+    # Peer list endpoint with detailed info
+    def get_peer_list():
+        """Get list of connected P2Pool peers with details"""
+        try:
+            peers = []
+            for peer in node.p2p_node.peers.itervalues():
+                try:
+                    addr = peer.transport.getPeer()
+                    peers.append({
+                        'address': '%s:%s' % (addr.host, addr.port),
+                        'web_port': getattr(node.net, 'WORKER_PORT', addr.port),
+                        'version': getattr(peer, 'other_sub_version', None),
+                        'incoming': getattr(peer, 'incoming', False),
+                        'uptime': time.time() - getattr(peer, 'connected_at', time.time()) if hasattr(peer, 'connected_at') else 0,
+                        'downtime': 0,
+                        'txpool_size': getattr(peer, 'remembered_txs_size', 0),
+                    })
+                except:
+                    pass
+            return peers
+        except Exception as e:
+            return []
+    
+    web_root.putChild('peer_list', WebInterface(get_peer_list))
+
     web_root.putChild('uptime', WebInterface(lambda: time.time() - start_time))
     web_root.putChild('stale_rates', WebInterface(lambda: p2pool_data.get_stale_counts(node.tracker, node.best_share_var.value, decent_height(), rates=True)))
     

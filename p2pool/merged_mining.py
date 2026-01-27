@@ -11,6 +11,7 @@ Merged chain blocks (Dogecoin) need their OWN coinbase with donation/OP_RETURN!
 
 import sys
 from p2pool.bitcoin import data as bitcoin_data
+from p2pool.bitcoin import script
 from p2pool.util import pack
 from p2pool import data as p2pool_data
 
@@ -28,6 +29,8 @@ def build_coinbase_input_script(height, extradata=''):
     """
     Build coinbase input script with block height (BIP 34)
     
+    Uses the same method as parent chain coinbase (script.create_push_script)
+    
     Args:
         height: Block height (integer)
         extradata: Optional extra data to include
@@ -35,13 +38,8 @@ def build_coinbase_input_script(height, extradata=''):
     Returns:
         Packed script bytes
     """
-    # Encode height as compact size (BIP 34 requirement)
-    height_bytes = pack.IntType(32).pack(height)
-    # Remove leading zero bytes
-    while len(height_bytes) > 1 and height_bytes[0] == '\x00':
-        height_bytes = height_bytes[1:]
-    
-    script_bytes = chr(len(height_bytes)) + height_bytes
+    # Use the same method as parent chain - this is already tested and working
+    script_bytes = script.create_push_script([height])
     if extradata:
         script_bytes += extradata
     
