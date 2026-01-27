@@ -479,14 +479,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         # We used createauxblock, so we need submitauxblock for submission
                         use_submitauxblock = True
                     
+                    # Check if merged work hash changed (new block to mine)
+                    new_hash = int(auxblock['hash'], 16)
+                    old_work = self.merged_work.value.get(auxblock['chainid'], {})
+                    old_hash = old_work.get('hash', 0)
+                    
                     self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: dict(
-                        hash=int(auxblock['hash'], 16),
+                        hash=new_hash,
                         target='p2pool' if auxblock['target'] == 'p2pool' else pack.IntType(256).unpack(auxblock['target'].decode('hex')),
                         merged_proxy=merged_proxy,
                         multiaddress=False,
                         use_submitauxblock=use_submitauxblock,
                     )}))
-                    print '[MERGED-REFRESH-SINGLE] hash=%s target=%s' % (auxblock['hash'][:16], auxblock['target'][:16])
+                    
+                    # Log when hash changes (new block template)
+                    if new_hash != old_hash:
+                        print '[MERGED-REFRESH-SINGLE] NEW TEMPLATE hash=%s target=%s height=%s' % (auxblock['hash'][:16], auxblock['target'][:16], auxblock.get('height', '?'))
                 
                 yield deferral.sleep(1)
         
@@ -1420,7 +1428,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         print
                                         
                                         # Record merged block find
-                                        self.recent_merged_blocks.append(dict(
+                                        block_record = dict(
                                             ts=time.time(),
                                             hash='%064x' % aux_work['hash'],
                                             pow_hash='%064x' % pow_hash,
@@ -1431,10 +1439,26 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             chainid=aux_work.get('chainid', 0),
                                             txs=len(merged_block['txs']),
                                             size=len(complete_block),
-                                        ))
+                                            verified=None,  # None=pending, True=confirmed, False=orphaned
+                                        )
+                                        self.recent_merged_blocks.append(block_record)
                                         # Keep only last 100 merged blocks
                                         if len(self.recent_merged_blocks) > 100:
                                             self.recent_merged_blocks = self.recent_merged_blocks[-100:]
+                                        
+                                        # Async verification after a delay
+                                        if 'merged_proxy' in aux_work:
+                                            def verify_block(block_rec, proxy, block_hash):
+                                                verify_df = proxy.rpc_getblock('%064x' % block_hash)
+                                                @verify_df.addCallback
+                                                def on_verify(block_info):
+                                                    block_rec['verified'] = True
+                                                    print 'Merged block VERIFIED in chain: %064x' % block_hash
+                                                @verify_df.addErrback
+                                                def on_verify_fail(err):
+                                                    block_rec['verified'] = False
+                                                    print >>sys.stderr, 'Merged block orphaned (not in chain): %064x' % block_hash
+                                            reactor.callLater(5.0, verify_block, block_record, aux_work['merged_proxy'], aux_work['hash'])
                                     else:
                                         print >>sys.stderr, 'Multiaddress merged block rejected: %s' % (result,)
                                 
