@@ -428,12 +428,18 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     known_block_hashes = set(b['hash'] for b in block_history)
     
     def save_block_history():
-        """Save block history to disk"""
+        """Save block history to disk
+        
+        Block history stores all found blocks with luck/timing data.
+        Dashboards handle their own display windowing (e.g., last 100 blocks).
+        No artificial limit needed here - let it grow and persist all history.
+        """
         try:
-            # Keep last 1000 blocks
-            while len(block_history) > 1000:
-                oldest = block_history.pop(0)
-                known_block_hashes.discard(oldest['hash'])
+            # Optional: Uncomment below to limit storage if memory/disk becomes an issue
+            # Note: List is sorted newest-first (descending), so pop() removes oldest
+            # while len(block_history) > 1000:
+            #     oldest = block_history.pop()  # Remove from END (oldest blocks)
+            #     known_block_hashes.discard(oldest['hash'])
             _atomic_write(block_history_path, json.dumps(block_history))
         except Exception as e:
             log.err(None, 'Error saving block history:')
@@ -518,7 +524,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 
                 if add_block_to_history(block_info):
                     new_blocks_added = True
-                    print('Added new block to history: height=%s hash=%s' % (block_info['number'], block_hash[:16]))
+                    print('Added new block to history: height=%s hash=%s diff=%.8f' % (block_info['number'], block_hash[:16], block_info['network_difficulty']))
             
             # Save to disk if new blocks were added
             if new_blocks_added:
@@ -545,6 +551,51 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             return block_history  # Return what we have on error
     
     web_root.putChild('recent_blocks', WebInterface(get_recent_blocks))
+    
+    # Debug endpoint to check tracker status
+    def get_tracker_debug():
+        """Debug endpoint to inspect tracker shares and their difficulty comparison"""
+        try:
+            height = node.tracker.get_height(node.best_share_var.value)
+            chain_length = min(height, node.net.CHAIN_LENGTH) if height > 0 else 0
+            
+            # Sample first 10 shares
+            shares_debug = []
+            block_candidates = 0
+            total_checked = 0
+            for s in node.tracker.get_chain(node.best_share_var.value, chain_length):
+                total_checked += 1
+                pow_hash = s.pow_hash
+                network_target = s.header['bits'].target
+                is_block = pow_hash <= network_target
+                if is_block:
+                    block_candidates += 1
+                if total_checked <= 10:
+                    shares_debug.append({
+                        'share_hash': '%064x' % s.hash,
+                        'pow_hash': '%064x' % pow_hash,
+                        'network_target': '%064x' % network_target,
+                        'share_target': '%064x' % s.target,
+                        'is_block': is_block,
+                        'ts': s.timestamp,
+                        'header_hash': '%064x' % s.header_hash,
+                    })
+            
+            return {
+                'tracker_height': height,
+                'chain_length_checked': total_checked,
+                'block_candidates_found': block_candidates,
+                'sample_shares': shares_debug,
+                'known_block_hashes_count': len(known_block_hashes),
+                'block_history_count': len(block_history),
+                'best_share_var': '%064x' % node.best_share_var.value if node.best_share_var.value else None,
+            }
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {'error': str(e)}
+    
+    web_root.putChild('tracker_debug', WebInterface(get_tracker_debug))
     
     # Merged block history storage - persisted to disk
     merged_block_history_path = os.path.join(datadir_path, 'merged_block_history')
@@ -651,6 +702,123 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         }
     
     web_root.putChild('merged_stats', WebInterface(get_merged_stats))
+    
+    # Network difficulty history storage - persisted to disk
+    network_diff_history = []
+    network_diff_history_path = os.path.join(datadir_path, 'network_difficulty_history')
+    known_diff_timestamps = set()
+    
+    # Load existing network difficulty history
+    if os.path.exists(network_diff_history_path):
+        try:
+            with open(network_diff_history_path, 'rb') as f:
+                network_diff_history = json.loads(f.read())
+                known_diff_timestamps = set(int(d['ts']) for d in network_diff_history)
+                print('Loaded %d network difficulty samples from disk' % len(network_diff_history))
+        except Exception as e:
+            log.err(None, 'Error loading network difficulty history:')
+    
+    # Seed network difficulty history from block history (if not already loaded)
+    seeded_from_blocks = 0
+    for b in block_history:
+        if b.get('ts') and b.get('network_difficulty'):
+            ts_key = int(b['ts'])
+            if ts_key not in known_diff_timestamps:
+                network_diff_history.append({
+                    'ts': b['ts'],
+                    'network_diff': b['network_difficulty'],
+                    'source': 'block'
+                })
+                known_diff_timestamps.add(ts_key)
+                seeded_from_blocks += 1
+    if seeded_from_blocks > 0:
+        network_diff_history.sort(key=lambda x: x['ts'])
+        print('Seeded %d network difficulty samples from block history' % seeded_from_blocks)
+    
+    def save_network_diff_history():
+        """Save network difficulty history to disk"""
+        try:
+            # Keep last 2000 samples (covers weeks of data at block-rate sampling)
+            while len(network_diff_history) > 2000:
+                oldest = network_diff_history.pop(0)
+                known_diff_timestamps.discard(int(oldest['ts']))
+            _atomic_write(network_diff_history_path, json.dumps(network_diff_history))
+        except Exception as e:
+            log.err(None, 'Error saving network difficulty history:')
+    
+    def add_network_diff_sample(timestamp, network_diff, source='block'):
+        """Add a network difficulty sample if not already recorded for this timestamp"""
+        ts_key = int(timestamp)
+        if ts_key not in known_diff_timestamps:
+            network_diff_history.append({
+                'ts': timestamp,
+                'network_diff': network_diff,
+                'source': source  # 'block' or 'periodic'
+            })
+            known_diff_timestamps.add(ts_key)
+            # Sort by timestamp ascending
+            network_diff_history.sort(key=lambda x: x['ts'])
+            return True
+        return False
+    
+    # Periodically save network difficulty history
+    x_netdiff = deferral.RobustLoopingCall(save_network_diff_history)
+    x_netdiff.start(120)  # Save every 2 minutes
+    stop_event.watch(x_netdiff.stop)
+    
+    # Also sample current network difficulty periodically (every 5 minutes)
+    def sample_current_network_diff():
+        try:
+            if wb.current_work.value and 'bits' in wb.current_work.value:
+                diff = bitcoin_data.target_to_difficulty(wb.current_work.value['bits'].target)
+                current_time = time.time()
+                if add_network_diff_sample(current_time, diff, 'periodic'):
+                    print('Recorded periodic network difficulty sample: %.8f' % diff)
+        except Exception as e:
+            pass
+    
+    x_sample_diff = deferral.RobustLoopingCall(sample_current_network_diff)
+    x_sample_diff.start(300)  # Sample every 5 minutes
+    stop_event.watch(x_sample_diff.stop)
+    
+    # Network difficulty endpoint for graph - returns historical network difficulty
+    class NetworkDifficultyResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            try:
+                # Parse period parameter
+                period = request.args.get('period', ['hour'])[0]
+                now = time.time()
+                
+                # Determine time cutoff based on period
+                if period == 'hour':
+                    cutoff = now - 3600
+                elif period == 'day':
+                    cutoff = now - 86400
+                elif period == 'week':
+                    cutoff = now - 604800
+                elif period == 'month':
+                    cutoff = now - 2592000
+                elif period == 'year':
+                    cutoff = now - 31536000
+                else:
+                    cutoff = now - 3600  # Default to hour
+                
+                # Get samples within the time range
+                samples = [d for d in network_diff_history if d['ts'] >= cutoff]
+                
+                # Also add current network difficulty
+                if wb.current_work.value and 'bits' in wb.current_work.value:
+                    diff = bitcoin_data.target_to_difficulty(wb.current_work.value['bits'].target)
+                    samples.append({'ts': now, 'network_diff': diff, 'source': 'current'})
+                
+                # Sort by timestamp and return
+                samples.sort(key=lambda x: x['ts'])
+                return json.dumps(samples)
+            except Exception as e:
+                return json.dumps([])
+    
+    web_root.putChild('network_difficulty', NetworkDifficultyResource())
     
     # Node info endpoint for miner configuration display
     def get_node_info():

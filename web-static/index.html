@@ -105,32 +105,87 @@
             d3.json('../web/currency_info', function(currency_info) {
                 d3.selectAll('.symbol').text(currency_info.symbol);
                 
-                d3.json('../current_payouts', function(pays) {
+                // Use current_merged_payouts which includes derived merged addresses
+                d3.json('../current_merged_payouts', function(mergedPays) {
                     var totamount=0.0;
-
-                    d3.json('../payout_addr', function(addr) {
-                        d3.select('#payout_addr').text(addr).attr('href', currency_info.address_explorer_url_prefix + addr);
-                        d3.select('#payout_amount').text(addr in pays ? pays[addr] : 0);
-                    });
-                    d3.json('../payout_addrs', function(addrs) {
-                        d3.select('#payout_addrs').text(addrs);
-
-                        for (var i in addrs) {
-                        	totamount = totamount + (addrs[i] in pays ? pays[addrs[i]] : 0);
-                        }
-	                d3.select('#payout_totamount').text(totamount);
-                    });
-
-                    var arr = []; for(var i in pays) arr.push(i); arr.sort(function(a, b){return pays[b] - pays[a]});
+                    var mergedTotal=0.0;
+                    var mergedSymbol='';
                     
-                    var tr = d3.select('#payouts').selectAll().data(arr).enter().append('tr');
-                    tr.append('td').append('a').text(function(addr){return addr}).attr('href', function(addr){return currency_info.address_explorer_url_prefix + addr});
-                    tr.append('td').text(function(addr){return pays[addr]});
+                    // Calculate totals
+                    for (var addr in mergedPays) {
+                        totamount += mergedPays[addr].amount || 0;
+                        if (mergedPays[addr].merged) {
+                            mergedPays[addr].merged.forEach(function(m) {
+                                mergedTotal += m.amount || 0;
+                                if (!mergedSymbol) mergedSymbol = m.symbol;
+                            });
+                        }
+                    }
+                    d3.select('#payout_totamount').text(totamount.toFixed(8));
+
+                    var arr = []; for(var i in mergedPays) arr.push(i); 
+                    arr.sort(function(a, b){return (mergedPays[b].amount || 0) - (mergedPays[a].amount || 0)});
+                    
+                    // Render payouts table with merged chain sub-rows
+                    arr.forEach(function(addr) {
+                        var entry = mergedPays[addr];
+                        
+                        // Main row for parent chain
+                        var mainRow = d3.select('#payouts').append('tr');
+                        mainRow.append('td').append('a')
+                            .text(addr)
+                            .attr('href', currency_info.address_explorer_url_prefix + addr);
+                        mainRow.append('td').text((entry.amount || 0).toFixed(8));
+                        
+                        // Sub-rows for merged chain addresses
+                        if (entry.merged && entry.merged.length > 0) {
+                            entry.merged.forEach(function(merged) {
+                                var subRow = d3.select('#payouts').append('tr')
+                                    .style('background', 'rgba(111, 66, 193, 0.15)');
+                                
+                                var addrCell = subRow.append('td')
+                                    .style('padding-left', '20px');
+                                addrCell.append('span')
+                                    .style('color', '#6f42c1')
+                                    .style('font-weight', 'bold')
+                                    .text('↳ ' + merged.symbol + ': ');
+                                addrCell.append('a')
+                                    .style('color', '#6f42c1')
+                                    .text(merged.address)
+                                    .attr('href', getMergedExplorerUrl(merged.symbol, merged.address));
+                                
+                                subRow.append('td')
+                                    .style('color', '#6f42c1')
+                                    .text(d3.format('.2f')(merged.amount || 0));
+                            });
+                        }
+                    });
                     
                     var total_tr = d3.select('#payouts').append('tr');
                     total_tr.append('td').append('strong').text('Total');
-                    total_tr.append('td').text(d3.sum(arr, function(addr){return pays[addr]}).toFixed(8));
+                    total_tr.append('td').text(totamount.toFixed(8));
+                    
+                    // Add merged total row if we have merged payouts
+                    if (mergedTotal > 0 && mergedSymbol) {
+                        var merged_total_tr = d3.select('#payouts').append('tr')
+                            .style('background', 'rgba(111, 66, 193, 0.2)');
+                        merged_total_tr.append('td').append('strong')
+                            .style('color', '#6f42c1')
+                            .text('Total Merged (' + mergedSymbol + ')');
+                        merged_total_tr.append('td')
+                            .style('color', '#6f42c1')
+                            .style('font-weight', 'bold')
+                            .text(d3.format('.2f')(mergedTotal));
+                    }
                 });
+                
+                function getMergedExplorerUrl(symbol, address) {
+                    var explorers = {
+                        'tDOGE': 'https://blockexplorer.one/dogecoin/testnet/address/',
+                        'DOGE': 'https://blockexplorer.one/dogecoin/mainnet/address/',
+                    };
+                    return (explorers[symbol] || '#') + address;
+                }
                 
                 d3.json('../recent_blocks', function(blocks) {
                     // Limit to 10 most recent blocks
