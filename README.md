@@ -1,10 +1,10 @@
 # P2Pool-Dash
 
-Decentralized pool mining software for Dash cryptocurrency.
+Decentralized pool mining software for Dash, Litecoin, and Dogecoin cryptocurrencies.
 
-## 🎉 Latest: Litecoin + Dogecoin Merged Mining (Testnet)
+## 🎉 Litecoin + Dogecoin Merged Mining
 
-**Status:** ⚠️ **BLOCKED** - Dogecoin testnet has a critical difficulty bug
+**Status:** ✅ **PRODUCTION READY** - Mainnet merged mining operational
 
 Branch: `feature/scrypt-litecoin-dogecoin`
 
@@ -15,22 +15,23 @@ Branch: `feature/scrypt-litecoin-dogecoin`
 - ✅ Modern P2PKH donation script (saves 42 bytes vs old P2PK)
 - ✅ Node operator fees for merged mining infrastructure
 - ✅ Real-time monitoring dashboard
+- ✅ MM-Adapter bridge for standard Dogecoin daemon compatibility
 
-### ⚠️ Dogecoin Testnet Bug
+### Architecture
 
-The official Dogecoin testnet has a critical bug that allows unlimited minimum 
-difficulty blocks via timestamp manipulation ("block storm attack"). This causes:
-
-- **~3.3 blocks/second** instead of 1 block/minute (180x faster!)
-- **31+ million blocks** (should be ~5 million based on chain age)
-- **All merged mining submissions go stale** before they can be accepted
-
-**Official fix:** https://github.com/dogecoin/dogecoin/pull/3967
-
-**See [DOGECOIN_TESTNET_BUG.md](DOGECOIN_TESTNET_BUG.md) for full documentation.**
-
-**Workaround:** Use our private testnet4alpha with fixed difficulty rules until Dogecoin
-Core releases official testnet4alpha. See `setup_dogecoin_testnet4alpha.sh`.
+```
+┌─────────────┐    Stratum    ┌─────────────┐   JSON-RPC    ┌─────────────┐
+│   Miners    │◀────────────▶│   P2Pool    │◀────────────▶│  Litecoin   │
+│  (scrypt)   │   Port 9327  │  (PyPy 2.7) │  Port 9332   │   Core      │
+└─────────────┘              └──────┬──────┘              └─────────────┘
+                                    │
+                                    │ JSON-RPC (Port 44556)
+                                    ▼
+                             ┌──────────────┐   JSON-RPC    ┌─────────────┐
+                             │  MM-Adapter  │◀────────────▶│  Dogecoin   │
+                             │ (Python 3)   │  Port 22555  │   Core      │
+                             └──────────────┘              └─────────────┘
+```
 
 See [MERGED_MINING_DONATION.md](MERGED_MINING_DONATION.md) for technical details.
 
@@ -54,12 +55,150 @@ The installation guide covers:
 | Document | Description |
 |----------|-------------|
 | [MERGED_MINING_DONATION.md](MERGED_MINING_DONATION.md) | LTC+DOGE merged mining technical details |
-| [DOGECOIN_TESTNET_BUG.md](DOGECOIN_TESTNET_BUG.md) | Dogecoin testnet difficulty bug documentation |
+| [mm-adapter/README.md](mm-adapter/README.md) | Merged mining adapter setup |
+| [MULTIADDRESS_MINING_GUIDE.md](MULTIADDRESS_MINING_GUIDE.md) | Multi-address mining configuration |
 | [CUSTOM_NETWORK_GUIDE.md](CUSTOM_NETWORK_GUIDE.md) | Adding support for new cryptocurrencies |
 | [ASIC_SUPPORT_COMPLETE.md](ASIC_SUPPORT_COMPLETE.md) | ASICBOOST implementation details |
 | [SHARE_ARCHIVE_README.md](SHARE_ARCHIVE_README.md) | Share archival and recovery |
 
-## Quick Start
+---
+
+## 🚀 Quick Start: Litecoin + Dogecoin Merged Mining
+
+### Prerequisites
+
+1. **Litecoin Core** (v0.21+) - Fully synced on mainnet
+2. **Dogecoin Core** (v1.14.7+) - Fully synced on mainnet
+3. **PyPy 2.7** - For running P2Pool
+4. **Python 3.10+** - For running MM-Adapter
+
+### Step 1: Install P2Pool
+
+```bash
+# Clone repository
+git clone https://github.com/dashpay/p2pool-dash.git
+cd p2pool-dash
+git checkout feature/scrypt-litecoin-dogecoin
+
+# Install PyPy 2.7 (Ubuntu 24.04+)
+wget https://downloads.python.org/pypy/pypy2.7-v7.3.20-linux64.tar.bz2
+tar xjf pypy2.7-v7.3.20-linux64.tar.bz2
+export PATH="$PWD/pypy2.7-v7.3.20-linux64/bin:$PATH"
+
+# Install P2Pool dependencies
+pypy -m ensurepip
+pypy -m pip install twisted pycryptodome
+
+# Build litecoin_scrypt module
+cd litecoin_scrypt
+pypy setup.py install --user
+cd ..
+```
+
+### Step 2: Configure Litecoin Core
+
+Add to `~/.litecoin/litecoin.conf`:
+```ini
+server=1
+rpcuser=litecoinrpc
+rpcpassword=YOUR_SECURE_PASSWORD
+rpcallowip=127.0.0.1
+rpcport=9332
+```
+
+### Step 3: Configure Dogecoin Core
+
+Add to `~/.dogecoin/dogecoin.conf`:
+```ini
+server=1
+rpcuser=dogecoinrpc
+rpcpassword=YOUR_SECURE_PASSWORD
+rpcallowip=127.0.0.1
+rpcport=22555
+```
+
+### Step 4: Setup MM-Adapter
+
+The MM-Adapter bridges P2Pool and Dogecoin Core for merged mining:
+
+```bash
+cd mm-adapter
+
+# Create Python virtual environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Configure adapter
+cp config.example.yaml config.yaml
+```
+
+Edit `config.yaml`:
+```yaml
+adapter:
+  host: "127.0.0.1"
+  port: 44556
+  rpc_user: "dogecoinrpc"
+  rpc_password: "YOUR_SECURE_PASSWORD"
+
+dogecoin:
+  host: "127.0.0.1"
+  port: 22555
+  rpc_user: "dogecoinrpc"
+  rpc_password: "YOUR_SECURE_PASSWORD"
+```
+
+Start the adapter:
+```bash
+python3 adapter.py --config config.yaml
+```
+
+### Step 5: Start P2Pool
+
+```bash
+# Get a legacy Litecoin address (L... format, not ltc1...)
+litecoin-cli getnewaddress "" legacy
+
+# Start P2Pool with merged mining
+pypy run_p2pool.py \
+    --net litecoin \
+    --coind-address 127.0.0.1 \
+    --coind-rpc-port 9332 \
+    --coind-p2p-port 9333 \
+    --merged-coind-address 127.0.0.1 \
+    --merged-coind-rpc-port 44556 \
+    --merged-coind-rpc-user dogecoinrpc \
+    --merged-coind-rpc-password YOUR_SECURE_PASSWORD \
+    --address YOUR_LEGACY_LTC_ADDRESS \
+    --give-author 1 \
+    -f 1 \
+    --disable-upnp \
+    litecoinrpc YOUR_LTC_RPC_PASSWORD
+```
+
+### Step 6: Connect Miners
+
+Point your scrypt miners to:
+```
+stratum+tcp://YOUR_IP:9327
+```
+
+**Username formats:**
+- Basic: `LTC_ADDRESS`
+- With DOGE address: `LTC_ADDRESS,DOGE_ADDRESS`
+- With worker name: `LTC_ADDRESS,DOGE_ADDRESS.worker1`
+
+**Example:**
+```
+Username: LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc,DFv7Rp94R9sQvo4PV5STp2qJPsBCprauFe.rig1
+Password: x
+```
+
+---
+
+---
+
+## Dash Mining (Original)
 
 ### Requirements
 

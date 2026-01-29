@@ -766,34 +766,71 @@ def run():
     print
     
     class SSLErrorFilter(object):
-        """Filter out harmless SSL import errors from Twisted HTTP client.
+        """Filter out harmless SSL/OpenSSL import errors from Twisted HTTP client.
         
         Twisted's HTTP client tries to import OpenSSL when handling 301/302 redirects
-        to support HTTPS. If OpenSSL is not available, it logs an ImportError but
-        continues working fine with HTTP. This filter suppresses these repetitive
-        error messages to keep logs clean.
+        to support HTTPS. On systems with incompatible OpenSSL versions (e.g., OpenSSL 3.x
+        without FIPS_mode symbol on PyPy), it logs ImportErrors but continues working
+        fine with HTTP. This filter suppresses these repetitive error messages.
         
-        Future maintainers: If you need HTTPS support, install pyopenssl and cryptography
-        packages. For PyPy on Ubuntu 24.04+, you may need to handle OpenSSL 3.x compatibility.
+        Known filtered errors:
+        - 'No module named OpenSSL' - OpenSSL not installed
+        - 'undefined symbol: FIPS_mode' - OpenSSL 3.x incompatibility with old pyopenssl
+        
+        Future maintainers: If you need HTTPS support, install compatible versions of
+        pyopenssl and cryptography packages for your Python/PyPy version.
         """
-        def emit(self, eventDict):
+        _ssl_warning_shown = False
+        
+        @staticmethod
+        def is_ssl_error(eventDict):
+            """Check if this is a known harmless SSL error that should be suppressed."""
             if not eventDict.get("isError"):
+                return False
+            if 'failure' not in eventDict:
+                return False
+            
+            tb = eventDict['failure'].getTraceback()
+            # Check for OpenSSL not installed
+            if 'from OpenSSL import SSL' in tb and 'ImportError' in tb:
+                return True
+            # Check for OpenSSL 3.x FIPS_mode incompatibility
+            if 'FIPS_mode' in tb or ('_openssl' in tb and 'undefined symbol' in tb):
+                return True
+            return False
+        
+        def emit(self, eventDict):
+            if self.is_ssl_error(eventDict):
+                if not SSLErrorFilter._ssl_warning_shown:
+                    SSLErrorFilter._ssl_warning_shown = True
+                    # Use direct file write to avoid duplication through logging pipes
+                    import datetime
+                    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    msg = '%s [SSL] OpenSSL 3.x/cryptography incompatibility detected - bug reporter disabled (does not affect mining)\n' % timestamp
+                    try:
+                        with open(os.path.join(datadir_path, 'log'), 'a') as f:
+                            f.write(msg)
+                    except:
+                        pass
+                # Return without processing - suppress the error completely
                 return
             
-            # Check if this is the known harmless OpenSSL import error
-            if 'failure' in eventDict:
-                tb = eventDict['failure'].getTraceback()
-                # Filter: Twisted trying to import OpenSSL for redirect handling
-                if 'from OpenSSL import SSL' in tb and 'ImportError: No module named OpenSSL' in tb:
-                    # Suppress this specific error - it's expected and harmless
-                    return
-            
-            # For all other errors, pass through using the default formatting
-            if 'failure' in eventDict:
-                log.textFromEventDict(eventDict)
-                sys.stderr.write(log.textFromEventDict(eventDict) + '\n')
+            # For non-SSL errors, do nothing - let the default observer handle them
+            # (We don't re-print here to avoid duplication)
     
-    # Install our SSL error filter
+    # Replace Twisted's default error observer with our filtered version
+    # First, stop the default observer from printing SSL errors
+    original_stderr_write = log.DefaultObserver.stderr.write
+    def filtered_stderr_write(data):
+        # Suppress SSL/OpenSSL traceback lines
+        if 'OpenSSL' in data or 'FIPS_mode' in data or '_openssl' in data:
+            return
+        if 'from cryptography' in data:
+            return
+        return original_stderr_write(data)
+    log.DefaultObserver.stderr.write = filtered_stderr_write
+    
+    # Install our SSL error filter as an observer
     log.addObserver(SSLErrorFilter().emit)
     
     class ErrorReporter(object):
@@ -804,11 +841,9 @@ def run():
             if not eventDict["isError"]:
                 return
             
-            # Also filter SSL errors from bug reporter
-            if 'failure' in eventDict:
-                tb = eventDict['failure'].getTraceback()
-                if 'from OpenSSL import SSL' in tb and 'ImportError: No module named OpenSSL' in tb:
-                    return
+            # Filter SSL/OpenSSL errors from bug reporter using shared method
+            if SSLErrorFilter.is_ssl_error(eventDict):
+                return
             
             if self.last_sent is not None and time.time() < self.last_sent + 5:
                 return
