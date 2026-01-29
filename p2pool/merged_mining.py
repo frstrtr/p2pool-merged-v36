@@ -46,7 +46,7 @@ def build_coinbase_input_script(height, extradata=''):
     return script_bytes
 
 
-def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, node_operator_address=None, worker_fee=0, parent_net=None):
+def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, node_operator_address=None, worker_fee=0, parent_net=None, coinbase_text=None):
     """
     Build coinbase transaction for MERGED CHAIN (Dogecoin) with multiple outputs
     
@@ -73,6 +73,8 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
         donation_percentage: Donation percentage (0-100, default 1.0 for 1%)
         node_operator_address: Address of P2Pool node operator (for worker_fee)
         worker_fee: Node operator fee percentage (0-100, default 0)
+        parent_net: Parent chain network object (e.g., Litecoin testnet) for address conversion
+        coinbase_text: Custom text for OP_RETURN (default: P2POOL_TAG constant)
         parent_net: Parent chain network object (e.g., Litecoin testnet) for address conversion
     
     Returns:
@@ -181,14 +183,16 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
                 print >>sys.stderr, 'Warning: Failed to decode node operator address %s for merged chain: %s' % (node_operator_address, e)
                 print >>sys.stderr, '         Skipping node operator fee. Check --merged-operator-address matches merged chain network.'
     
-    # Add OP_RETURN output with P2Pool identifier (0 value, data only)
-    # This marks the block as P2Pool-mined on the DOGECOIN blockchain
-    op_return_script = '\x6a' + chr(len(P2POOL_TAG)) + P2POOL_TAG  # OP_RETURN + length + data
+    # Add OP_RETURN output with pool identifier (0 value, data only)
+    # This marks the block as pool-mined on the DOGECOIN blockchain
+    # Use custom coinbase_text if provided, otherwise fall back to default P2POOL_TAG
+    op_return_text = coinbase_text if coinbase_text else P2POOL_TAG
+    op_return_script = '\x6a' + chr(len(op_return_text)) + op_return_text  # OP_RETURN + length + data
     tx_outs.append({
         'value': 0,
         'script': op_return_script,
     })
-    print >>sys.stderr, '[OP_RETURN] Added P2Pool identifier to merged block: "%s"' % P2POOL_TAG
+    print >>sys.stderr, '[OP_RETURN] Added pool identifier to merged block: "%s"' % op_return_text
     
     # Add P2Pool author donation output (ALWAYS included as blockchain marker)
     # Even if donation_percentage=0, this output marks every block as P2Pool-mined

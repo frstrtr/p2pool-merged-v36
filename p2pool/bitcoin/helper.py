@@ -102,18 +102,15 @@ def getwork(coind, net, use_getblocktemplate=False, txidcache={}, feecache={}, f
             try:
                 unpacked = bitcoin_data.tx_type.unpack(packed)
             except Exception as e:
-                # Transaction parsing failed - could be:
-                # 1. Malformed transaction in mempool
-                # 2. Unknown transaction type/format
-                # 3. Truncated data from RPC
-                # Skip and log - losing this tx's fee is better than crashing
+                # Transaction parsing failed - likely MWEB (MimbleWimble Extension Block)
+                # transaction on Litecoin. These use a different format that p2pool
+                # doesn't yet support. The transaction is still included in the block
+                # template, but we can't calculate its fee contribution.
+                # TODO: Implement MWEB transaction parsing support
                 skipped_mweb += 1
-                if skipped_mweb <= 3:  # Only print first 3 warnings
-                    # txid is an integer (hash256 result), convert to hex string for display
-                    txid_hex = '%064x' % txid
-                    print >>sys.stderr, '[WARN] Failed to parse tx %s (fee=%s): %s' % (
-                        txid_hex[:16], fee, e)
-                    print >>sys.stderr, '[WARN] First 100 bytes: %s' % packed[:100].encode('hex')
+                if skipped_mweb == 1:  # Only print once per batch
+                    print '[MWEB] Detected MWEB/special transaction(s) - parsing not yet implemented'
+                    print '[MWEB] These transactions are still included in blocks, but fee calculation skipped'
                 continue
         # Only add to lists if successfully parsed
         txhashes.append(txid)
@@ -126,7 +123,7 @@ def getwork(coind, net, use_getblocktemplate=False, txidcache={}, feecache={}, f
             feefifo.append(txid)
     
     if skipped_mweb > 0:
-        print >>sys.stderr, '[WARN] Skipped %d unparseable transaction(s) - fees lost for those txs' % skipped_mweb
+        print '[MWEB] Skipped parsing %d MWEB/special transaction(s) - fee estimation unavailable (TODO: implement MWEB support)' % skipped_mweb
 
     if time.time() - txidcache['start'] > 30*60.:
         keepers = {(x['data'] if isinstance(x, dict) else x):txid for x, txid in zip(work['transactions'], txhashes)}

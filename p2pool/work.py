@@ -362,11 +362,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 
                                 # Build coinbase with P2Pool donation and node fee
                                 # Pass parent_net for automatic address conversion (LTC -> DOGE)
+                                # Pass coinbase_text from adapter template (if provided)
                                 parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                coinbase_text = template.get('auxpow', {}).get('coinbase_text')  # From MM adapter
                                 pass  # Suppressed: print >>sys.stderr, '[MERGED] Calling build_merged_coinbase with net=%s (ADDRESS_VERSION=%d), parent_net=%s' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION, parent_net.SYMBOL)
                                 doge_coinbase_tx = merged_mining.build_merged_coinbase(
                                     template, shareholders, merged_addr_net, self.donation_percentage,
-                                    node_operator_address, self.worker_fee, parent_net)
+                                    node_operator_address, self.worker_fee, parent_net, coinbase_text)
                                 
                                 doge_coinbase_hash = bitcoin_data.hash256(bitcoin_data.tx_type.pack(doge_coinbase_tx))
                                 all_doge_tx_hashes = [doge_coinbase_hash] + doge_tx_hashes
