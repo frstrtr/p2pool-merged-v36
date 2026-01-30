@@ -173,8 +173,9 @@ class MergedMiningBroadcaster(object):
             # Bootstrap peers from node
             yield self._bootstrap_peers()
             
-            # Establish initial P2P connections
-            yield self._connect_to_peers()
+            # Start initial peer connections in background (don't block startup)
+            # This allows the broadcaster to register immediately while connections establish
+            self._connect_to_peers()  # Don't yield - let it run in background
             
             # Start connection maintenance loop
             self.connection_loop = deferral.RobustLoopingCall(self._maintain_connections)
@@ -190,7 +191,7 @@ class MergedMiningBroadcaster(object):
         
         print('MergedBroadcaster[%s]: Started' % self.chain_name)
         if self.p2p_net:
-            print('MergedBroadcaster[%s]: Active P2P connections: %d' % (
+            print('MergedBroadcaster[%s]: Active P2P connections: %d (more connecting in background)' % (
                 self.chain_name, len(self.connections)))
         defer.returnValue(True)
     
@@ -313,7 +314,6 @@ class MergedMiningBroadcaster(object):
         except Exception as e:
             print('MergedBroadcaster[%s]: Bootstrap error: %s' % (self.chain_name, e), file=sys.stderr)
     
-    @defer.inlineCallbacks
     @defer.inlineCallbacks
     def _connect_to_peers(self):
         """Connect to peers from the database"""
