@@ -314,6 +314,7 @@ class MergedMiningBroadcaster(object):
             print('MergedBroadcaster[%s]: Bootstrap error: %s' % (self.chain_name, e), file=sys.stderr)
     
     @defer.inlineCallbacks
+    @defer.inlineCallbacks
     def _connect_to_peers(self):
         """Connect to peers from the database"""
         if not self.p2p_net or self.stopping:
