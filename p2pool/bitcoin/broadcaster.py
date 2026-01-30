@@ -297,7 +297,10 @@ class NetworkBroadcaster(object):
                     continue
                 
                 # Calculate initial score based on node metrics
-                score = 100  # Base score
+                # NOTE: coind peers get LOWER priority because the coin daemon
+                # will broadcast to these peers itself. P2P discovered peers
+                # provide additional coverage that the daemon won't reach.
+                score = 30  # Low base score - daemon handles these
                 
                 # Prefer outbound connections
                 if not peer.get('inbound', True):
@@ -394,22 +397,23 @@ class NetworkBroadcaster(object):
                 if port not in self.valid_ports:
                     continue
                 
-                # Calculate score
-                score = 100
+                # Calculate score - LOW for coind peers (daemon propagates to these)
+                # P2P discovered peers get priority for unique coverage
+                score = 30  # Low base - daemon handles these
                 if not peer.get('inbound', True):
-                    score += 100
+                    score += 30  # Smaller bonus for outbound
                 
                 ping_ms = peer.get('pingtime', 1.0) * 1000
                 if ping_ms < 50:
-                    score += 50
+                    score += 20
                 elif ping_ms < 100:
-                    score += 30
-                elif ping_ms < 200:
                     score += 10
+                elif ping_ms < 200:
+                    score += 5
                 
                 conn_time = peer.get('conntime', 0)
                 if conn_time > 3600:
-                    score += 20
+                    score += 10
                 
                 # Add or update
                 if addr not in self.peer_db:
@@ -478,7 +482,9 @@ class NetworkBroadcaster(object):
             if addr not in self.peer_db:
                 self.peer_db[addr] = {
                     'addr': addr,
-                    'score': 50,  # Lower initial score than node peers
+                    # P2P peers get HIGH priority - they provide unique coverage
+                    # that the coin daemon won't reach (daemon uses its own peers)
+                    'score': 150,  # Higher score - unique propagation paths
                     'first_seen': time.time(),
                     'last_seen': timestamp,
                     'source': 'p2p',

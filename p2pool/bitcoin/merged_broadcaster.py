@@ -297,7 +297,9 @@ class MergedMiningBroadcaster(object):
                 if addr not in self.peer_db:
                     self.peer_db[addr] = {
                         'addr': addr,
-                        'score': 100,  # High score for bootstrap peers
+                        # coind peers get LOW priority - daemon propagates to these
+                        # P2P discovered peers provide unique coverage
+                        'score': 30,  # Low score - daemon handles these
                         'first_seen': time.time(),
                         'last_seen': time.time(),
                         'source': 'coind',  # From daemon's peers
@@ -457,7 +459,9 @@ class MergedMiningBroadcaster(object):
                         if peer_addr not in broadcaster.peer_db:
                             broadcaster.peer_db[peer_addr] = {
                                 'addr': peer_addr,
-                                'score': 50,
+                                # P2P peers get HIGH priority - unique coverage
+                                # that daemon won't reach
+                                'score': 150,  # Higher than coind peers
                                 'first_seen': time.time(),
                                 'last_seen': time.time(),
                                 'source': 'p2p',
@@ -558,7 +562,9 @@ class MergedMiningBroadcaster(object):
                 else:
                     self.peer_db[addr] = {
                         'addr': addr,
-                        'score': 50,
+                        # Refresh peers from coind get LOW priority
+                        # daemon handles these already
+                        'score': 30,  # Low score - daemon propagates to these
                         'first_seen': time.time(),
                         'last_seen': time.time(),
                         'source': 'refresh',
