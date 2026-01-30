@@ -1045,8 +1045,11 @@ class NetworkBroadcaster(object):
             
             peers_list.append(peer_detail)
         
-        # Sort by score (protected first, then by score)
-        peers_list.sort(key=lambda x: (x['protected'], x['score']), reverse=True)
+        # Sort by: protected first, then connected, then by score
+        peers_list.sort(key=lambda x: (x['protected'], x['connected'], x['score']), reverse=True)
+        
+        # Limit to top 20 peers for dashboard display
+        peers_list = peers_list[:20]
         
         # Calculate success rate
         if self.stats['total_broadcasts'] > 0:
