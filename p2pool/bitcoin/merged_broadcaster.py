@@ -134,7 +134,7 @@ class MergedMiningBroadcaster(object):
             self.valid_ports.append(self.p2p_port)
         
         # Configuration
-        self.max_peers = 10  # Target number of P2P connections
+        self.max_peers = 20  # Target number of P2P connections for reliable block propagation
         self.min_peers = 4   # Minimum before we actively try to connect more
         self.bootstrapped = False
         self.stopping = False
