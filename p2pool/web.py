@@ -564,6 +564,27 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         best_diff_hashrate_all_time = best_diff_all_time * dumb_scrypt_diff
         best_diff_hashrate_session = best_diff_session * dumb_scrypt_diff
         
+        # Count shares for this miner address in the current window
+        lookbehind = min(node.tracker.get_height(node.best_share_var.value), 3600//node.net.SHARE_PERIOD)
+        miner_share_count = 0
+        miner_orphan_count = 0
+        miner_doa_count = 0
+        try:
+            for share in node.tracker.get_chain(node.best_share_var.value, lookbehind):
+                share_addr = getattr(share, 'address', None)
+                if share_addr == address:
+                    if share.share_data.get('stale_info') == 'orphan':
+                        miner_orphan_count += 1
+                    elif share.share_data.get('stale_info') == 'doa':
+                        miner_doa_count += 1
+                    else:
+                        miner_share_count += 1
+        except Exception as e:
+            pass
+        
+        total_miner_shares = miner_share_count + miner_orphan_count + miner_doa_count
+        miner_dead_shares = miner_orphan_count + miner_doa_count
+        
         return dict(
             address=address,
             active=True,
@@ -584,6 +605,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             hashrate_periods=hashrate_periods,
             network_difficulty=network_difficulty,
             chance_to_find_block=chance_to_find_block,
+            # Share counts
+            total_shares=total_miner_shares,
+            unstale_shares=miner_share_count,
+            dead_shares=miner_dead_shares,
+            orphan_shares=miner_orphan_count,
+            doa_shares=miner_doa_count,
         )
     
     web_root.putChild('miner_stats', WebInterface(get_miner_stats))
