@@ -163,6 +163,11 @@ class Node(object):
         self.bitcoind = bitcoind
         self.net = net
         self.cur_share_ver = None
+        
+        # Block broadcaster for parallel propagation (set externally)
+        self.broadcaster = None
+        # Merged mining broadcasters: {chainid: MergedMiningBroadcaster}
+        self.merged_broadcasters = {}
 
         self.known_txs_var = variable.VariableDict({}) # hash -> tx
         self.mining_txs_var = variable.Variable({}) # hash -> tx

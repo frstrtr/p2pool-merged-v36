@@ -1210,6 +1210,26 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             return []
     
     web_root.putChild('peer_list', WebInterface(get_peer_list))
+    
+    # Add broadcaster network status endpoint (parent chain)
+    from p2pool.bitcoin import helper as bitcoin_helper
+    web_root.putChild('broadcaster_status', WebInterface(lambda: bitcoin_helper.get_broadcaster_status()))
+    
+    # Add merged broadcaster status endpoint (child chains like Dogecoin)
+    def get_merged_broadcaster_status():
+        """Get status of all merged mining broadcasters"""
+        result = {'chains': {}}
+        if hasattr(node, 'merged_broadcasters') and node.merged_broadcasters:
+            for chain_id, broadcaster in node.merged_broadcasters.items():
+                try:
+                    result['chains'][chain_id] = broadcaster.get_stats()
+                except Exception as e:
+                    result['chains'][chain_id] = {'error': str(e)}
+        if not result['chains']:
+            result['message'] = 'No merged mining broadcasters active'
+        return result
+    
+    web_root.putChild('merged_broadcaster_status', WebInterface(get_merged_broadcaster_status))
 
     web_root.putChild('uptime', WebInterface(lambda: time.time() - start_time))
     web_root.putChild('stale_rates', WebInterface(lambda: p2pool_data.get_stale_counts(node.tracker, node.best_share_var.value, decent_height(), rates=True)))

@@ -21,6 +21,7 @@ from nattraverso import portmapper, ipdiscover
 
 import bitcoin.p2p as bitcoin_p2p, bitcoin.data as bitcoin_data
 from bitcoin import stratum, worker_interface, helper
+from bitcoin.broadcaster import NetworkBroadcaster
 from util import fixargparse, jsonrpc, variable, deferral, math, logging, switchprotocol
 from . import networks, web, work
 import p2pool, p2pool.data as p2pool_data, p2pool.node as p2pool_node
@@ -193,6 +194,55 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         gnode = node = p2pool_node.Node(factory, bitcoind, shares.values(), known_verified, net)
         yield node.start()
         
+        # Initialize block broadcaster for parallel propagation
+        broadcaster = None
+        if not args.disable_broadcaster:
+            print ''
+            print '=' * 70
+            print 'INITIALIZING MULTI-PEER BROADCASTER'
+            print '=' * 70
+            try:
+                broadcaster = NetworkBroadcaster(
+                    net=net.PARENT,
+                    coind=bitcoind,
+                    local_factory=factory,
+                    local_addr=(args.bitcoind_address, args.bitcoind_p2p_port),
+                    datadir_path=datadir_path,
+                    chain_name=net.PARENT.SYMBOL.lower()
+                )
+                
+                # Configure settings from CLI args
+                broadcaster.max_peers = args.broadcaster_max_peers
+                broadcaster.min_peers = args.broadcaster_min_peers
+                
+                # Start the broadcaster (bootstrap and begin peer management)
+                yield broadcaster.start()
+                
+                # Register with helper module for global access
+                helper.set_broadcaster(broadcaster)
+                
+                node.broadcaster = broadcaster
+                
+                print ''
+                print '*** BROADCASTER READY ***'
+                print '  Max peers: %d' % broadcaster.max_peers
+                print '  Min peers: %d' % broadcaster.min_peers
+                print '  Peer database: %d peers' % len(broadcaster.peer_db)
+                print '  Active connections: %d' % len(broadcaster.connections)
+                print '=' * 70
+                print ''
+            except Exception as e:
+                print '    ...block broadcaster failed to start (continuing without it): %s' % e
+                import traceback
+                traceback.print_exc()
+                broadcaster = None
+        else:
+            print ''
+            print 'Multi-peer broadcaster: DISABLED'
+            print '  Using local node only for block propagation'
+            print '  (Use without --disable-broadcaster to enable multi-peer broadcasting)'
+            print ''
+        
         for share_hash in shares:
             if share_hash not in node.tracker.items:
                 ss.forget_share(share_hash)
@@ -214,6 +264,35 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
             previous_share = shares[best_share.share_data['previous_share_hash']]
             counts = p2pool_data.get_desired_version_counts(node.tracker, node.tracker.get_nth_parent_hash(previous_share.hash, net.CHAIN_LENGTH*9//10), net.CHAIN_LENGTH//10)
             p2pool_data.update_min_protocol_version(counts, best_share)
+        
+        # Set up graceful shutdown handler
+        def sigterm_handler(signum, frame):
+            """Handle SIGTERM/SIGINT by stopping broadcaster before reactor stops"""
+            print ''
+            print 'Received shutdown signal, cleaning up...'
+            sys.stdout.flush()
+            
+            # Set stopping flag on p2p_node if it exists
+            if hasattr(node, 'p2p_node') and node.p2p_node:
+                node.p2p_node.stopping = True
+            
+            # Stop broadcaster if running
+            if broadcaster:
+                print 'Stopping broadcaster...'
+                sys.stdout.flush()
+                try:
+                    broadcaster.stop()
+                    print 'Broadcaster stopped'
+                    sys.stdout.flush()
+                except Exception as e:
+                    print 'Warning: Broadcaster shutdown error: %s' % str(e)
+                    sys.stdout.flush()
+            
+            # Now let reactor stop normally
+            reactor.callFromThread(reactor.stop)
+        
+        signal.signal(signal.SIGTERM, sigterm_handler)
+        signal.signal(signal.SIGINT, sigterm_handler)
         
         print '    ...success!'
         print
@@ -582,6 +661,17 @@ def run():
     parser.add_argument('--disable-advertise',
         help='''don't advertise local IP address as being available for incoming connections. useful for running a dark node, along with multiple -n ADDR's and --outgoing-conns 0''',
         action='store_false', default=True, dest='advertise_ip')
+    
+    broadcaster_group = parser.add_argument_group('multi-peer broadcaster')
+    broadcaster_group.add_argument('--disable-broadcaster',
+        help='''disable multi-peer block broadcasting (uses only local node for propagation)''',
+        action='store_true', default=False, dest='disable_broadcaster')
+    broadcaster_group.add_argument('--broadcaster-max-peers', metavar='MAX_PEERS',
+        help='maximum number of network peers to maintain connections to (default: 20)',
+        type=int, action='store', default=20, dest='broadcaster_max_peers')
+    broadcaster_group.add_argument('--broadcaster-min-peers', metavar='MIN_PEERS',
+        help='minimum number of peers required for healthy operation (default: 5)',
+        type=int, action='store', default=5, dest='broadcaster_min_peers')
     
     worker_group = parser.add_argument_group('worker interface')
     worker_group.add_argument('-w', '--worker-port', metavar='PORT or ADDR:PORT',
