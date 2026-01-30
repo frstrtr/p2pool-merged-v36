@@ -607,6 +607,12 @@ class MergedMiningBroadcaster(object):
         if self.stopping or not self.p2p_net:
             return
         
+        current_time = time.time()
+        
+        # Update last_seen for protected local node (it's always "active")
+        if self.local_p2p_addr and self.local_p2p_addr in self.peer_db:
+            self.peer_db[self.local_p2p_addr]['last_seen'] = current_time
+        
         # Clean up dead connections (but NEVER remove protected peers from db!)
         for addr in list(self.connections.keys()):
             conn = self.connections[addr]
