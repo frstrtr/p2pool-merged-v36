@@ -532,7 +532,7 @@ class NetworkBroadcaster(object):
         
         current_time = time.time()
         
-        # Verify local node connection
+        # Verify local node connection and update its last_seen
         if self.local_addr not in self.connections:
             print('Broadcaster[%s]: WARNING - Local node not in connections!' % self.chain_name, file=sys.stderr)
             self.connections[self.local_addr] = {
@@ -541,6 +541,10 @@ class NetworkBroadcaster(object):
                 'connected_at': time.time(),
                 'protected': True
             }
+        
+        # Update last_seen for protected local node (it's always "active")
+        if self.local_addr in self.peer_db:
+            self.peer_db[self.local_addr]['last_seen'] = current_time
         
         # Get sorted peers by score (exclude protected and already connected)
         # Use dynamic scoring that considers success rate, recency, and source
