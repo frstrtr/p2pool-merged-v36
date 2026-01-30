@@ -759,6 +759,14 @@
                     });
                 }
                 
+                // Update share counts
+                if (stats.total_shares !== undefined) {
+                    document.getElementById('total_shares').textContent = stats.total_shares;
+                    document.getElementById('dead_shares').textContent = stats.dead_shares || 0;
+                    var deadPct = stats.total_shares > 0 ? (stats.dead_shares / stats.total_shares * 100) : 0;
+                    document.getElementById('dead_shares_pct').textContent = d3.format('.1f')(deadPct) + '%';
+                }
+                
                 // Calculate 24h average hashrate
                 d3.json('../web/graph_data/miner_hash_rates/last_day', function(graph_data) {
                     var avg_24h = 0;
