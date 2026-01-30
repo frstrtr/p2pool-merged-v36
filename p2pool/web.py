@@ -1219,15 +1219,23 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     def get_merged_broadcaster_status():
         """Get status of all merged mining broadcasters"""
         result = {'chains': {}}
-        if hasattr(node, 'merged_broadcasters') and node.merged_broadcasters:
-            for chain_id, broadcaster in node.merged_broadcasters.items():
+        has_attr = hasattr(node, 'merged_broadcasters')
+        broadcasters_dict = getattr(node, 'merged_broadcasters', None)
+        if broadcasters_dict:
+            for chain_id, broadcaster in broadcasters_dict.items():
                 try:
                     # Use get_network_status for full peer list (same format as Litecoin broadcaster)
-                    result['chains'][chain_id] = broadcaster.get_network_status()
+                    result['chains'][str(chain_id)] = broadcaster.get_network_status()
                 except Exception as e:
-                    result['chains'][chain_id] = {'error': str(e)}
+                    result['chains'][str(chain_id)] = {'error': str(e)}
         if not result['chains']:
             result['message'] = 'No merged mining broadcasters active'
+            result['debug'] = {
+                'has_attr': has_attr,
+                'broadcasters_type': str(type(broadcasters_dict)),
+                'broadcasters_len': len(broadcasters_dict) if broadcasters_dict else 0,
+                'broadcasters_keys': list(broadcasters_dict.keys()) if broadcasters_dict else [],
+            }
         return result
     
     web_root.putChild('merged_broadcaster_status', WebInterface(get_merged_broadcaster_status))
