@@ -11,6 +11,7 @@ from twisted.internet import defer, reactor
 from twisted.python import log
 
 from bitcoin import getwork, data as bitcoin_data, helper, script, worker_interface
+from bitcoin.merged_broadcaster import MergedMiningBroadcaster
 from util import forest, jsonrpc, variable, deferral, math, pack
 import p2pool, p2pool.data as p2pool_data
 from p2pool import merged_mining
@@ -159,6 +160,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
         def set_merged_work(merged_url, merged_userpass, merged_payout_address=None):
             merged_proxy = jsonrpc.HTTPProxy(merged_url, dict(Authorization='Basic ' + base64.b64encode(merged_userpass)))
             
+            # Initialize merged broadcaster for this chain (once per URL)
+            # We'll determine the chainid from the first successful response
+            merged_broadcaster = None
+            broadcaster_initialized = False
+            
             # Try to detect auxpow capability on first call
             auxpow_capable = None
             
@@ -178,6 +184,28 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             
                             chainid = template['auxpow']['chainid']
                             target_hex = template['auxpow']['target']
+                            
+                            # Initialize merged broadcaster for this chain (once)
+                            if not broadcaster_initialized and chainid not in self.node.merged_broadcasters:
+                                try:
+                                    # Determine chain name for logging
+                                    chain_name = 'dogecoin' if chainid == 98 else 'merged_%d' % chainid
+                                    parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
+                                    if parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower():
+                                        chain_name += '_testnet'
+                                    
+                                    merged_broadcaster = MergedMiningBroadcaster(
+                                        merged_proxy=merged_proxy,
+                                        merged_url=merged_url,
+                                        datadir_path=self.args.datadir if hasattr(self.args, 'datadir') else '.',
+                                        chain_name=chain_name,
+                                    )
+                                    yield merged_broadcaster.start()
+                                    self.node.merged_broadcasters[chainid] = merged_broadcaster
+                                    print 'Merged broadcaster started for chainid %d (%s)' % (chainid, chain_name)
+                                except Exception as e:
+                                    print >>sys.stderr, 'Failed to start merged broadcaster: %s' % e
+                                broadcaster_initialized = True
                             
                             # PHASE A: Build complete Dogecoin block to get its hash for merged mining commitment
                             # This is the key to resolving the "chicken-and-egg" problem:
@@ -491,6 +519,28 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     new_hash = int(auxblock['hash'], 16)
                     old_work = self.merged_work.value.get(auxblock['chainid'], {})
                     old_hash = old_work.get('hash', 0)
+                    
+                    # Initialize merged broadcaster for fallback mode (once)
+                    chainid = auxblock['chainid']
+                    if not broadcaster_initialized and chainid not in self.node.merged_broadcasters:
+                        try:
+                            chain_name = 'dogecoin' if chainid == 98 else 'merged_%d' % chainid
+                            parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
+                            if parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower():
+                                chain_name += '_testnet'
+                            
+                            merged_broadcaster = MergedMiningBroadcaster(
+                                merged_proxy=merged_proxy,
+                                merged_url=merged_url,
+                                datadir_path=self.args.datadir if hasattr(self.args, 'datadir') else '.',
+                                chain_name=chain_name,
+                            )
+                            yield merged_broadcaster.start()
+                            self.node.merged_broadcasters[chainid] = merged_broadcaster
+                            print 'Merged broadcaster started for chainid %d (%s)' % (chainid, chain_name)
+                        except Exception as e:
+                            print >>sys.stderr, 'Failed to start merged broadcaster: %s' % e
+                        broadcaster_initialized = True
                     
                     self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: dict(
                         hash=new_hash,
@@ -1122,7 +1172,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 print >>sys.stderr, '[WITNESS DEBUG] share_info wtxid_merkle_root: %064x' % share_info['segwit_data']['wtxid_merkle_root']
                     
                     # Submit block and add error callback to catch any failures
-                    block_submission = helper.submit_block(dict(header=header, txs=[new_gentx] + other_transactions), False, self.node)
+                    # Use broadcaster for parallel propagation if available
+                    block_submission = helper.submit_block(
+                        dict(header=header, txs=[new_gentx] + other_transactions),
+                        False,
+                        self.node,
+                        broadcaster=self.node.broadcaster
+                    )
                     @block_submission.addErrback
                     def block_submit_error(err):
                         print >>sys.stderr, '*** CRITICAL: Block submission failed! ***'
@@ -1473,6 +1529,17 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 # print 'Block size: %d bytes (header + auxpow + %d txs)' % (len(complete_block), len(merged_block['txs']))
                                 # print '[DEBUG] About to call rpc_submitblock with %d byte hex string' % (len(complete_block_hex),)
                                 # print '[DEBUG] Block hex (first 200 chars): %s...' % (complete_block_hex[:200],)
+                                
+                                # Fire parallel broadcast via merged broadcaster (non-blocking)
+                                chainid = aux_work.get('chainid', 98)
+                                if chainid in self.node.merged_broadcasters:
+                                    try:
+                                        bc = self.node.merged_broadcasters[chainid]
+                                        bc_d = bc.broadcast_block(complete_block_hex, aux_work['hash'])
+                                        bc_d.addErrback(lambda f: None)  # Ignore broadcaster errors
+                                    except Exception as e:
+                                        print >>sys.stderr, 'Merged broadcaster error: %s' % e
+                                
                                 df = deferral.retry('Error submitting multiaddress merged block: (will retry)', 10, 10)(
                                     aux_work['merged_proxy'].rpc_submitblock
                                 )(complete_block_hex)

@@ -8,6 +8,30 @@ from p2pool.bitcoin import data as bitcoin_data
 from p2pool.util import deferral, jsonrpc
 txlookup = {}
 
+# Global broadcaster instance (initialized by main.py)
+_broadcaster = None
+
+def set_broadcaster(broadcaster):
+    """Set the global broadcaster instance for multi-peer propagation"""
+    global _broadcaster
+    print 'Helper: Broadcaster instance registered for multi-peer propagation'
+    _broadcaster = broadcaster
+
+def get_broadcaster():
+    """Get the global broadcaster instance"""
+    return _broadcaster
+
+def get_broadcaster_status():
+    """Get broadcaster status for web dashboard"""
+    if _broadcaster:
+        return _broadcaster.get_network_status()
+    else:
+        return {
+            'enabled': False,
+            'health': {'healthy': False, 'active_connections': 0},
+            'message': 'Multi-peer broadcaster disabled'
+        }
+
 @deferral.retry('Error while checking Bitcoin connection:', 1)
 @defer.inlineCallbacks
 def check(coind, net, args):
@@ -183,8 +207,29 @@ def submit_block_rpc(block, ignore_failure, coind, coind_work, net):
     if (not success and success_expected and not ignore_failure) or (success and not success_expected):
         print >>sys.stderr, 'Block submittal result: %s (%r) Expected: %s' % (success, result, success_expected)
 
-def submit_block(block, ignore_failure, node):
+def submit_block(block, ignore_failure, node, broadcaster=None):
+    """Submit block via P2P and RPC, optionally with parallel broadcast
+    
+    Args:
+        block: Block dict to submit
+        ignore_failure: If True, ignore RPC failures
+        node: Node object with factory, bitcoind, etc.
+        broadcaster: Optional NetworkBroadcaster for parallel propagation
+    
+    Returns:
+        Deferred from RPC submission
+    """
+    # Always submit via local P2P first (fastest path)
     submit_block_p2p(block, node.factory, node.net)
+    
+    # If broadcaster available, do parallel broadcast to additional peers
+    if broadcaster is not None:
+        # Fire and forget - don't block on broadcast completion
+        # The local P2P submission is the critical path
+        d = broadcaster.broadcast_block(block)
+        d.addErrback(lambda f: sys.stderr.write('Broadcaster error: %s\n' % f.getErrorMessage()))
+    
+    # Submit via RPC for verification
     return submit_block_rpc(block, ignore_failure, node.bitcoind, node.bitcoind_work, node.net)
 
 @defer.inlineCallbacks
