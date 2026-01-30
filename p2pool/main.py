@@ -194,6 +194,9 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         gnode = node = p2pool_node.Node(factory, bitcoind, shares.values(), known_verified, net)
         yield node.start()
         
+        # Store external IP on node for web dashboard access
+        node.external_ip = args.p2pool_external_ip
+        
         # Initialize block broadcaster for parallel propagation
         broadcaster = None
         if not args.disable_broadcaster:
