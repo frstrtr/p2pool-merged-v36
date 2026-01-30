@@ -196,6 +196,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     # Select correct P2P network for the merged chain
                                     p2p_net = None
                                     p2p_port = None
+                                    local_p2p_addr = None
+                                    
                                     if chainid == 98:  # Dogecoin
                                         if parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower():
                                             chain_name = 'dogecoin_testnet'
@@ -204,6 +206,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         else:
                                             p2p_net = dogecoin_net
                                             p2p_port = 22556 if dogecoin_net else None
+                                        
+                                        # Get local Dogecoin node's P2P address from args
+                                        merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
+                                        merged_address = getattr(self.args, 'merged_coind_address', None)
+                                        if merged_p2p_port and merged_address:
+                                            local_p2p_addr = (merged_address, merged_p2p_port)
+                                            print 'MergedBroadcaster will connect to our Dogecoin node at %s:%d' % (merged_address, merged_p2p_port)
                                     
                                     # Compute datadir_path for peer database storage
                                     # Use same logic as main.py: default to data/<net_name> or args.datadir/<net_name>
@@ -220,11 +229,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         chain_name=chain_name,
                                         p2p_net=p2p_net,
                                         p2p_port=p2p_port,
+                                        local_p2p_addr=local_p2p_addr,
                                     )
                                     yield merged_broadcaster.start()
                                     self.node.merged_broadcasters[chainid] = merged_broadcaster
-                                    print 'Merged broadcaster started for chainid %d (%s) P2P=%s' % (
-                                        chainid, chain_name, 'enabled' if p2p_net else 'disabled')
+                                    print 'Merged broadcaster started for chainid %d (%s) P2P=%s local=%s' % (
+                                        chainid, chain_name, 
+                                        'enabled' if p2p_net else 'disabled',
+                                        '%s:%d' % local_p2p_addr if local_p2p_addr else 'none')
                                 except Exception as e:
                                     print >>sys.stderr, 'Failed to start merged broadcaster: %s' % e
                                 broadcaster_initialized = True
@@ -552,6 +564,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             # Select correct P2P network for the merged chain
                             p2p_net = None
                             p2p_port = None
+                            local_p2p_addr = None
+                            
                             if chainid == 98:  # Dogecoin
                                 if parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower():
                                     chain_name = 'dogecoin_testnet'
@@ -560,6 +574,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 else:
                                     p2p_net = dogecoin_net
                                     p2p_port = 22556 if dogecoin_net else None
+                                
+                                # Get local Dogecoin node's P2P address from args
+                                merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
+                                merged_address = getattr(self.args, 'merged_coind_address', None)
+                                if merged_p2p_port and merged_address:
+                                    local_p2p_addr = (merged_address, merged_p2p_port)
                             
                             # Compute datadir_path for peer database storage
                             net_name = self.node.net.NAME
@@ -575,11 +595,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 chain_name=chain_name,
                                 p2p_net=p2p_net,
                                 p2p_port=p2p_port,
+                                local_p2p_addr=local_p2p_addr,
                             )
                             yield merged_broadcaster.start()
                             self.node.merged_broadcasters[chainid] = merged_broadcaster
-                            print 'Merged broadcaster started for chainid %d (%s) P2P=%s' % (
-                                chainid, chain_name, 'enabled' if p2p_net else 'disabled')
+                            print 'Merged broadcaster started for chainid %d (%s) P2P=%s local=%s' % (
+                                chainid, chain_name, 
+                                'enabled' if p2p_net else 'disabled',
+                                '%s:%d' % local_p2p_addr if local_p2p_addr else 'none')
                         except Exception as e:
                             print >>sys.stderr, 'Failed to start merged broadcaster: %s' % e
                         broadcaster_initialized = True
