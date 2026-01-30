@@ -24,10 +24,41 @@ import sys
 import time
 
 from twisted.internet import defer, reactor, protocol
-from twisted.python import log
+from twisted.python import log, failure
 
 from . import data as bitcoin_data, p2p as bitcoin_p2p
 from p2pool.util import deferral, variable
+
+
+def _with_timeout(df, timeout):
+    """Wrap a deferred with a timeout.
+    
+    Returns a new deferred that either:
+    - Succeeds with the original deferred's result if it fires within timeout
+    - Fails with TimeoutError if the timeout expires first
+    """
+    result_df = defer.Deferred()
+    timed_out = [False]  # mutable to allow modification in nested function
+    
+    def on_timeout():
+        timed_out[0] = True
+        if not result_df.called:
+            result_df.errback(failure.Failure(defer.TimeoutError('Connection timeout')))
+    
+    timeout_call = reactor.callLater(timeout, on_timeout)
+    
+    def on_success(result):
+        if not timed_out[0] and not result_df.called:
+            timeout_call.cancel()
+            result_df.callback(result)
+    
+    def on_failure(fail):
+        if not timed_out[0] and not result_df.called:
+            timeout_call.cancel()
+            result_df.errback(fail)
+    
+    df.addCallbacks(on_success, on_failure)
+    return result_df
 
 
 def _safe_addr_str(addr):
@@ -560,8 +591,8 @@ class NetworkBroadcaster(object):
         self.stats['connection_stats']['total_attempts'] += 1
         
         try:
-            # Wait for handshake
-            yield deferral.timeout(factory.getProtocol(), 15)
+            # Wait for handshake with timeout
+            yield _with_timeout(factory.getProtocol(), 15)
             
             self.connections[addr] = {
                 'factory': factory,
