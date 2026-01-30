@@ -121,6 +121,9 @@ class MergedMiningBroadcaster(object):
         # Active P2P connections
         self.connections = {}
         
+        # Track coind's peer connections (to avoid duplication)
+        self.coind_peers = set()  # Set of (host, port) tuples coind is connected to
+        
         # Connection tracking
         self.connection_attempts = {}
         self.connection_failures = {}
@@ -290,6 +293,9 @@ class MergedMiningBroadcaster(object):
                 if addr == self.local_p2p_addr:
                     continue
                 
+                # Track that coind is connected to this peer
+                self.coind_peers.add(addr)
+                
                 # Filter non-standard ports
                 if port not in self.valid_ports:
                     continue
@@ -303,6 +309,9 @@ class MergedMiningBroadcaster(object):
                         'first_seen': time.time(),
                         'last_seen': time.time(),
                         'source': 'coind',  # From daemon's peers
+                        'successful_broadcasts': 0,
+                        'failed_broadcasts': 0,
+                        'blocks_relayed': 0,
                     }
                     added += 1
                 else:
@@ -322,37 +331,54 @@ class MergedMiningBroadcaster(object):
         if not self.p2p_net or self.stopping:
             return
         
-        # Get peers sorted by score (highest first)
-        peers_by_score = sorted(
-            self.peer_db.items(),
-            key=lambda x: x[1].get('score', 0),
-            reverse=True
-        )
-        
-        connected = 0
         current_time = time.time()
         
-        for addr, peer_info in peers_by_score:
-            if len(self.connections) >= self.max_peers:
-                break
-            
+        # Use dynamic scoring to select peers
+        # Exclude: protected, already connected, and peers coind is connected to
+        scored_peers = []
+        coind_overlap_count = 0
+        
+        for addr, peer_info in self.peer_db.items():
+            # Skip protected peers (local coind)
+            if peer_info.get('protected'):
+                continue
+            # Skip already connected
             if addr in self.connections:
                 continue
-            
+            # Skip peers that coind is already connected to (avoid duplication)
+            if addr in self.coind_peers:
+                coind_overlap_count += 1
+                continue
             # Check backoff
             if addr in self.connection_failures:
                 if current_time - self.connection_failures[addr] < self.connection_timeout:
                     continue
-            
             # Check attempt count
-            attempts = self.connection_attempts.get(addr, 0)
-            if attempts >= self.max_connection_attempts:
+            if self.connection_attempts.get(addr, 0) >= self.max_connection_attempts:
                 continue
+            
+            # Calculate dynamic score
+            score = self._calculate_peer_score(peer_info, current_time)
+            scored_peers.append((score, addr, peer_info))
+        
+        if coind_overlap_count > 0:
+            print('MergedBroadcaster[%s]: Excluded %d peers (already connected via coind)' % (
+                self.chain_name, coind_overlap_count))
+        
+        # Sort by score (highest first)
+        scored_peers.sort(reverse=True)
+        
+        connected = 0
+        
+        for score, addr, peer_info in scored_peers:
+            if len(self.connections) >= self.max_peers:
+                break
             
             try:
                 yield self._connect_to_peer(addr)
                 connected += 1
             except Exception as e:
+                attempts = self.connection_attempts.get(addr, 0)
                 self.connection_attempts[addr] = attempts + 1
                 if attempts + 1 >= self.max_connection_attempts:
                     self.connection_failures[addr] = current_time
@@ -465,6 +491,9 @@ class MergedMiningBroadcaster(object):
                                 'first_seen': time.time(),
                                 'last_seen': time.time(),
                                 'source': 'p2p',
+                                'successful_broadcasts': 0,
+                                'failed_broadcasts': 0,
+                                'blocks_relayed': 0,
                             }
                             broadcaster.stats['peers_discovered'] += 1
                     except Exception:
@@ -473,6 +502,29 @@ class MergedMiningBroadcaster(object):
                 return original_handle_addr(addrs)
             
             protocol.handle_addr = handle_addr_wrapper
+        
+        # Hook inv message handler to track block relay
+        original_handle_inv = getattr(protocol, 'handle_inv', None)
+        if original_handle_inv:
+            broadcaster = self
+            
+            def handle_inv_wrapper(invs):
+                for inv in invs:
+                    inv_type = inv.get('type')
+                    if inv_type == 'block':
+                        # Track block relay for peer scoring
+                        if addr in broadcaster.peer_db:
+                            broadcaster.peer_db[addr]['last_seen'] = time.time()
+                            broadcaster.peer_db[addr]['blocks_relayed'] = \
+                                broadcaster.peer_db[addr].get('blocks_relayed', 0) + 1
+                            # Small score bonus for block relayers
+                            broadcaster.peer_db[addr]['score'] = min(
+                                broadcaster.peer_db[addr].get('score', 50) + 5,
+                                999998  # Below protected threshold
+                            )
+                return original_handle_inv(invs)
+            
+            protocol.handle_inv = handle_inv_wrapper
     
     def _disconnect_peer(self, addr):
         """Disconnect from a peer (NEVER disconnect protected peers!)"""
@@ -496,6 +548,58 @@ class MergedMiningBroadcaster(object):
         
         if addr in self.connections:
             del self.connections[addr]
+    
+    def _calculate_peer_score(self, peer_info, current_time):
+        """Calculate dynamic quality score for a peer
+        
+        Scoring factors:
+        - Base score from initial discovery
+        - Success rate bonus (for broadcast reliability)
+        - Recency bonus/penalty (prefer active peers)
+        - Source bonus: P2P peers get priority (daemon handles its own peers)
+        - Block relay bonus (peers that relay blocks are well-connected)
+        
+        Args:
+            peer_info: Peer info dict from peer_db
+            current_time: Current timestamp
+            
+        Returns:
+            float: Quality score (higher is better)
+        """
+        score = peer_info.get('score', 50)
+        
+        # Success rate bonus
+        total = peer_info.get('successful_broadcasts', 0) + peer_info.get('failed_broadcasts', 0)
+        if total > 0:
+            success_rate = peer_info['successful_broadcasts'] / float(total)
+            score += success_rate * 100  # Up to +100 for 100% success
+        
+        # Recency bonus/penalty
+        age_hours = (current_time - peer_info.get('last_seen', current_time)) / 3600.0
+        if age_hours > 24:
+            score -= 50  # Very stale
+        elif age_hours > 6:
+            score -= 20  # Somewhat stale
+        elif age_hours < 1:
+            score += 50  # Very fresh
+        
+        # Source bonus: PRIORITIZE P2P discovered peers
+        source = peer_info.get('source', 'unknown')
+        if source == 'p2p':
+            score += 50  # P2P peers provide unique coverage
+        elif source in ('coind', 'refresh'):
+            score -= 20  # Daemon already handles these
+        
+        # Block relay bonus
+        blocks_relayed = peer_info.get('blocks_relayed', 0)
+        if blocks_relayed > 10:
+            score += 30
+        elif blocks_relayed > 5:
+            score += 20
+        elif blocks_relayed > 0:
+            score += 10
+        
+        return max(0, score)
     
     @defer.inlineCallbacks
     def _maintain_connections(self):
@@ -535,12 +639,15 @@ class MergedMiningBroadcaster(object):
     
     @defer.inlineCallbacks
     def _refresh_peers(self):
-        """Periodic peer refresh"""
+        """Periodic peer refresh - update coind_peers tracking and add new peers"""
         if self.stopping or not self.p2p_net:
             return
         
         try:
             peer_info = yield self.merged_proxy.rpc_getpeerinfo()
+            
+            # Clear and rebuild coind_peers set
+            self.coind_peers.clear()
             
             for peer in peer_info:
                 addr_str = peer.get('addr', '')
@@ -553,10 +660,14 @@ class MergedMiningBroadcaster(object):
                 except ValueError:
                     continue
                 
+                addr = (host, port)
+                
+                # Track that coind is connected to this peer
+                self.coind_peers.add(addr)
+                
                 if port not in self.valid_ports:
                     continue
                 
-                addr = (host, port)
                 if addr in self.peer_db:
                     self.peer_db[addr]['last_seen'] = time.time()
                 else:
@@ -568,6 +679,9 @@ class MergedMiningBroadcaster(object):
                         'first_seen': time.time(),
                         'last_seen': time.time(),
                         'source': 'refresh',
+                        'successful_broadcasts': 0,
+                        'failed_broadcasts': 0,
+                        'blocks_relayed': 0,
                     }
         except Exception as e:
             print('MergedBroadcaster[%s]: Refresh error: %s' % (self.chain_name, e), file=sys.stderr)
