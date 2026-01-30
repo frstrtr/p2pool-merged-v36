@@ -470,14 +470,6 @@ class MergedMiningBroadcaster(object):
             protocol.handle_addr = handle_addr_wrapper
     
     def _disconnect_peer(self, addr):
-        """Disconnect from a peer"""
-        if addr not in self.connections:
-            return
-        
-        try:
-            conn = self.connections[addr]
-            if conn.get('connector'):
-    def _disconnect_peer(self, addr):
         """Disconnect from a peer (NEVER disconnect protected peers!)"""
         if addr not in self.connections:
             return
