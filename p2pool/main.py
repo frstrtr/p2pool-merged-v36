@@ -613,6 +613,9 @@ def run():
     merged_group.add_argument('--merged-coind-rpc-port', metavar='MERGED_COIND_RPC_PORT',
         help='connect to merged mining daemon RPC at this port',
         type=int, action='store', default=None, dest='merged_coind_rpc_port')
+    merged_group.add_argument('--merged-coind-p2p-port', metavar='MERGED_COIND_P2P_PORT',
+        help='connect to merged mining daemon P2P at this port (for fast block propagation)',
+        type=int, action='store', default=None, dest='merged_coind_p2p_port')
     merged_group.add_argument('--merged-coind-rpc-user', metavar='MERGED_COIND_RPC_USER',
         help='merged mining daemon RPC username',
         type=str, action='store', default=None, dest='merged_coind_rpc_user')

@@ -78,19 +78,20 @@ class MergedMiningBroadcaster(object):
     """Manages block broadcasting for merged mining chains (e.g., Dogecoin)
     
     P2P connections for faster block propagation:
-    - Maintain P2P connections to merged chain nodes BEFORE blocks are found
-    - Bootstrap peers from local merged mining node (dogecoind) via getpeerinfo
-    - Discover additional peers via P2P 'addr' messages
+    - Connect to our own synced Dogecoin node first (PROTECTED peer)
+    - Discover additional peers via P2P 'addr' messages from our node
+    - Bootstrap more peers from local node via getpeerinfo
     - When block found: RPC submit + P2P broadcast simultaneously
     
-    This broadcaster focuses on:
-    - Primary RPC submission to local merged mining node
-    - P2P announcement to connected peers for faster propagation
-    - Multiple RPC endpoints for redundancy (if configured)
+    This broadcaster follows the same pattern as Litecoin broadcaster:
+    - Primary P2P connection to our own Dogecoin node
+    - P2P announcement to all connected peers for faster propagation
+    - RPC submission as backup
     """
     
     def __init__(self, merged_proxy, merged_url, datadir_path, chain_name='dogecoin',
-                 additional_rpc_endpoints=None, p2p_net=None, p2p_port=None):
+                 additional_rpc_endpoints=None, p2p_net=None, p2p_port=None,
+                 local_p2p_addr=None):
         """Initialize merged mining broadcaster
         
         Args:
@@ -101,6 +102,7 @@ class MergedMiningBroadcaster(object):
             additional_rpc_endpoints: List of additional RPC proxies for redundancy
             p2p_net: Network object for P2P connections (required for P2P)
             p2p_port: P2P port for the chain (e.g., 22556 for Dogecoin mainnet)
+            local_p2p_addr: (host, port) of our own synced Dogecoin node's P2P port
         """
         print('MergedBroadcaster[%s]: Initializing...' % chain_name)
         
@@ -111,6 +113,7 @@ class MergedMiningBroadcaster(object):
         self.additional_rpc_endpoints = additional_rpc_endpoints or []
         self.p2p_net = p2p_net
         self.p2p_port = p2p_port or 22556  # Default to Dogecoin mainnet
+        self.local_p2p_addr = local_p2p_addr  # Our own Dogecoin node's P2P address
         
         # Peer database for P2P discovery
         self.peer_db = {}
@@ -217,8 +220,38 @@ class MergedMiningBroadcaster(object):
         if not self.p2p_net:
             return
         
+        print('=' * 70)
+        print('MergedBroadcaster[%s]: BOOTSTRAP PHASE - Connecting to our Dogecoin node' % self.chain_name)
+        print('=' * 70)
+        
+        # CRITICAL: Connect to our own Dogecoin node FIRST as PROTECTED peer
+        if self.local_p2p_addr:
+            print('MergedBroadcaster[%s]: Connecting to OUR OWN node at %s (PROTECTED)' % (
+                self.chain_name, _safe_addr_str(self.local_p2p_addr)))
+            
+            # Register local node in peer database with maximum priority
+            self.peer_db[self.local_p2p_addr] = {
+                'addr': self.local_p2p_addr,
+                'score': 999999,  # Maximum score - never drop!
+                'first_seen': time.time(),
+                'last_seen': time.time(),
+                'source': 'local_coind',
+                'protected': True,  # CRITICAL FLAG - never disconnect
+            }
+            
+            # Connect to our local node
+            try:
+                yield self._connect_to_peer(self.local_p2p_addr, protected=True)
+                print('MergedBroadcaster[%s]: Connected to OUR OWN node - will discover peers via addr messages!' % self.chain_name)
+            except Exception as e:
+                print('MergedBroadcaster[%s]: WARNING - Failed to connect to our own node: %s' % (
+                    self.chain_name, e), file=sys.stderr)
+        else:
+            print('MergedBroadcaster[%s]: WARNING - No local P2P address configured!' % self.chain_name)
+        
+        # Get additional peers from node via RPC getpeerinfo
         try:
-            print('MergedBroadcaster[%s]: Bootstrapping peers from node...' % self.chain_name)
+            print('MergedBroadcaster[%s]: Fetching peers from node via RPC...' % self.chain_name)
             peer_info = yield self.merged_proxy.rpc_getpeerinfo()
             
             added = 0
@@ -252,6 +285,10 @@ class MergedMiningBroadcaster(object):
                 
                 addr = (host, port)
                 
+                # Skip our own local node (already added as protected)
+                if addr == self.local_p2p_addr:
+                    continue
+                
                 # Filter non-standard ports
                 if port not in self.valid_ports:
                     continue
@@ -270,7 +307,7 @@ class MergedMiningBroadcaster(object):
                     self.peer_db[addr]['last_seen'] = time.time()
             
             self.bootstrapped = True
-            print('MergedBroadcaster[%s]: Bootstrapped %d new peers (total: %d)' % (
+            print('MergedBroadcaster[%s]: Bootstrapped %d additional peers (total: %d)' % (
                 self.chain_name, added, len(self.peer_db)))
             
         except Exception as e:
@@ -322,12 +359,21 @@ class MergedMiningBroadcaster(object):
                 self.chain_name, connected, len(self.connections)))
     
     @defer.inlineCallbacks
-    def _connect_to_peer(self, addr):
-        """Connect to a single peer"""
+    def _connect_to_peer(self, addr, protected=False):
+        """Connect to a single peer
+        
+        Args:
+            addr: (host, port) tuple
+            protected: If True, this is our own node - never disconnect!
+        """
         host, port = addr
         
-        print('MergedBroadcaster[%s]: Connecting to %s...' % (
-            self.chain_name, _safe_addr_str(addr)))
+        if protected:
+            print('MergedBroadcaster[%s]: Connecting to PROTECTED peer %s...' % (
+                self.chain_name, _safe_addr_str(addr)))
+        else:
+            print('MergedBroadcaster[%s]: Connecting to %s...' % (
+                self.chain_name, _safe_addr_str(addr)))
         
         factory = bitcoin_p2p.ClientFactory(self.p2p_net)
         connector = reactor.connectTCP(host, port, factory, timeout=10)
@@ -341,6 +387,7 @@ class MergedMiningBroadcaster(object):
                 'connector': connector,
                 'protocol': protocol,
                 'connected_at': time.time(),
+                'protected': protected,  # Mark protected peers
             }
             
             # Reset failure tracking on success
@@ -352,18 +399,25 @@ class MergedMiningBroadcaster(object):
             # Update peer database score
             if addr in self.peer_db:
                 self.peer_db[addr]['last_seen'] = time.time()
-                self.peer_db[addr]['score'] = min(200, self.peer_db[addr].get('score', 50) + 10)
+                if not protected:
+                    self.peer_db[addr]['score'] = min(200, self.peer_db[addr].get('score', 50) + 10)
             
-            print('MergedBroadcaster[%s]: Connected to %s' % (
-                self.chain_name, _safe_addr_str(addr)))
+            if protected:
+                print('MergedBroadcaster[%s]: Connected to PROTECTED peer %s' % (
+                    self.chain_name, _safe_addr_str(addr)))
+            else:
+                print('MergedBroadcaster[%s]: Connected to %s' % (
+                    self.chain_name, _safe_addr_str(addr)))
             
             # Hook P2P messages for discovery
             self._hook_protocol_messages(addr, protocol)
             
-            # Request peer addresses
+            # Request peer addresses from this peer
             try:
                 if hasattr(protocol, 'send_getaddr') and callable(protocol.send_getaddr):
                     protocol.send_getaddr()
+                    print('MergedBroadcaster[%s]:   -> Sent getaddr request to %s' % (
+                        self.chain_name, _safe_addr_str(addr)))
             except Exception as e:
                 print('MergedBroadcaster[%s]: Error sending getaddr: %s' % (
                     self.chain_name, e), file=sys.stderr)
@@ -423,6 +477,21 @@ class MergedMiningBroadcaster(object):
         try:
             conn = self.connections[addr]
             if conn.get('connector'):
+    def _disconnect_peer(self, addr):
+        """Disconnect from a peer (NEVER disconnect protected peers!)"""
+        if addr not in self.connections:
+            return
+        
+        conn = self.connections[addr]
+        
+        # CRITICAL: Never disconnect protected peers (our own node)!
+        if conn.get('protected'):
+            print('MergedBroadcaster[%s]: REFUSED to disconnect PROTECTED peer %s' % (
+                self.chain_name, _safe_addr_str(addr)), file=sys.stderr)
+            return
+        
+        try:
+            if conn.get('connector'):
                 conn['connector'].disconnect()
         except Exception as e:
             print('MergedBroadcaster[%s]: Error disconnecting %s: %s' % (
@@ -437,17 +506,33 @@ class MergedMiningBroadcaster(object):
         if self.stopping or not self.p2p_net:
             return
         
-        # Clean up dead connections
+        # Clean up dead connections (but NEVER remove protected peers from db!)
         for addr in list(self.connections.keys()):
             conn = self.connections[addr]
             protocol = conn.get('protocol')
+            is_protected = conn.get('protected', False)
+            
             if protocol and hasattr(protocol, 'transport'):
                 if not protocol.transport or not protocol.transport.connected:
-                    print('MergedBroadcaster[%s]: Lost connection to %s' % (
-                        self.chain_name, _safe_addr_str(addr)))
+                    if is_protected:
+                        print('MergedBroadcaster[%s]: Lost connection to PROTECTED peer %s - will reconnect!' % (
+                            self.chain_name, _safe_addr_str(addr)))
+                    else:
+                        print('MergedBroadcaster[%s]: Lost connection to %s' % (
+                            self.chain_name, _safe_addr_str(addr)))
                     del self.connections[addr]
         
-        # Connect more if needed
+        # CRITICAL: Reconnect to our own node if disconnected
+        if self.local_p2p_addr and self.local_p2p_addr not in self.connections:
+            print('MergedBroadcaster[%s]: Reconnecting to our own node at %s...' % (
+                self.chain_name, _safe_addr_str(self.local_p2p_addr)))
+            try:
+                yield self._connect_to_peer(self.local_p2p_addr, protected=True)
+            except Exception as e:
+                print('MergedBroadcaster[%s]: Failed to reconnect to our own node: %s' % (
+                    self.chain_name, e), file=sys.stderr)
+        
+        # Connect more peers if needed
         if len(self.connections) < self.min_peers:
             yield self._connect_to_peers()
     
