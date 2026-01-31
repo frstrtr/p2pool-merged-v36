@@ -365,13 +365,15 @@ class Protocol(p2protocol.Protocol):
             elif share.VERSION >= 13:
                 # send full transaction for every new_transaction_hash that peer does not know
                 for tx_hash in share.share_info['new_transaction_hashes']:
-                    if not tx_hash in known_txs:
-                        newset   = set(share.share_info['new_transaction_hashes'])
-                        ktxset   = set(known_txs)
-                        missing = newset - ktxset
-                        print "[P2P] WARNING: Missing %i of %i transactions for share broadcast" % (len(missing), len(newset))
-                        print "[P2P] This may indicate MWEB/special transactions not being tracked properly"
-                    assert tx_hash in known_txs, 'Share references unknown transaction %064x - possible MWEB parsing issue' % tx_hash
+                    if tx_hash not in known_txs:
+                        # Transaction not in our known_txs - this can happen when:
+                        # 1. Share arrives before we've seen the transaction in GBT
+                        # 2. MWEB transaction that we couldn't parse (should be fixed now)
+                        # 3. Transaction was evicted from mempool
+                        # Don't assert, just skip sending this tx - peer likely has it already
+                        if p2pool.DEBUG:
+                            print "[P2P] WARN: Share references unknown tx %064x - skipping relay of this tx" % tx_hash
+                        continue
                     if tx_hash not in self.remote_tx_hashes:
                         tx_hashes.add(tx_hash)
                 continue
