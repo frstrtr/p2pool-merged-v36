@@ -128,15 +128,25 @@ def getwork(coind, net, use_getblocktemplate=False, txidcache={}, feecache={}, f
             except Exception as e:
                 # Transaction parsing failed - likely MWEB (MimbleWimble Extension Block)
                 # transaction on Litecoin. These use a different format that p2pool
-                # doesn't yet support. The transaction is still included in the block
-                # template, but we can't calculate its fee contribution.
-                # TODO: Implement MWEB transaction parsing support
+                # doesn't yet support.
+                #
+                # MWEB transactions have a special structure that includes confidential
+                # transaction data (Pedersen commitments, range proofs, etc.) which
+                # our standard Bitcoin tx parser cannot decode.
+                #
+                # TODO: Implement proper MWEB transaction parsing support
+                # See: https://github.com/litecoin-project/lips/blob/master/lip-0002.mediawiki
+                #
+                # For now, store as a "raw" transaction wrapper so share broadcasting works.
+                # This allows the transaction to exist in known_txs for P2P share propagation.
                 skipped_mweb += 1
                 if skipped_mweb == 1:  # Only print once per batch
-                    print '[MWEB] Detected MWEB/special transaction(s) - parsing not yet implemented'
-                    print '[MWEB] These transactions are still included in blocks, but fee calculation skipped'
-                continue
-        # Only add to lists if successfully parsed
+                    print '[MWEB] Detected MWEB/MimbleWimble transaction(s) - full parsing not yet implemented'
+                    print '[MWEB] Storing as raw bytes for P2P share propagation (fee calculation unavailable)'
+                # Create a raw transaction wrapper that stores the packed bytes
+                # This allows the tx to be in known_txs for share broadcasting
+                unpacked = {'_raw_tx': packed, '_raw_size': len(packed), '_mweb': True}
+        # Add to lists (including MWEB transactions stored as raw)
         txhashes.append(txid)
         unpacked_transactions.append(unpacked)
         txfees.append(fee)
@@ -147,7 +157,8 @@ def getwork(coind, net, use_getblocktemplate=False, txidcache={}, feecache={}, f
             feefifo.append(txid)
     
     if skipped_mweb > 0:
-        print '[MWEB] Skipped parsing %d MWEB/special transaction(s) - fee estimation unavailable (TODO: implement MWEB support)' % skipped_mweb
+        print '[MWEB] Processed %d MWEB/MimbleWimble transaction(s) as raw bytes' % skipped_mweb
+        print '[MWEB] TODO: Implement full MWEB parsing for fee estimation (see LIP-0002)'
 
     if time.time() - txidcache['start'] > 30*60.:
         keepers = {(x['data'] if isinstance(x, dict) else x):txid for x, txid in zip(work['transactions'], txhashes)}
