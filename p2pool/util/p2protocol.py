@@ -67,8 +67,8 @@ class Protocol(protocol.Protocol):
                 # - 'remember_tx': P2Pool protocol message with list of transactions
                 # - 'shares': P2Pool shares which reference transactions
                 if command in ('tx', 'remember_tx', 'shares'):
-                    if p2pool.DEBUG:
-                        print '[MWEB] Skipping unparseable %s message (likely contains MWEB tx): %s' % (command, e,)
+                    # Always log MWEB skips for now (to diagnose orphan issues)
+                    print '[MWEB-SKIP] Skipping unparseable %s message (likely contains MWEB tx): %s' % (command, e,)
                     continue  # Skip this message but stay connected
                 else:
                     print 'RECV', command, payload[:100].encode('hex') + ('...' if len(payload) > 100 else '')
