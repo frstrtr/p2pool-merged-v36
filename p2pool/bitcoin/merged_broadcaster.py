@@ -124,11 +124,17 @@ class MergedMiningBroadcaster(object):
         # Track coind's peer connections (to avoid duplication)
         self.coind_peers = set()  # Set of (host, port) tuples coind is connected to
         
-        # Connection tracking
-        self.connection_attempts = {}
-        self.connection_failures = {}
-        self.max_connection_attempts = 3
-        self.connection_timeout = 60  # Backoff time in seconds
+        # Connection tracking with exponential backoff
+        self.connection_attempts = {}  # addr -> attempt count
+        self.connection_failures = {}  # addr -> (last_failure_time, backoff_seconds)
+        self.pending_connections = set()  # Currently attempting to connect
+        self.max_connection_attempts = 5
+        self.base_backoff = 30  # Base backoff in seconds
+        self.max_backoff = 3600  # Max backoff: 1 hour
+        
+        # Rate limiting for connection attempts
+        self.max_concurrent_connections = 3  # Max pending connection attempts at once
+        self.max_connections_per_cycle = 5  # Max new connections to attempt per maintenance cycle
         
         # Valid P2P ports for Dogecoin
         # Dogecoin: 22556 (mainnet), 44556 (testnet), 44557 (testnet4alpha)
@@ -325,41 +331,88 @@ class MergedMiningBroadcaster(object):
         except Exception as e:
             print('MergedBroadcaster[%s]: Bootstrap error: %s' % (self.chain_name, e), file=sys.stderr)
     
+    def _get_backoff_time(self, addr):
+        """Get exponential backoff time for a peer"""
+        if addr not in self.connection_failures:
+            return 0
+        last_failure, backoff = self.connection_failures[addr]
+        return last_failure + backoff
+    
+    def _record_connection_failure(self, addr):
+        """Record a connection failure with exponential backoff"""
+        if addr in self.connection_failures:
+            last_failure, old_backoff = self.connection_failures[addr]
+            # Exponential backoff: double the delay each time, up to max
+            new_backoff = min(old_backoff * 2, self.max_backoff)
+        else:
+            new_backoff = self.base_backoff
+        
+        self.connection_failures[addr] = (time.time(), new_backoff)
+        attempts = self.connection_attempts.get(addr, 0) + 1
+        self.connection_attempts[addr] = attempts
+        
+        # Remove from pending
+        self.pending_connections.discard(addr)
+    
+    def _record_connection_success(self, addr):
+        """Record a successful connection - reset backoff"""
+        if addr in self.connection_failures:
+            del self.connection_failures[addr]
+        if addr in self.connection_attempts:
+            del self.connection_attempts[addr]
+        self.pending_connections.discard(addr)
+    
     @defer.inlineCallbacks
     def _connect_to_peers(self):
-        """Connect to peers from the database"""
+        """Connect to peers from the database with rate limiting and exponential backoff
+        
+        This method is designed to not saturate the event loop:
+        - Limits concurrent pending connections
+        - Uses exponential backoff for failed peers
+        - Only attempts a few connections per cycle
+        """
         if not self.p2p_net or self.stopping:
             return
         
         current_time = time.time()
         
+        # Check how many connections we're already attempting
+        pending_count = len(self.pending_connections)
+        if pending_count >= self.max_concurrent_connections:
+            return  # Don't start more connections
+        
+        # How many more connections can we attempt this cycle?
+        available_slots = min(
+            self.max_concurrent_connections - pending_count,
+            self.max_connections_per_cycle,
+            self.max_peers - len(self.connections)
+        )
+        
+        if available_slots <= 0:
+            return
+        
         # Use dynamic scoring to select peers
-        # Exclude: protected, already connected, and peers coind is connected to
+        # Exclude: protected, already connected, pending, in backoff, and coind peers
         scored_peers = []
-        coind_overlap_count = 0
-        ipv6_skip_count = 0
         
         for addr, peer_info in self.peer_db.items():
             host, port = addr
-            # Skip IPv6 addresses (they often timeout and waste resources)
-            if ':' in host:
-                ipv6_skip_count += 1
-                continue
             # Skip protected peers (local coind)
             if peer_info.get('protected'):
                 continue
             # Skip already connected
             if addr in self.connections:
                 continue
+            # Skip already pending
+            if addr in self.pending_connections:
+                continue
             # Skip peers that coind is already connected to (avoid duplication)
             if addr in self.coind_peers:
-                coind_overlap_count += 1
                 continue
-            # Check backoff
-            if addr in self.connection_failures:
-                if current_time - self.connection_failures[addr] < self.connection_timeout:
-                    continue
-            # Check attempt count
+            # Check exponential backoff
+            if self._get_backoff_time(addr) > current_time:
+                continue
+            # Check max attempt count (give up after too many failures)
             if self.connection_attempts.get(addr, 0) >= self.max_connection_attempts:
                 continue
             
@@ -367,31 +420,26 @@ class MergedMiningBroadcaster(object):
             score = self._calculate_peer_score(peer_info, current_time)
             scored_peers.append((score, addr, peer_info))
         
-        if coind_overlap_count > 0:
-            print('MergedBroadcaster[%s]: Excluded %d peers (already connected via coind)' % (
-                self.chain_name, coind_overlap_count))
-        
         # Sort by score (highest first)
         scored_peers.sort(reverse=True)
         
-        connected = 0
-        
-        for score, addr, peer_info in scored_peers:
-            if len(self.connections) >= self.max_peers:
-                break
+        # Attempt connections to top peers (non-blocking)
+        attempts_started = 0
+        for score, addr, peer_info in scored_peers[:available_slots]:
+            # Mark as pending before starting
+            self.pending_connections.add(addr)
             
-            try:
-                yield self._connect_to_peer(addr)
-                connected += 1
-            except Exception as e:
-                attempts = self.connection_attempts.get(addr, 0)
-                self.connection_attempts[addr] = attempts + 1
-                if attempts + 1 >= self.max_connection_attempts:
-                    self.connection_failures[addr] = current_time
-        
-        if connected > 0:
-            print('MergedBroadcaster[%s]: Connected to %d new peers (total: %d)' % (
-                self.chain_name, connected, len(self.connections)))
+            # Start connection attempt (don't yield - let it run in background)
+            d = self._connect_to_peer(addr)
+            d.addErrback(lambda f, a=addr: self._handle_connection_error(a, f))
+            
+            attempts_started += 1
+            if attempts_started >= available_slots:
+                break
+    
+    def _handle_connection_error(self, addr, failure):
+        """Handle connection failure - record backoff"""
+        self._record_connection_failure(addr)
     
     @defer.inlineCallbacks
     def _connect_to_peer(self, addr, protected=False):
@@ -425,11 +473,11 @@ class MergedMiningBroadcaster(object):
                 'protected': protected,  # Mark protected peers
             }
             
-            # Reset failure tracking on success
-            if addr in self.connection_attempts:
-                del self.connection_attempts[addr]
-            if addr in self.connection_failures:
-                del self.connection_failures[addr]
+            # Record successful connection (resets backoff)
+            self._record_connection_success(addr)
+            
+            # Remove from pending connections
+            self.pending_connections.discard(addr)
             
             # Update peer database score
             if addr in self.peer_db:

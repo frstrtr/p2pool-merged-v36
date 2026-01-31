@@ -123,13 +123,20 @@ class NetworkBroadcaster(object):
         
         # Connection tracking for retry logic
         self.connection_attempts = {}  # (host, port) -> attempt count
-        self.connection_failures = {}  # (host, port) -> last failure time
+        self.connection_failures = {}  # (host, port) -> (last_failure_time, backoff_seconds)
         self.last_coind_refresh = 0    # Timestamp of last node peer refresh
+        
+        # Rate-limited connection management (to prevent CPU saturation)
+        self.pending_connections = set()  # Peers we're currently trying to connect to
+        self.max_concurrent_connections = 3  # Max simultaneous connection attempts
+        self.max_connections_per_cycle = 5  # Max new connections to start per refresh cycle
+        self.base_backoff = 30  # Initial backoff time in seconds
+        self.max_backoff = 3600  # Maximum backoff time (1 hour)
         
         # Configuration
         self.max_peers = 20  # Total connections including local node
         self.min_peers = 5   # Minimum required for health
-        self.max_connection_attempts = 3  # Max retries per peer before backoff
+        self.max_connection_attempts = 10  # Max retries per peer before giving up
         self.connection_timeout = 300  # 5 minutes backoff after max failures
         self.coind_refresh_interval = 1800  # 30 minutes between node refreshes
         self.bootstrapped = False
@@ -524,9 +531,50 @@ class NetworkBroadcaster(object):
             yield self._refresh_peers_from_coind()
             yield self.refresh_connections()
     
+    def _get_backoff_time(self, addr):
+        """Get exponential backoff time for a peer"""
+        if addr not in self.connection_failures:
+            return 0
+        last_failure, backoff = self.connection_failures[addr]
+        return last_failure + backoff
+    
+    def _record_connection_failure(self, addr):
+        """Record a connection failure with exponential backoff"""
+        if addr in self.connection_failures:
+            last_failure, old_backoff = self.connection_failures[addr]
+            # Exponential backoff: double the delay each time, up to max
+            new_backoff = min(old_backoff * 2, self.max_backoff)
+        else:
+            new_backoff = self.base_backoff
+        
+        self.connection_failures[addr] = (time.time(), new_backoff)
+        attempts = self.connection_attempts.get(addr, 0) + 1
+        self.connection_attempts[addr] = attempts
+        
+        # Remove from pending
+        self.pending_connections.discard(addr)
+    
+    def _record_connection_success(self, addr):
+        """Record a successful connection - reset backoff"""
+        if addr in self.connection_failures:
+            del self.connection_failures[addr]
+        if addr in self.connection_attempts:
+            del self.connection_attempts[addr]
+        self.pending_connections.discard(addr)
+    
+    def _handle_connection_error(self, addr, failure):
+        """Handle connection failure - record backoff"""
+        self._record_connection_failure(addr)
+    
     @defer.inlineCallbacks
     def refresh_connections(self):
-        """Maintain connections to the best peers from our database"""
+        """Maintain connections to the best peers from our database
+        
+        Rate-limited and non-blocking connection management:
+        - Limits concurrent pending connections
+        - Uses exponential backoff for failed peers
+        - Only attempts a few connections per cycle
+        """
         if self.stopping:
             return
         
@@ -546,74 +594,66 @@ class NetworkBroadcaster(object):
         if self.local_addr in self.peer_db:
             self.peer_db[self.local_addr]['last_seen'] = current_time
         
+        # Check how many connections we're already attempting
+        pending_count = len(self.pending_connections)
+        if pending_count >= self.max_concurrent_connections:
+            return  # Don't start more connections
+        
+        # How many more connections can we attempt this cycle?
+        available_slots = min(
+            self.max_concurrent_connections - pending_count,
+            self.max_connections_per_cycle,
+            self.max_peers - len(self.connections)
+        )
+        
+        if available_slots <= 0:
+            return
+        
         # Get sorted peers by score (exclude protected and already connected)
         # Use dynamic scoring that considers success rate, recency, and source
         scored_peers = []
-        coind_overlap_count = 0
-        ipv6_skip_count = 0
         
         for addr, info in self.peer_db.items():
             host, port = addr
-            # Skip IPv6 addresses (they often timeout and waste resources)
-            if ':' in host:
-                ipv6_skip_count += 1
-                continue
             # Skip protected peers (local coind)
             if info.get('protected'):
                 continue
             # Skip already connected
             if addr in self.connections:
                 continue
+            # Skip already pending
+            if addr in self.pending_connections:
+                continue
             # Skip peers that coind is already connected to (avoid duplication)
             if addr in self.coind_peers:
-                coind_overlap_count += 1
+                continue
+            # Check exponential backoff
+            if self._get_backoff_time(addr) > current_time:
+                continue
+            # Check max attempt count (give up after too many failures)
+            if self.connection_attempts.get(addr, 0) >= self.max_connection_attempts:
                 continue
             
             # Calculate dynamic score
             score = self._calculate_peer_score(info, current_time)
             scored_peers.append((score, addr, info))
         
-        if coind_overlap_count > 0:
-            print('Broadcaster[%s]: Excluded %d peers (already connected via coind)' % (
-                self.chain_name, coind_overlap_count))
-        
         # Sort by score (highest first)
         scored_peers.sort(reverse=True)
-        sorted_peers = [(addr, info) for score, addr, info in scored_peers]
         
-        # Calculate how many more connections we need
-        current_count = len(self.connections)
-        needed = self.max_peers - current_count
-        
-        if needed <= 0:
-            return
-        
-        print('Broadcaster[%s]: Connecting to %d more peers (have %d, want %d)' % (
-            self.chain_name, min(needed, len(sorted_peers)), current_count, self.max_peers))
-        
-        # Connect to top peers
-        connected = 0
-        for addr, info in sorted_peers[:needed]:
-            # Check backoff
-            if addr in self.connection_failures:
-                if current_time - self.connection_failures[addr] < self.connection_timeout:
-                    continue
+        # Attempt connections to top peers (non-blocking)
+        attempts_started = 0
+        for score, addr, info in scored_peers[:available_slots]:
+            # Mark as pending before starting
+            self.pending_connections.add(addr)
             
-            # Check attempt count
-            attempts = self.connection_attempts.get(addr, 0)
-            if attempts >= self.max_connection_attempts:
-                continue
+            # Start connection attempt (don't yield - let it run in background)
+            d = self._connect_to_peer(addr)
+            d.addErrback(lambda f, a=addr: self._handle_connection_error(a, f))
             
-            try:
-                yield self._connect_to_peer(addr)
-                connected += 1
-            except Exception as e:
-                self.connection_attempts[addr] = attempts + 1
-                if attempts + 1 >= self.max_connection_attempts:
-                    self.connection_failures[addr] = current_time
-        
-        if connected > 0:
-            print('Broadcaster[%s]: Connected to %d new peers' % (self.chain_name, connected))
+            attempts_started += 1
+            if attempts_started >= available_slots:
+                break
     
     @defer.inlineCallbacks
     def _connect_to_peer(self, addr):
@@ -638,11 +678,8 @@ class NetworkBroadcaster(object):
                 'protected': False
             }
             
-            # Reset failure tracking on success
-            if addr in self.connection_attempts:
-                del self.connection_attempts[addr]
-            if addr in self.connection_failures:
-                del self.connection_failures[addr]
+            # Record successful connection (resets backoff)
+            self._record_connection_success(addr)
             
             # Update peer database score
             if addr in self.peer_db:
