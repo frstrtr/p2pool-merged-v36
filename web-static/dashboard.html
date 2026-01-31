@@ -2429,7 +2429,9 @@
                     
                     // Show "Show more" button if there are more peers
                     if (window.broadcastPeersDisplayCount < window.allBroadcasterPeers.length) {
-                        d3.select('#broadcaster_peers_show_more').style('display', 'block');
+                        d3.select('#broadcaster_peers_show_more')
+                            .style('display', 'block')
+                            .text('Show 5 more... (' + (window.allBroadcasterPeers.length - window.broadcastPeersDisplayCount) + ' remaining)');
                     } else {
                         d3.select('#broadcaster_peers_show_more').style('display', 'none');
                     }
@@ -2485,7 +2487,7 @@
                     // Determine display name
                     var displayName = chainData.chain_name || chainData.chain || chainId;
                     if (displayName === 'dogecoin' || chainId === '98') {
-                        displayName = 'Dogecoin';
+                        displayName = 'Dogecoin Peers';
                     }
                     
                     headerDiv.append('h3')
@@ -2497,6 +2499,8 @@
                         .attr('class', 'badge')
                         .style('background', chainData.health && chainData.health.healthy ? 'var(--success)' : '#6366f1')
                         .style('color', '#fff')
+                        .style('border-radius', '20px')
+                        .style('padding', '4px 10px')
                         .text(chainData.health && chainData.health.healthy ? '✓ Active' : '⏳ Starting');
                     
                     // Stats grid - updated to show P2P connections
@@ -2641,15 +2645,16 @@
                             // Update show more button
                             var showMoreBtn = d3.select('#merged_peers_show_more_' + chainId);
                             if (window[peersKey + '_display'] < window[peersKey].length) {
-                                showMoreBtn.style('display', 'block');
+                                showMoreBtn
+                                    .style('display', 'block')
+                                    .text('Show 5 more... (' + (window[peersKey].length - window[peersKey + '_display']) + ' remaining)');
                             } else {
                                 showMoreBtn.style('display', 'none');
                             }
                         }
                         
-                        renderMergedPeers();
-                        
-                        // Show more button
+                        // Show more button - create before render so renderMergedPeers can update it
+                        var initialRemaining = peers.length - 5;
                         chainDiv.append('button')
                             .attr('id', 'merged_peers_show_more_' + chainId)
                             .style('display', peers.length > 5 ? 'block' : 'none')
@@ -2662,7 +2667,7 @@
                             .style('border-radius', '8px')
                             .style('cursor', 'pointer')
                             .style('font-size', '14px')
-                            .text('Show 5 more...')
+                            .text('Show 5 more... (' + initialRemaining + ' remaining)')
                             .on('click', function() {
                                 window[peersKey + '_display'] = Math.min(
                                     window[peersKey + '_display'] + 5,
@@ -2670,6 +2675,8 @@
                                 );
                                 renderMergedPeers();
                             });
+                        
+                        renderMergedPeers();
                     }
                 });
                 
