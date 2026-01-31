@@ -138,10 +138,18 @@ tx_id_type = pack.ComposedType([
 ])
 
 def get_stripped_size(tx):
+    # TODO: For MWEB transactions, we store the raw size directly
+    # since we can't parse them to calculate size
+    if isinstance(tx, dict) and tx.get('_mweb'):
+        return tx['_raw_size']
     if not 'stripped_size' in tx:
         tx['stripped_size'] = tx_id_type.packed_size(tx)
     return tx['stripped_size']
 def get_size(tx):
+    # TODO: For MWEB transactions, we store the raw size directly
+    # since we can't parse them to calculate size
+    if isinstance(tx, dict) and tx.get('_mweb'):
+        return tx['_raw_size']
     if not 'size' in tx:
         tx['size'] = tx_id_type.packed_size(tx)
     return tx['size']
@@ -185,6 +193,13 @@ class TransactionType(pack.Type):
             return dict(version=version, tx_ins=tx_ins, tx_outs=next['tx_outs'], lock_time=next['lock_time'])
     
     def write(self, file, item):
+        # TODO: Implement proper MWEB transaction serialization
+        # MWEB raw transactions are stored as dicts with '_mweb': True
+        # For now, write the raw bytes directly. This is used when sending
+        # transactions over P2P that we couldn't parse (MWEB format).
+        if isinstance(item, dict) and item.get('_mweb'):
+            file.write(item['_raw_tx'])
+            return
         if is_segwit_tx(item):
             assert len(item['tx_ins']) == len(item['witness'])
             self._write_type.write(file, item)
