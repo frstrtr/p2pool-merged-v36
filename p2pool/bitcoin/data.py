@@ -487,6 +487,9 @@ def get_wtxid(tx, txid=None, txhash=None):
         return hash256(tx_id_type.pack(tx)) if txid is None else txid
 
 def get_txid(tx):
+    # Handle MWEB raw transactions stored as dict with _raw_tx key
+    if isinstance(tx, dict) and tx.get('_mweb'):
+        return hash256(tx['_raw_tx'])
     return hash256(tx_id_type.pack(tx))
 
 def pubkey_to_script2(pubkey):

@@ -95,7 +95,11 @@ class Protocol(p2protocol.Protocol):
     def packetReceived(self, command, payload2):
         try:
             if command != 'version' and not self.connected2:
-                raise PeerMisbehavingError('first message was not version message')
+                # This often happens during node restarts when peers have stale connections
+                # Don't ban, just disconnect - they will reconnect with proper handshake
+                print 'Peer %s:%i sent non-version first message, disconnecting (will not ban)' % self.addr
+                self.disconnect()
+                return
             p2protocol.Protocol.packetReceived(self, command, payload2)
         except PeerMisbehavingError, e:
             print 'Peer %s:%i misbehaving, will drop and ban. Reason:' % self.addr, e.message
@@ -157,7 +161,10 @@ class Protocol(p2protocol.Protocol):
     def handle_version(self, version, services, addr_to, addr_from, nonce, sub_version, mode, best_share_hash):
         print "Peer %s:%s says protocol version is %s, client version %s" % (addr_from['address'], addr_from['port'], version, sub_version)
         if self.other_version is not None:
-            raise PeerMisbehavingError('more than one version message')
+            # This can happen during simultaneous connection attempts - just disconnect, don't ban
+            print 'Peer %s:%i sent duplicate version message, disconnecting (will not ban)' % self.addr
+            self.disconnect()
+            return
         if version < getattr(self.node.net, 'MINIMUM_PROTOCOL_VERSION', 1400):
             raise PeerMisbehavingError('peer too old')
         
@@ -330,6 +337,7 @@ class Protocol(p2protocol.Protocol):
             share = p2pool_data.load_share(wrappedshare, self.node.net, self.addr)
             if 13 <= wrappedshare['type'] < 34:
                 txs = []
+                share_has_unknown_txs = False
                 for tx_hash in share.share_info['new_transaction_hashes']:
                     if tx_hash in self.node.known_txs_var.value:
                         tx = self.node.known_txs_var.value[tx_hash]
@@ -341,10 +349,16 @@ class Protocol(p2protocol.Protocol):
                                     print 'Transaction %064x rescued from peer latency cache!' % (tx_hash,)
                                 break
                         else:
-                            print >>sys.stderr, 'Peer referenced unknown transaction %064x, disconnecting' % (tx_hash,)
-                            self.disconnect()
-                            return
+                            # Transaction not found - this can happen with mempool timing differences
+                            # or MWEB transactions. Don't disconnect, just skip this share.
+                            if p2pool.DEBUG:
+                                print >>sys.stderr, '[P2P] Share references unknown transaction %064x - skipping share' % (tx_hash,)
+                            share_has_unknown_txs = True
+                            break
                     txs.append(tx)
+                if share_has_unknown_txs:
+                    # Skip this share - we can't validate it without all transactions
+                    continue
             else:
                 txs = None
             
@@ -485,9 +499,11 @@ class Protocol(p2protocol.Protocol):
                         print 'Transaction %064x rescued from peer latency cache!' % (tx_hash,)
                         break
                 else:
-                    print >>sys.stderr, 'Peer referenced unknown transaction %064x, disconnecting' % (tx_hash,)
-                    self.disconnect()
-                    return
+                    # Transaction not found - this can happen with mempool timing differences
+                    # or MWEB transactions. Don't disconnect, just skip this transaction.
+                    if p2pool.DEBUG:
+                        print >>sys.stderr, '[P2P] remember_tx: Unknown transaction %064x - skipping' % (tx_hash,)
+                    continue
             
             self.remembered_txs[tx_hash] = tx
             self.remembered_txs_size += 100 + get_tx_packed_size(tx)
