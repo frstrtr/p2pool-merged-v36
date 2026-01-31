@@ -1631,6 +1631,7 @@
             loadBroadcasterStats();
             loadMergedBroadcasterStats();
             loadShares();
+            document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
         });
         
         // Load version
