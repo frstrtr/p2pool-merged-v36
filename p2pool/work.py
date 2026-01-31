@@ -784,19 +784,26 @@ class WorkerBridge(worker_interface.WorkerBridge):
             pubkey_hash = self.my_pubkey_hash
         else:
             try:
-                # Validate that miner's address is convertible for merged mining
-                is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
-                
-                if is_convertible:
-                    pubkey_hash = validated_pubkey_hash
+                # Skip validation if user is empty (can happen with pre-authorization work requests)
+                # Use donation script pubkey_hash so rewards go to P2Pool development
+                if not user or not user.strip():
+                    # Extract pubkey_hash from DONATION_SCRIPT (P2PKH format: 76a914<20-bytes>88ac)
+                    # The pubkey_hash is bytes 3-23 of the script
+                    pubkey_hash = int(p2pool_data.DONATION_SCRIPT[3:23].encode('hex'), 16)
                 else:
-                    # Address is not convertible (P2SH, P2WSH, P2TR)
-                    # Log warning but still allow mining on parent chain
-                    # Merged mining rewards will be skipped for this miner
-                    print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
-                    print >>sys.stderr, '[WARN] This miner will NOT receive merged mining rewards! Use P2PKH or P2WPKH address.'
-                    # Fall back to parsing anyway for parent chain mining
-                    pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
+                    # Validate that miner's address is convertible for merged mining
+                    is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
+                    
+                    if is_convertible:
+                        pubkey_hash = validated_pubkey_hash
+                    else:
+                        # Address is not convertible (P2SH, P2WSH, P2TR)
+                        # Log warning but still allow mining on parent chain
+                        # Merged mining rewards will be skipped for this miner
+                        print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
+                        print >>sys.stderr, '[WARN] This miner will NOT receive merged mining rewards! Use P2PKH or P2WPKH address.'
+                        # Fall back to parsing anyway for parent chain mining
+                        pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
             except: # XXX blah
                 pubkey_hash = self.my_pubkey_hash
         
