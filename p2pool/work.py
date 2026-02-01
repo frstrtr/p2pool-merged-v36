@@ -36,18 +36,87 @@ print_throttle = 0.0
 
 def is_pubkey_hash_address(address, net):
     """
-    Check if an address contains a pubkey hash (convertible to other chains).
+    Check if an address contains a pubkey hash that can be converted to merged chain addresses.
     
-    Returns (is_convertible, pubkey_hash, error_message)
+    =================================================================================
+    MERGED MINING ADDRESS CONVERSION - TECHNICAL EXPLANATION
+    =================================================================================
     
-    Convertible address types:
-    - P2PKH (legacy, version = ADDRESS_VERSION): 20-byte pubkey hash
-    - P2WPKH (native segwit v0, 20 bytes): 20-byte pubkey hash
+    When P2Pool performs merged mining (e.g., Litecoin + Dogecoin), miner payouts need
+    to be distributed on BOTH chains. However, miners only provide a Litecoin address.
     
-    Non-convertible address types (script hashes - cannot be converted!):
-    - P2SH (legacy, version = ADDRESS_P2SH_VERSION): 20-byte script hash
-    - P2WSH (native segwit v0, 32 bytes): 32-byte script hash  
-    - P2TR (taproot, witness v1): 32-byte tweaked pubkey
+    To create the Dogecoin payout address, we extract the pubkey_hash from the Litecoin
+    address and re-encode it with the Dogecoin address version. This ONLY works for
+    addresses that contain a raw pubkey_hash:
+    
+    CONVERTIBLE ADDRESS TYPES:
+    --------------------------
+    1. P2PKH (Pay-to-Public-Key-Hash) - Legacy addresses
+       - Litecoin: starts with 'L' (mainnet) or 'm/n' (testnet)
+       - Format: Base58Check(version || HASH160(pubkey))
+       - The 20-byte HASH160(pubkey) can be extracted and re-encoded for Dogecoin
+       - Example: LTC 'LbxJe7Nf59gv2vK7Mw8kEa6aWFDHjwsf2E' -> DOGE 'DCo7...'
+    
+    2. P2WPKH (Pay-to-Witness-Public-Key-Hash) - Native SegWit v0
+       - Litecoin: starts with 'ltc1q' followed by 39 more chars (43 total)
+       - Format: Bech32(hrp, version=0, witness_program=HASH160(pubkey))
+       - The 20-byte witness program IS the pubkey_hash
+       - Example: LTC 'ltc1qna9n6gs...' (43 chars) -> DOGE 'D...'
+    
+    NON-CONVERTIBLE ADDRESS TYPES (contain script hashes, NOT pubkey hashes):
+    -------------------------------------------------------------------------
+    3. P2SH (Pay-to-Script-Hash) - Legacy script addresses
+       - Litecoin: starts with 'M' or '3' (mainnet) or '2' (testnet)
+       - Format: Base58Check(p2sh_version || HASH160(script))
+       - The hash is of a SCRIPT, not a public key - CANNOT be safely converted!
+       - Used for: multisig, SegWit-wrapped addresses, complex scripts
+    
+    4. P2WSH (Pay-to-Witness-Script-Hash) - Native SegWit script addresses
+       - Litecoin: starts with 'ltc1q' followed by ~59 more chars (62 total)
+       - Format: Bech32(hrp, version=0, witness_program=SHA256(script))
+       - The 32-byte witness program is a SHA256 hash of a script
+       - WARNING: These look similar to P2WPKH but are LONGER (62 vs 43 chars)
+       - CANNOT be converted - the script exists only on the parent chain!
+    
+    5. P2TR (Pay-to-Taproot) - Taproot addresses (witness v1)
+       - Litecoin: starts with 'ltc1p...'
+       - Format: Bech32m(hrp, version=1, tweaked_pubkey)
+       - Contains a 32-byte tweaked public key, not a simple hash
+       - CANNOT be safely converted
+    
+    WHY P2SH/P2WSH CANNOT BE CONVERTED:
+    -----------------------------------
+    These addresses are hashes of SCRIPTS (smart contracts), not public keys.
+    The underlying script (e.g., "2-of-3 multisig with keys A, B, C") only exists
+    on the parent chain. Creating a Dogecoin address from the script hash would
+    result in an address that NO ONE can spend from, because the script doesn't
+    exist on Dogecoin.
+    
+    P2WPKH vs P2WSH DETECTION:
+    --------------------------
+    Both P2WPKH and P2WSH use witness version 0 and start with 'ltc1q'.
+    The difference is the witness program length:
+    - P2WPKH: 20 bytes (HASH160) -> 43 character address
+    - P2WSH:  32 bytes (SHA256)  -> 62 character address
+    
+    We detect this by checking if the pubkey_hash value exceeds 2^160-1.
+    A legitimate 20-byte hash will never exceed this, while a 32-byte hash
+    almost certainly will (probability of false negative: 1 in 2^96).
+    
+    REDISTRIBUTION OF UNCONVERTIBLE SHARES:
+    ---------------------------------------
+    When an address cannot be converted, that miner's share of the merged
+    mining reward is redistributed proportionally to all convertible addresses,
+    EXCLUDING the primary donation (author fee). This ensures:
+    1. 100% of the merged block reward is distributed
+    2. Miners with convertible addresses get slightly more DOGE
+    3. The author donation doesn't unfairly benefit from unconvertible addresses
+    
+    Returns: (is_convertible, pubkey_hash, error_message)
+    - is_convertible: True if address can be converted to merged chain
+    - pubkey_hash: The 160-bit hash (int) if convertible, None otherwise
+    - error_message: Human-readable error if not convertible, None otherwise
+    =================================================================================
     """
     try:
         pubkey_hash, version, witver = bitcoin_data.address_to_pubkey_hash(address, net)
@@ -58,16 +127,22 @@ def is_pubkey_hash_address(address, net):
         
         # Check for P2WPKH vs P2WSH (both are witness v0, but different lengths)
         if witver == 0:
-            # Witness v0: P2WPKH is 20 bytes (160 bits), P2WSH is 32 bytes (256 bits)
-            # Check the actual size by examining the pubkey_hash value
-            if pubkey_hash > (1 << 160) - 1:  # Larger than 20 bytes
-                return (False, None, 'P2WSH address (script hash) cannot be converted to merged chain')
+            # Witness v0: P2WPKH is 20 bytes (max value 2^160-1), P2WSH is 32 bytes (max value 2^256-1)
+            # A 32-byte value will always be > 2^160-1 if any of the upper 12 bytes are non-zero
+            # This is a probabilistic check - a P2WSH hash that happens to have all upper
+            # 12 bytes as zero would pass, but this is astronomically unlikely (1 in 2^96)
+            if pubkey_hash > (1 << 160) - 1:  # Larger than 20 bytes can represent
+                return (False, None, 'P2WSH address (32-byte script hash) cannot be converted to merged chain')
             else:
                 return (True, pubkey_hash, None)  # P2WPKH - convertible
         
-        # Check for Taproot (witness v1) - not convertible
+        # Check for Taproot (witness v1) - not convertible (32-byte tweaked pubkey)
         if witver == 1:
             return (False, None, 'P2TR address (taproot) cannot be converted to merged chain')
+        
+        # Higher witness versions (future segwit) - not convertible for safety
+        if witver > 1:
+            return (False, None, 'Unknown witness version %d - cannot convert to merged chain' % witver)
         
         # P2PKH (legacy) - convertible
         if version == net.ADDRESS_VERSION:
