@@ -11,15 +11,19 @@ This document outlines the comprehensive implementation plan for P2Pool V36 shar
 4. Create economic incentives for network migration to V36
 5. **Migrate donation from lost-key address to controlled address** (Part 9)
 
-**Critical Design Principle - Gradual Migration:**
-Both merged mining rewards AND donation migration follow the **same gradual adoption-based principle**:
-- V36 miners get full benefits immediately (merged rewards + saved donations)
-- Pre-V36 miners get proportionally less as V36 adoption increases
-- When network signals V36 majority (95%), old donation is cut from coinbase entirely
-- No hard switches, no flag days - natural economic incentive drives migration
+**Critical Design Note - Different Migration Mechanics:**
 
-**Critical Donation Migration:**
-The original P2Pool donation address has a **LOST PRIVATE KEY** - all funds sent there are permanently burned. V36 changes `gentx_before_refhash` to use our controlled donation address. As V36 adoption increases, less and less goes to the burned address, until the cutover threshold (95%) when old donation is removed from coinbase entirely.
+| Feature | Migration Type | Reason |
+|---------|---------------|--------|
+| **Merged Mining Rewards** | Gradual proportional | NEW feature - V35 doesn't verify |
+| **Donation** | Flag day (95%+ V36) | EXISTING feature - ALL nodes must agree on coinbase |
+
+- **Merged rewards**: CAN be split proportionally because V35 doesn't verify merged outputs
+- **Donation**: CANNOT change until V35 deprecated - `get_expected_payouts()` must produce IDENTICAL coinbase on ALL nodes
+- **Result**: Continue SECONDARY_DONATION_ENABLED hack (50/50 split) until flag day
+
+**Critical Donation Constraint:**
+The original P2Pool donation address has a **LOST PRIVATE KEY** - all funds sent there are permanently burned. However, donation CANNOT be migrated gradually because **ALL P2Pool nodes (V35 and V36) must compute identical coinbase structure**. V35 nodes use `DONATION_SCRIPT` in `get_expected_payouts()` - if V36 used different script, V35 nodes would reject V36 blocks! Migration requires V35 deprecation first.
 
 ---
 
@@ -880,12 +884,14 @@ The original P2Pool donation script is a **P2PK (Pay-to-Public-Key)** format wit
 # P2PK script: <65-byte uncompressed pubkey> OP_CHECKSIG
 DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac'.decode('hex')
 
-# This pubkey corresponds to addresses:
-# - Bitcoin:  1HLoD9E4SDFFPDiYfNYnkBLQ85Y51J3Zb1
-# - Litecoin: LhiLUQRJNGNpCb6eDz5HsmrEupwm4gJG4K
-# - Dogecoin: DHy2615XKerRbJEPN5TCPDN8GEkHaEtsFg
+# This pubkey hash160 is: d03da6fca390166d020be0e7c28ac8cc70f58403
+# Which corresponds to addresses (P2PKH equivalent):
+# - Bitcoin:  1Kz5QaUPDtKrj5SqW5tFkn7WZh8LmQaQi4
+# - Litecoin: LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd
+# - Dogecoin: DQ8AwqR2XJE9G5dSEfspJYH7Spre85dj6L
 #
-# ALL FUNDS SENT TO THESE ADDRESSES ARE PERMANENTLY LOST!
+# NOTE: P2PK outputs can be spent without revealing the address,
+# but the private key is LOST so these funds are UNSPENDABLE!
 ```
 
 **Impact:**
@@ -894,310 +900,241 @@ DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd370
 - Funds accumulate but can NEVER be spent
 - This is wasteful and reduces miner rewards
 
-### 9.2 Migration Principle: Same as Merged Mining Rewards
+### 9.2 CRITICAL CONSTRAINT: Coinbase Must Be Identical Across All Nodes!
 
-**KEY INSIGHT:** We apply the **same gradual migration principle** used for merged mining rewards:
+**⚠️ THIS IS THE KEY CONSTRAINT THAT LIMITS OUR OPTIONS ⚠️**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  DONATION MIGRATION = SAME PRINCIPLE AS MERGED REWARD REDISTRIBUTION        │
+│  WHY DONATION CANNOT CHANGE UNTIL V35 IS DEPRECATED                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  MERGED REWARDS:                                                            │
-│  ├─ V36 miners → Full merged rewards (primary pool)                         │
-│  ├─ Pre-V36 convertible → Small incentive rewards                           │
-│  └─ Pre-V36 unconvertible → Redistributed to V36 miners                     │
+│  BLOCK VALIDATION REQUIREMENT:                                              │
+│  ├─ When ANY share finds a block, ALL P2Pool nodes must agree on coinbase   │
+│  ├─ get_expected_payouts() calculates payouts for ALL miners in PPLNS       │
+│  ├─ This function uses donation_script_to_address() → DONATION_SCRIPT       │
+│  └─ ALL nodes must compute IDENTICAL coinbase outputs!                      │
 │                                                                             │
-│  DONATION REWARDS:                                                          │
-│  ├─ V36 shares → 100% donation to NEW controlled address                    │
-│  ├─ Pre-V36 shares → Donation split (or old script for compatibility)       │
-│  └─ As V36 adoption ↑ → Less goes to burned address                         │
+│  IF V36 USED DIFFERENT DONATION SCRIPT:                                     │
+│  ├─ V36 node: donation → SECONDARY_DONATION_SCRIPT                          │
+│  ├─ V35 node: donation → DONATION_SCRIPT                                    │
+│  ├─ RESULT: Different coinbase structure!                                   │
+│  └─ V35 nodes would REJECT blocks from V36 nodes!                           │
 │                                                                             │
-│  SAME GRADUAL MIGRATION, SAME ECONOMIC INCENTIVE!                           │
+│  UNLIKE MERGED MINING (which is NEW and V35 doesn't verify):                │
+│  ├─ Donation is part of EXISTING coinbase verification                      │
+│  ├─ V35 nodes verify ALL blocks against their expected payout structure     │
+│  └─ Cannot use different donation until V35 is GONE!                        │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.3 The Gradual Migration Model
+### 9.3 Why gentx_before_refhash Doesn't Help Here
 
-Instead of a hard switch, donation follows **share version adoption**:
+You might think: "V36 can have different gentx_before_refhash, so it can use different donation!"
 
-```python
-# SECONDARY_DONATION_SCRIPT: Our project's donation (P2PKH format)
-# Pubkey hash: 20cb5c22b1e4d5947e5c112c7696b51ad9af3c61
-SECONDARY_DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'.decode('hex')
-
-# This corresponds to addresses:
-# - Litecoin: LRWaj4D3Ue5hZvJ29eKVP9N8z298YPcoMW  (WE CONTROL THIS!)
-```
-
-**How It Works:**
-
-1. **V36 nodes** use `SECONDARY_DONATION_SCRIPT` in their `gentx_before_refhash`
-2. **V36 shares** have 100% of donation going to the new controlled address
-3. **Pre-V36 shares** (from legacy nodes) still use the old donation script
-4. **As V36 adoption increases**, the proportion of donations to the burned address **decreases naturally**
-5. **When network signals V36 majority**, we can cut old donation from coinbase entirely
-
-### 9.4 Mathematical Model for Donation Distribution
-
-This mirrors the merged mining redistribution math:
+**WRONG.** Here's why:
 
 ```python
-def calculate_donation_distribution(tracker, best_share_hash, total_donation, chain_length):
-    """
-    Calculate donation distribution based on share versions in PPLNS chain.
-    
-    Same principle as merged mining rewards:
-    - V36 shares: Donation to new controlled address
-    - Pre-V36 shares: Donation to old burned address (until cutover)
-    
-    Returns: {new_donation_address: amount, old_donation_address: amount}
-    """
-    MIGRATION_VERSION = 36
-    
-    v36_weight = 0
-    pre_v36_weight = 0
-    
-    # Walk the share chain (same as PPLNS)
-    for share in tracker.get_chain(best_share_hash, chain_length):
-        weight = bitcoin_data.target_to_average_attempts(share.target)
-        
-        if share.share_info['share_data']['desired_version'] >= MIGRATION_VERSION:
-            v36_weight += weight
-        else:
-            pre_v36_weight += weight
-    
-    total_weight = v36_weight + pre_v36_weight
-    
-    if total_weight == 0:
-        return {SECONDARY_DONATION_SCRIPT: total_donation, DONATION_SCRIPT: 0}
-    
-    # Proportional distribution based on share version adoption
-    v36_donation = total_donation * v36_weight // total_weight
-    pre_v36_donation = total_donation - v36_donation
-    
-    return {
-        SECONDARY_DONATION_SCRIPT: v36_donation,    # Goes to controlled address
-        DONATION_SCRIPT: pre_v36_donation           # Goes to burned address (decreasing!)
-    }
+# gentx_before_refhash is for SHARE VERIFICATION, not BLOCK PAYOUT CALCULATION
+
+# Share verification:
+# - Each share version has its own gentx_before_refhash
+# - V35 share verified with V35's gentx_before_refhash
+# - V36 share verified with V36's gentx_before_refhash
+# - This works fine for SHARES
+
+# Block payout calculation:
+# - When block found, get_expected_payouts() is called
+# - This calculates payouts for ALL miners in PPLNS chain
+# - Uses SINGLE donation_script_to_address() for ALL shares
+# - ALL nodes must compute SAME result!
+
+# The coinbase that actually goes on the blockchain must:
+# 1. Match the winning share's hash_link (which share found the block)
+# 2. Be accepted by ALL P2Pool nodes (for share chain validation)
+# 3. Be consistent with get_expected_payouts() on ALL nodes
+
+# PROBLEM: If V36 coinbase has SECONDARY_DONATION_SCRIPT,
+#          but V35 nodes expect DONATION_SCRIPT,
+#          V35 nodes reject the block as invalid!
 ```
 
-### 9.5 Donation Flow at Different Adoption Levels
+### 9.4 The ONLY Valid Migration Path
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  DONATION DISTRIBUTION BY V36 ADOPTION                                      │
+│  DONATION MIGRATION: MUST WAIT FOR V35 DEPRECATION                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  0% V36 ADOPTION (current state):                                           │
-│  ├─ Total Donation: 1.0 LTC                                                 │
-│  ├─ → New Address (controlled): 0.0 LTC (0%)                                │
-│  └─ → Old Address (BURNED): 1.0 LTC (100%) ❌                               │
+│  PHASE 0: CURRENT STATE (V35 Network)                                       │
+│  ├─ All blocks: 100% donation to DONATION_SCRIPT (burned)                   │
+│  ├─ Our nodes: Use SECONDARY_DONATION_ENABLED hack                          │
+│  │   └─ Adds SECOND output (doesn't change donation amount calculation!)    │
+│  └─ This works because we ADD an output, not CHANGE the donation            │
 │                                                                             │
-│  25% V36 ADOPTION:                                                          │
-│  ├─ Total Donation: 1.0 LTC                                                 │
-│  ├─ → New Address (controlled): 0.25 LTC (25%) ✓                            │
-│  └─ → Old Address (BURNED): 0.75 LTC (75%) ❌                               │
+│  PHASE 1: V36 DEPLOYMENT (0-95% V36 adoption)                               │
+│  ├─ V36 nodes deployed, coexisting with V35 nodes                           │
+│  ├─ Coinbase STILL uses DONATION_SCRIPT for donation calculation            │
+│  ├─ V36 gentx_before_refhash: Keep same as V35 for now!                     │
+│  │   └─ OR: V36 shares only verified by V36 nodes (V35 rejects anyway)      │
+│  └─ SECONDARY_DONATION_ENABLED hack continues (adds 2nd output)             │
 │                                                                             │
-│  50% V36 ADOPTION:                                                          │
-│  ├─ Total Donation: 1.0 LTC                                                 │
-│  ├─ → New Address (controlled): 0.5 LTC (50%) ✓                             │
-│  └─ → Old Address (BURNED): 0.5 LTC (50%) ❌                                │
+│  PHASE 2: V36 SUPERMAJORITY (95%+ V36 adoption)                             │
+│  ├─ Version signaling shows >95% V36                                        │
+│  ├─ Prepare for flag day                                                    │
+│  └─ Announce deprecation timeline                                           │
 │                                                                             │
-│  75% V36 ADOPTION:                                                          │
-│  ├─ Total Donation: 1.0 LTC                                                 │
-│  ├─ → New Address (controlled): 0.75 LTC (75%) ✓                            │
-│  └─ → Old Address (BURNED): 0.25 LTC (25%) ❌                               │
+│  PHASE 3: V35 DEPRECATION (Flag Day)                                        │
+│  ├─ Bump MINIMUM_PROTOCOL_VERSION to reject V35 shares                      │
+│  ├─ V35 nodes can no longer participate in share chain                      │
+│  └─ NOW we can change donation calculation!                                 │
 │                                                                             │
-│  95% V36 ADOPTION (threshold for cutover):                                  │
-│  ├─ Total Donation: 1.0 LTC                                                 │
-│  ├─ → New Address (controlled): 0.95 LTC (95%) ✓                            │
-│  └─ → Old Address (BURNED): 0.05 LTC (5%) ❌                                │
-│  └─ READY TO CUT OLD DONATION FROM COINBASE!                                │
-│                                                                             │
-│  100% V36 ADOPTION (post-cutover):                                          │
-│  ├─ Total Donation: 1.0 LTC                                                 │
-│  ├─ → New Address (controlled): 1.0 LTC (100%) ✓                            │
-│  └─ → Old Address: REMOVED FROM COINBASE! 🎉                                │
+│  PHASE 4: POST-DEPRECATION (100% V36)                                       │
+│  ├─ Update get_expected_payouts() to use SECONDARY_DONATION_SCRIPT          │
+│  ├─ Update gentx_before_refhash to use SECONDARY_DONATION_SCRIPT            │
+│  ├─ Remove SECONDARY_DONATION_ENABLED hack                                  │
+│  └─ 100% of donations go to controlled address!                             │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.6 V36 gentx_before_refhash Migration
+### 9.5 Why We CAN'T Do Per-Block Migration (Like Merged Mining)
 
-V36 shares use the new donation script in `gentx_before_refhash`:
+**Merged Mining Rewards** - CAN be proportionally split:
+- V35 doesn't have merged mining, so it doesn't verify merged outputs
+- V36 can distribute merged rewards however it wants
+- V35 nodes simply ignore merged outputs they don't understand
+
+**Donation** - CANNOT be changed until V35 is gone:
+- V35 DOES verify donation outputs
+- V35 nodes use `get_expected_payouts()` which hard-codes DONATION_SCRIPT
+- If coinbase doesn't match V35's expectation, V35 rejects the block
+- Even if V36 share finds block, V35 nodes must accept it!
+
+### 9.6 Current Transitional Solution: SECONDARY_DONATION_ENABLED
+
+Our current hack works because it ADDS a second output without changing the primary:
 
 ```python
+# Current implementation (p2pool/data.py):
+
+if SECONDARY_DONATION_ENABLED and secondary_donation_address and not verifying:
+    secondary_donation_amount = total_donation // 2  # 50% to secondary
+    primary_donation_amount = total_donation - secondary_donation_amount
+    amounts[secondary_donation_address] = amounts.get(secondary_donation_address, 0) + secondary_donation_amount
+    amounts[donation_address] = amounts.get(donation_address, 0) + primary_donation_amount
+else:
+    amounts[donation_address] = amounts.get(donation_address, 0) + total_donation
+
+# KEY: We only use this when `not verifying`!
+# When verifying shares from others, we use their format (single donation)
+# This means our shares have 2 donation outputs, but we still verify theirs correctly
+```
+
+**Why this works:**
+- We add SECONDARY output to OUR shares only
+- When verifying THEIR shares, we use their expected format
+- The total donation AMOUNT stays the same
+- We just split it between two addresses
+
+**Limitation:**
+- 50% still goes to burned address
+- Can't improve this until V35 is gone
+
+### 9.7 V36 Donation Strategy: Continue the Hack
+
+For V36, we continue the same strategy:
+
+```python
+# V36 donation handling (BEFORE V35 deprecation):
+
 class MergedMiningShare(BaseShare):
     VERSION = 36
-    VOTING_VERSION = 36
-    SUCCESSOR = None
-    MINIMUM_PROTOCOL_VERSION = 3600
     
-    # V36 uses SECONDARY_DONATION_SCRIPT in gentx_before_refhash
-    # This is DIFFERENT from V35's gentx_before_refhash
-    # V35 nodes will reject V36 shares anyway (version mismatch)
-    # So we can safely use the new donation script!
-    gentx_before_refhash = (
-        pack.VarStrType().pack(SECONDARY_DONATION_SCRIPT) +  # NEW controlled address!
-        pack.IntType(64).pack(0) + 
-        pack.VarStrType().pack('\x6a\x28' + pack.IntType(256).pack(0) + pack.IntType(64).pack(0))[:3]
-    )
+    # IMPORTANT: Keep same gentx_before_refhash structure as V35!
+    # This ensures coinbase format is compatible
+    # (OR: Accept that V35 rejects V36 shares - that's expected anyway)
+    gentx_before_refhash = pack.VarStrType().pack(DONATION_SCRIPT) + ...
+
+# In generate_transaction:
+# - Still calculate donation using DONATION_SCRIPT for compatibility
+# - Still add SECONDARY_DONATION_SCRIPT as bonus output (not verifying)
+# - V35 nodes can still verify our coinbase structure
 ```
 
-### 9.7 Cutover Threshold: When to Remove Old Donation
+### 9.8 Post-V35-Deprecation: Full Migration
+
+Only AFTER V35 is deprecated (MINIMUM_PROTOCOL_VERSION bump):
 
 ```python
-# Configuration for donation cutover
-DONATION_CUTOVER_THRESHOLD = 0.95  # 95% V36 adoption required
-DONATION_CUTOVER_LOOKBACK = 8640   # ~24 hours of shares
+# V36 donation handling (AFTER V35 deprecation):
 
-def should_include_old_donation(tracker, best_share_hash):
-    """
-    Determine if old donation should still be included in coinbase.
-    
-    Returns True if pre-V36 shares still have significant weight,
-    Returns False when safe to cut old donation (95%+ V36 adoption).
-    """
-    v36_adoption = get_v36_adoption_rate(tracker, best_share_hash, DONATION_CUTOVER_LOOKBACK)
-    
-    if v36_adoption >= DONATION_CUTOVER_THRESHOLD:
-        # Safe to remove old donation - 95%+ network on V36
-        log.info("V36 adoption at %.1f%% - old donation can be removed from coinbase" % (v36_adoption * 100))
-        return False
-    else:
-        # Still need old donation for compatibility with pre-V36 shares
-        return True
+# Update donation calculation:
+def donation_script_to_address(net):
+    return bitcoin_data.script2_to_address(SECONDARY_DONATION_SCRIPT, net)
+
+# Update gentx_before_refhash:
+class MergedMiningShare(BaseShare):
+    gentx_before_refhash = pack.VarStrType().pack(SECONDARY_DONATION_SCRIPT) + ...
+
+# Remove dual-donation hack:
+# - Single donation output to SECONDARY_DONATION_SCRIPT
+# - 100% of donation saved!
 ```
 
-### 9.8 Implementation: Coinbase Donation Outputs
-
-```python
-def build_coinbase_donation_outputs(tracker, best_share_hash, total_donation, net, share_version):
-    """
-    Build donation outputs for coinbase transaction.
-    
-    For V36 shares:
-    - If network is 95%+ V36: Only new donation output
-    - If network is <95% V36: Proportional split based on share weights
-    
-    For V35 shares:
-    - Must use old donation script for gentx_before_refhash compatibility
-    """
-    if share_version < 36:
-        # V35 share: Must use old donation for share verification
-        return [{'script': DONATION_SCRIPT, 'value': total_donation}]
-    
-    # V36 share: Check if we can cut old donation
-    v36_adoption = get_v36_adoption_rate(tracker, best_share_hash, DONATION_CUTOVER_LOOKBACK)
-    
-    if v36_adoption >= DONATION_CUTOVER_THRESHOLD:
-        # Network is 95%+ V36 - only new donation!
-        return [{'script': SECONDARY_DONATION_SCRIPT, 'value': total_donation}]
-    
-    # Transitional period: Proportional split
-    # Pre-V36 miners in PPLNS chain still expect old donation in their blocks
-    donation_split = calculate_donation_distribution(
-        tracker, best_share_hash, total_donation, DONATION_CUTOVER_LOOKBACK
-    )
-    
-    outputs = []
-    if donation_split[SECONDARY_DONATION_SCRIPT] > 0:
-        outputs.append({
-            'script': SECONDARY_DONATION_SCRIPT, 
-            'value': donation_split[SECONDARY_DONATION_SCRIPT]
-        })
-    if donation_split[DONATION_SCRIPT] > 0:
-        outputs.append({
-            'script': DONATION_SCRIPT, 
-            'value': donation_split[DONATION_SCRIPT]
-        })
-    
-    return outputs
-```
-
-### 9.9 Migration Timeline
+### 9.9 Timeline Comparison: Merged Mining vs Donation
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  DONATION MIGRATION TIMELINE                                                │
+│  FEATURE MIGRATION TIMELINES                                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  PHASE 0: PRE-V36 (Current)                                                 │
-│  ├─ All donations go to burned address                                      │
-│  ├─ Our nodes: 50/50 split (secondary donation hack)                        │
-│  └─ Global nodes: 100% burned                                               │
+│  MERGED MINING REWARDS (Gradual from Day 1):                                │
+│  ├─ Day 1: V36 deployed → V36 miners get full merged rewards                │
+│  ├─ Week 2: 30% V36 → 30% of merged rewards to V36 miners                   │
+│  ├─ Month 1: 70% V36 → 70% of merged rewards to V36 miners                  │
+│  └─ Migration complete when V36 dominant in PPLNS                           │
 │                                                                             │
-│  PHASE 1: V36 DEPLOYMENT (0-50% adoption)                                   │
-│  ├─ V36 nodes deployed, mining V36 shares                                   │
-│  ├─ V36 shares: Donation proportionally split by adoption                   │
-│  │   └─ e.g., 30% V36 → 30% to new addr, 70% to old                        │
-│  ├─ V35 shares: Still 100% to burned (they can't change)                    │
-│  └─ Economic incentive: V36 miners' donations go to useful address          │
+│  DONATION (Flag Day after 95% V36):                                         │
+│  ├─ Day 1 to Flag Day: BOTH donations (50/50 split continues)               │
+│  ├─ Flag Day: MINIMUM_PROTOCOL_VERSION bump, V35 rejected                   │
+│  └─ Post Flag Day: 100% donation to controlled address                      │
 │                                                                             │
-│  PHASE 2: V36 MAJORITY (50-90% adoption)                                    │
-│  ├─ Most shares are V36                                                     │
-│  ├─ Majority of donations now going to controlled address                   │
-│  ├─ Burned amount decreasing rapidly                                        │
-│  └─ Network health improving                                                │
-│                                                                             │
-│  PHASE 3: V36 DOMINANT (90-95% adoption)                                    │
-│  ├─ Approaching cutover threshold                                           │
-│  ├─ <10% of donations still going to burned address                         │
-│  └─ Preparing for full cutover                                              │
-│                                                                             │
-│  PHASE 4: CUTOVER (95%+ adoption)                                           │
-│  ├─ Threshold reached!                                                      │
-│  ├─ V36 nodes REMOVE old donation from coinbase                             │
-│  ├─ 100% of donations go to controlled address                              │
-│  └─ MIGRATION COMPLETE! 🎉                                                  │
-│                                                                             │
-│  PHASE 5: CLEANUP (100% V36)                                                │
-│  ├─ MINIMUM_PROTOCOL_VERSION bump rejects V35 shares                        │
-│  ├─ Old donation code can be removed                                        │
-│  └─ Simplified codebase going forward                                       │
+│  WHY THE DIFFERENCE:                                                        │
+│  ├─ Merged rewards: NEW feature, V35 doesn't verify                         │
+│  └─ Donation: EXISTING feature, V35 DOES verify coinbase structure          │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.10 Parallel with Merged Mining Rewards
-
-| Aspect | Merged Mining Rewards | Donation Migration |
-|--------|----------------------|-------------------|
-| **V36 miners** | Full merged rewards (primary pool) | 100% donation to controlled addr |
-| **Pre-V36 convertible** | Small incentive rewards | Proportional (decreasing) |
-| **Pre-V36 unconvertible** | Redistributed to V36 | Goes to burned addr (until cutover) |
-| **Adoption threshold** | 10% incentive → 1% at 90% | 95% triggers cutover |
-| **Full migration** | All merged rewards to V36 miners | All donation to controlled addr |
-
-### 9.11 Dashboard Donation Transparency
+### 9.10 Dashboard: Show Donation Migration Status
 
 ```javascript
 // In web-static/dashboard.html
 
-function loadDonationMigrationStatus() {
+function loadDonationStatus() {
     d3.json('../donation_stats', function(stats) {
         if (!stats) return;
         
-        // Show current adoption and donation split
-        var adoption = stats.v36_adoption;
-        var newDonationPct = adoption * 100;
-        var burnedPct = (1 - adoption) * 100;
+        var v36Pct = stats.v36_adoption * 100;
+        var threshold = 95;
         
-        d3.select('#donation_migration_status').html(`
-            <div class="migration-bar">
-                <div class="new-donation" style="width: ${newDonationPct}%">
-                    ${newDonationPct.toFixed(1)}% to controlled address
+        d3.select('#donation_status').html(`
+            <div class="donation-status">
+                <h4>Donation Migration Status</h4>
+                <p>V36 Adoption: ${v36Pct.toFixed(1)}% (need ${threshold}% for migration)</p>
+                <div class="progress-bar">
+                    <div class="progress" style="width: ${Math.min(v36Pct, 100)}%"></div>
+                    <div class="threshold" style="left: ${threshold}%"></div>
                 </div>
-                <div class="burned-donation" style="width: ${burnedPct}%">
-                    ${burnedPct.toFixed(1)}% burned
-                </div>
-            </div>
-            <div class="migration-message">
-                ${adoption >= 0.95 
-                    ? '🎉 Cutover complete! 100% of donations saved!' 
-                    : `Upgrade to V36 to stop burning donations. ${(0.95 - adoption) * 100}% more needed for cutover.`
+                <p class="donation-split">
+                    Current: 50% saved / 50% burned<br>
+                    After migration: 100% saved
+                </p>
+                ${v36Pct >= threshold 
+                    ? '<p class="ready">✓ Ready for donation migration! Awaiting flag day.</p>'
+                    : '<p class="waiting">Upgrade to V36 to help reach migration threshold!</p>'
                 }
             </div>
         `);
@@ -1205,152 +1142,63 @@ function loadDonationMigrationStatus() {
 }
 ```
 
-### 9.12 API Endpoint for Donation Stats
-
-```python
-# In p2pool/web.py
-
-def get_donation_stats():
-    """
-    Return donation migration statistics.
-    """
-    v36_adoption = get_v36_adoption_rate(
-        node.tracker, node.best_share_var.value, DONATION_CUTOVER_LOOKBACK
-    )
-    
-    return {
-        'new_donation_address': secondary_donation_script_to_address(net),
-        'old_donation_address': donation_script_to_address(net),
-        'v36_adoption': v36_adoption,
-        'cutover_threshold': DONATION_CUTOVER_THRESHOLD,
-        'cutover_reached': v36_adoption >= DONATION_CUTOVER_THRESHOLD,
-        'new_donation_percent': v36_adoption,
-        'burned_percent': 1 - v36_adoption if v36_adoption < DONATION_CUTOVER_THRESHOLD else 0,
-        'donation_rate': wb.donation_percentage / 100.0,
-        'message': 'V36 adoption: %.1f%% - %s' % (
-            v36_adoption * 100,
-            'Cutover complete!' if v36_adoption >= DONATION_CUTOVER_THRESHOLD else 
-            'Upgrade to save donations!'
-        )
-    }
-
-web_root.putChild('donation_stats', WebInterface(get_donation_stats))
-```
-
-### 9.13 Benefits of Gradual Donation Migration
+### 9.11 Summary: Donation Migration is a Flag Day Event
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  WHY GRADUAL MIGRATION IS BETTER THAN HARD SWITCH                           │
+│  KEY TAKEAWAYS                                                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  1. NO NETWORK SPLIT RISK                                                   │
-│     └─ V35 and V36 shares coexist during transition                         │
-│     └─ No flag day, no coordination required                                │
+│  1. Donation migration CANNOT be gradual like merged mining                 │
+│     └─ All nodes must agree on coinbase structure                           │
 │                                                                             │
-│  2. ECONOMIC INCENTIVE TO UPGRADE                                           │
-│     └─ V36 miners immediately benefit (their donations saved)               │
-│     └─ Pre-V36 miners see "you're burning X% of donations"                  │
-│     └─ Natural pressure to upgrade                                          │
+│  2. Must wait for V35 deprecation (flag day)                                │
+│     └─ 95%+ V36 adoption triggers deprecation timeline                      │
+│     └─ MINIMUM_PROTOCOL_VERSION bump removes V35 nodes                      │
 │                                                                             │
-│  3. PROPORTIONAL FAIRNESS                                                   │
-│     └─ Each share version gets donation treatment matching their format     │
-│     └─ No one loses unfairly during transition                              │
+│  3. Until flag day, use SECONDARY_DONATION_ENABLED hack                     │
+│     └─ 50/50 split between old (burned) and new (saved)                     │
+│     └─ Better than 100% burned, but not ideal                               │
 │                                                                             │
-│  4. REVERSIBLE                                                              │
-│     └─ If issues arise, threshold can be adjusted                           │
-│     └─ Cutover only happens when network is ready                           │
+│  4. After flag day, full migration                                          │
+│     └─ 100% donation to controlled address                                  │
+│     └─ No more burned funds!                                                │
 │                                                                             │
-│  5. CONSISTENT WITH MERGED MINING APPROACH                                  │
-│     └─ Same principle = simpler mental model                                │
-│     └─ One unified migration strategy                                       │
+│  5. This is fundamentally different from merged mining                      │
+│     └─ Merged mining: V35 doesn't verify → gradual migration OK             │
+│     └─ Donation: V35 DOES verify → flag day required                        │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
-
-### 9.14 Merged Mining + Donation Migration Synergy
-
-The V36 migration provides a **single upgrade event** that achieves multiple goals:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  V36 MIGRATION BENEFITS                                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  1. MERGED MINING ADDRESSES                                                 │
-│     └─ Miners can specify explicit DOGE/etc addresses                       │
-│     └─ Fair reward distribution via three-pool model                        │
-│     └─ Economic incentive to upgrade (31x more merged rewards!)             │
-│                                                                             │
-│  2. DONATION MIGRATION                                                      │
-│     └─ Stop burning funds to lost key address                               │
-│     └─ 100% of author donation goes to controlled address                   │
-│     └─ Gradual transition: less burning as adoption increases               │
-│                                                                             │
-│  3. UNIFIED GRADUAL MIGRATION PRINCIPLE                                     │
-│     └─ Both merged rewards AND donations use same adoption-based model      │
-│     └─ No hard switches, no flag days                                       │
-│     └─ Economic incentive naturally drives adoption                         │
-│                                                                             │
-│  4. PROTOCOL MODERNIZATION                                                  │
-│     └─ Clean break from legacy constraints                                  │
-│     └─ Foundation for future features (multi-chain, etc.)                   │
-│     └─ Simplified codebase (no dual-donation logic needed post-cutover)     │
-│                                                                             │
-│  SINGLE UPGRADE = FOUR MAJOR IMPROVEMENTS                                   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 9.15 Post-Cutover Cleanup
-
-Once V36 adoption reaches 100% and cutover threshold is met:
-
-```python
-# After full migration (95%+ V36 adoption), the system naturally:
-# 1. Stops including old donation in coinbase
-# 2. V35 shares expire from PPLNS chain
-# 3. Can bump MINIMUM_PROTOCOL_VERSION to reject V35 completely
-
-# Eventual V37+ simplification:
-DONATION_SCRIPT = SECONDARY_DONATION_SCRIPT  # Just use the new one
-
-class BaseShare(object):
-    gentx_before_refhash = (
-        pack.VarStrType().pack(DONATION_SCRIPT) +  # Now points to controlled address
-        pack.IntType(64).pack(0) + 
-        pack.VarStrType().pack('\x6a\x28' + pack.IntType(256).pack(0) + pack.IntType(64).pack(0))[:3]
-    )
-```
-
-### 9.16 Migration Success Criteria
-
-| Metric | Target | Impact |
-|--------|--------|--------|
-| V36 adoption | >95% | Cutover threshold reached |
-| Donation receipts | Trackable | On-chain verification |
-| Burned funds | 0% after cutover | All donations saved |
-| Network stability | No splits | Clean gradual migration |
-| Community acceptance | Positive | Transparent progress display |
 
 ---
 
 ## Appendix C: Donation Address Reference
 
-| Chain | Old Donation (BURNED) | New Donation (CONTROLLED) |
-|-------|----------------------|---------------------------|
-| Litecoin | `LhiLUQRJNGNpCb6eDz5HsmrEupwm4gJG4K` | `LRWaj4D3Ue5hZvJ29eKVP9N8z298YPcoMW` |
-| Bitcoin | `1HLoD9E4SDFFPDiYfNYnkBLQ85Y51J3Zb1` | (derived from same pubkey_hash) |
-| Dogecoin | `DHy2615XKerRbJEPN5TCPDN8GEkHaEtsFg` | (derived from same pubkey_hash) |
+**Script Formats:**
+- **DONATION_SCRIPT** (P2PK): `4104ffd03de...ac` - pubkey_hash: `0384f570ccc88ac2e7e00b026d1690a3fca63dd0`
+- **SECONDARY_DONATION_SCRIPT** (P2PKH): `76a91420cb5c22...88ac` - pubkey_hash: `20cb5c22b1e4d5947e5c112c7696b51ad9af3c61`
 
-**CRITICAL:** Only use the NEW donation addresses. Old addresses have **NO PRIVATE KEY**.
+| Chain | Old Donation (P2PK - BURNED) | New Donation (P2PKH - CONTROLLED) |
+|-------|------------------------------|-----------------------------------|
+| Bitcoin | `1Kz5QaUPDtKrj5SqW5tFkn7WZh8LmQaQi4` | `13zQEqHLKUCvnfJbvq4KRXb96FDrMa72CB` |
+| Litecoin | `LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd` | `LNDMW3bAQ8Sz3Tzm6y3chYeuJTb8VHSHGM` |
+| Dogecoin | `DQ8AwqR2XJE9G5dSEfspJYH7Spre85dj6L` | `D88Vn6Dyct7DKfVCfR3syHkjyNx9gEyyiv` |
+
+**CRITICAL:** 
+- Old donation is P2PK format (65-byte pubkey, no address in coinbase) - **PRIVATE KEY LOST!**
+- New donation is P2PKH format - **WE CONTROL THIS!**
 
 ---
 
-*Document Version: 1.2*
+*Document Version: 1.6*
 *Last Updated: February 2026*
 *Author: P2Pool Merged Mining Team*
 *Changelog:*
 - *v1.0: Initial V36 merged mining plan*
 - *v1.1: Added donation migration plan (Part 9)*
-- *v1.2: Updated donation migration to use same gradual principle as merged rewards - version signaling based cutover*
+- *v1.2: Updated donation migration to use same gradual principle as merged rewards*
+- *v1.3: CORRECTED: Donation migration is per-block (winner takes all), NOT proportional split*
+- *v1.4: FINAL CORRECTION: Donation CANNOT change until V35 deprecated - all nodes must compute identical coinbase. Continue SECONDARY_DONATION_ENABLED hack (50/50 split) until flag day.*
+- *v1.5: FIXED: Corrected all donation addresses - they were completely wrong. Verified against actual script hash160 values.*
+- *v1.6: VERIFIED: BTC donation address confirmed as 1Kz5QaUPDtKrj5SqW5tFkn7WZh8LmQaQi4 (user-provided), all addresses now derived correctly from hash160 d03da6fca390166d020be0e7c28ac8cc70f58403*
