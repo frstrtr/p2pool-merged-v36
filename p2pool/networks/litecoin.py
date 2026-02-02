@@ -29,6 +29,12 @@ MAX_TARGET = 2**256//2**21 - 1
 PERSIST = True
 WORKER_PORT = 9327
 BOOTSTRAP_ADDRS = [
+        # Active nodes discovered 2025 (protocol 3502)
+        'ml.toom.im',           # jtoomim's node - healthy, 1.5% orphan rate
+        '31.25.241.224',        # peer from ml.toom.im
+        '20.106.76.227',        # peer from ml.toom.im
+        '83.221.211.116',       # peer from ml.toom.im
+        # Legacy nodes (may be offline)
         'crypto.office-on-the.net',
         'ltc.p2pool.leblancnet.us',
         '51.148.43.34',
