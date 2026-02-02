@@ -214,9 +214,10 @@ class BaseShare(object):
         return t
 
     @classmethod
-    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, verifying=False):
-        # verifying=True when checking shares from others (must match their format exactly)
-        # verifying=False when creating our own shares (can add our secondary donation)
+    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None):
+        # Secondary donation is now handled via "fake miner" mechanism in work.py
+        # The secondary donation address appears in weights dict as a regular miner payout
+        # This means all nodes (old and new) generate identical coinbases
         t0 = time.time()
         previous_share = tracker.items[share_data['previous_share_hash']] if share_data['previous_share_hash'] is not None else None
         
@@ -328,7 +329,7 @@ class BaseShare(object):
         else:
             this_address = share_data['address']
         donation_address = donation_script_to_address(net)
-        secondary_donation_address = secondary_donation_script_to_address(net)
+        # Secondary donation now appears as a regular miner in weights dict (via "fake miner" in work.py)
         # 0.5% goes to block finder
         amounts[this_address] = amounts.get(this_address, 0) \
                                 + share_data['subsidy']//200
@@ -336,17 +337,12 @@ class BaseShare(object):
         # satoshis due to rounding
         total_donation = share_data['subsidy'] - sum(amounts.itervalues())
         
-        # Split donation between original (global p2pool) and secondary (our project)
-        # During transition: 50/50 split. After migration: can shift to 100% secondary
-        # IMPORTANT: Only add secondary donation when creating OUR shares (not when verifying)
-        # Global nodes don't have secondary donation, so we must match their format when verifying
-        if SECONDARY_DONATION_ENABLED and secondary_donation_address and not verifying:
-            secondary_donation_amount = total_donation // 2  # 50% to secondary
-            primary_donation_amount = total_donation - secondary_donation_amount  # 50% to original (includes rounding)
-            amounts[secondary_donation_address] = amounts.get(secondary_donation_address, 0) + secondary_donation_amount
-            amounts[donation_address] = amounts.get(donation_address, 0) + primary_donation_amount
-        else:
-            amounts[donation_address] = amounts.get(donation_address, 0) + total_donation
+        # All donation goes to primary donation script (the one in gentx_before_refhash)
+        # Secondary donation is now handled via "fake miner" mechanism in work.py:
+        # - Secondary donation address appears in weights dict as a regular miner
+        # - This is compatible with old nodes - they see it as a normal miner payout
+        # - The split is done probabilistically at share creation time
+        amounts[donation_address] = amounts.get(donation_address, 0) + total_donation
             
         if cls.VERSION < 34 and 'pubkey_hash' not in share_data:
             share_data['pubkey_hash'], _, _ = bitcoin_data.address_to_pubkey_hash(
@@ -411,24 +407,14 @@ class BaseShare(object):
             share_info['segwit_data'] = segwit_data
         
         # Build payouts list - IMPORTANT: DONATION_SCRIPT must be LAST for gentx_before_refhash compatibility
-        # Order: [regular payouts] + [secondary donation] + [primary donation]
-        donation_addresses = {donation_address}
-        if SECONDARY_DONATION_ENABLED and secondary_donation_address:
-            donation_addresses.add(secondary_donation_address)
-        
+        # Secondary donation now appears as a regular miner payout in the weights dict
+        # (handled via "fake miner" mechanism in work.py)
         payouts = [dict(value=amounts[addr],
                         script=bitcoin_data.address_to_script2(addr, net.PARENT)
-                        ) for addr in dests if amounts[addr] and addr not in donation_addresses]
-        
-        # Add secondary donation BEFORE primary (if enabled and not verifying)
-        if SECONDARY_DONATION_ENABLED and secondary_donation_address and amounts.get(secondary_donation_address, 0) > 0 and not verifying:
-            payouts.append({'script': SECONDARY_DONATION_SCRIPT, 'value': amounts[secondary_donation_address]})
-            print "[COINBASE] Adding secondary donation: %.8f LTC (verifying=%s)" % (amounts[secondary_donation_address] / 1e8, verifying)
+                        ) for addr in dests if amounts[addr] and addr != donation_address]
         
         # Primary donation MUST be last (for gentx_before_refhash compatibility with global p2pool)
         payouts.append({'script': DONATION_SCRIPT, 'value': amounts[donation_address]})
-        if not verifying:
-            print "[COINBASE] Adding primary donation: %.8f LTC, total outputs: %d (verifying=%s)" % (amounts[donation_address] / 1e8, len(payouts), verifying)
         
         # Debug: Uncomment to trace payout structure (confirmed working)
         # import sys
@@ -669,8 +655,18 @@ class BaseShare(object):
             print "Performing maybe-unnecessary packing and hashing"
             known_txs = dict((bitcoin_data.hash256(bitcoin_data.tx_type.pack(tx)), tx) for tx in known_txs)
         
-        share_info, gentx, other_tx_hashes2, get_share = self.generate_transaction(tracker, self.share_info['share_data'], self.header['bits'].target, self.share_info['timestamp'], self.share_info['bits'].target, self.contents['ref_merkle_link'], [(h, None) for h in other_tx_hashes], self.net,
-            known_txs=None, last_txout_nonce=self.contents['last_txout_nonce'], segwit_data=self.share_info.get('segwit_data', None), verifying=True)
+        # Generate the expected coinbase transaction
+        # With "fake miner" mechanism for secondary donation, all nodes generate identical coinbases
+        share_info, gentx, other_tx_hashes2, get_share = self.generate_transaction(
+            tracker, self.share_info['share_data'], self.header['bits'].target, 
+            self.share_info['timestamp'], self.share_info['bits'].target, 
+            self.contents['ref_merkle_link'], [(h, None) for h in other_tx_hashes], self.net,
+            known_txs=None, last_txout_nonce=self.contents['last_txout_nonce'], 
+            segwit_data=self.share_info.get('segwit_data', None))
+        
+        assert other_tx_hashes2 == other_tx_hashes
+        if bitcoin_data.get_txid(gentx) != self.gentx_hash:
+            raise ValueError('''gentx doesn't match hash_link''')
 
         if self.VERSION < 34:
             # check for excessive fees
@@ -700,13 +696,10 @@ class BaseShare(object):
             if self.naughty > 6:
                 self.naughty = 0
 
-        assert other_tx_hashes2 == other_tx_hashes
+        # share_info was already validated by generate_transaction matching gentx_hash
         if share_info != self.share_info:
             raise ValueError('share_info invalid')
-        if bitcoin_data.get_txid(gentx) != self.gentx_hash:
-            print bitcoin_data.get_txid(gentx), self.gentx_hash
-            print gentx
-            raise ValueError('''gentx doesn't match hash_link''')
+        
         if self.VERSION < 34:
             if bitcoin_data.calculate_merkle_link([None] + other_tx_hashes, 0) != self.merkle_link: # the other hash commitments are checked in the share_info assertion
                 raise ValueError('merkle_link and other_tx_hashes do not match')
