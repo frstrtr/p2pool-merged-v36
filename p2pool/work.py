@@ -425,17 +425,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             fraction = float(weight) / float(total_weight) if total_weight > 0 else 0
                                             shareholders[merged_address] = fraction
                                         except Exception as e:
-                                            print >>sys.stderr, '[MERGED] Warning: Could not convert key to address: %s' % e
+                                            pass  # Suppressed: print >>sys.stderr, '[MERGED] Warning: Could not convert key to address: %s' % e
                                     
                                     if skipped_addresses:
-                                        print >>sys.stderr, '[MERGED] WARNING: %d miner address(es) skipped - not convertible to merged chain:' % len(skipped_addresses)
-                                        for addr, reason in skipped_addresses[:5]:  # Show first 5
-                                            print >>sys.stderr, '[MERGED]   - %s: %s' % (addr, reason)
-                                        if len(skipped_addresses) > 5:
-                                            print >>sys.stderr, '[MERGED]   ... and %d more' % (len(skipped_addresses) - 5)
-                                        print >>sys.stderr, '[MERGED]   These miners should use P2PKH or P2WPKH addresses for merged mining rewards!'
+                                        # Summary only - suppress verbose per-address output
+                                        pass  # Suppressed verbose output: print >>sys.stderr, '[MERGED] WARNING: %d miner address(es) skipped' % len(skipped_addresses)
                                     
-                                    print >>sys.stderr, '[MERGED] Using PPLNS distribution with %d shareholders from share chain' % len(shareholders)
+                                    pass  # Suppressed: print >>sys.stderr, '[MERGED] Using PPLNS distribution with %d shareholders from share chain' % len(shareholders)
                                 except (KeyError, AttributeError, TypeError) as e:
                                     # Fall back to single address mode if PPLNS calculation fails
                                     # This is expected during bootstrap when share chain is empty or incomplete
@@ -530,7 +526,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 )
                                 doge_header_packed = bitcoin_data.block_header_type.pack(doge_header)
                                 doge_block_hash = bitcoin_data.hash256(doge_header_packed)
-                                print '[MERGED-DEBUG] New Dogecoin block hash calculated: %064x (prev=%s)' % (doge_block_hash, template.get('previousblockhash', 'None')[:16])
+                                pass  # Suppressed: print '[MERGED-DEBUG] New Dogecoin block hash calculated: %064x (prev=%s)' % (doge_block_hash, template.get('previousblockhash', 'None')[:16])
                             except Exception as e:
                                 print >>sys.stderr, '[ERROR] Failed to build Dogecoin block (v2-FIXED): %s' % e
                                 import traceback
@@ -564,7 +560,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 merged_net_name=merged_net_name,  # Store network name for block found message
                                 merged_net_symbol=merged_net_symbol,  # Store network symbol for block found message
                             )}))
-                            print '[MERGED-REFRESH] Template height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
+                            pass  # Suppressed: print '[MERGED-REFRESH] Template height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
                         else:
                             # getblocktemplate succeeded but no auxpow - shouldn't happen
                             if auxpow_capable is None:
