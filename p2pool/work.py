@@ -857,14 +857,48 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         if random.uniform(0, 100) < self.worker_fee:
             pubkey_hash = self.my_pubkey_hash
+        # Secondary donation: Credit some shares to secondary donation address (like a fake miner)
+        # This is compatible with old nodes - they see it as a regular miner payout
+        # Split donation_percentage: half stays as primary donation, half goes to secondary via this mechanism
+        # 
+        # SECONDARY DONATION LOGIC:
+        # - For --give-author 0: Use MARKER_CHANCE (0.012%) to ensure ~1 share per PPLNS window
+        #   This gives ~72,000 litoshis (~0.00072 LTC) per block as blockchain marker
+        #   Primary donation still gets only consensus dust
+        # - For --give-author >0: Split 50/50 between primary and secondary
+        #   Use max(MARKER_CHANCE, donation/2) to ensure marker always appears
+        elif p2pool_data.SECONDARY_DONATION_ENABLED:
+            MARKER_CHANCE = 0.012  # ~1 share per 8640 PPLNS window = marker in every block
+            secondary_donation_chance = max(MARKER_CHANCE, self.donation_percentage / 2)
+            if random.uniform(0, 100) < secondary_donation_chance:
+                # Credit this share to secondary donation address
+                # SECONDARY_DONATION_SCRIPT is P2PKH: 76a914<20-byte-pubkey-hash>88ac
+                # Extract pubkey_hash (bytes 3-23)
+                pubkey_hash = int(p2pool_data.SECONDARY_DONATION_SCRIPT[3:23].encode('hex'), 16)
+            else:
+                try:
+                    if not user or not user.strip():
+                        pubkey_hash = int(p2pool_data.DONATION_SCRIPT[3:23].encode('hex'), 16)
+                    else:
+                        is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
+                        if is_convertible:
+                            pubkey_hash = validated_pubkey_hash
+                        else:
+                            print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
+                            print >>sys.stderr, '[WARN] This miner will NOT receive merged mining rewards! Use P2PKH or P2WPKH address.'
+                            pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
+                except:
+                    pubkey_hash = self.my_pubkey_hash
         else:
+            # SECONDARY_DONATION_ENABLED=False
+            # Standard behavior - no secondary donation
             try:
                 # Skip validation if user is empty (can happen with pre-authorization work requests)
                 # Use donation script pubkey_hash so rewards go to P2Pool development
                 if not user or not user.strip():
-                    # Extract pubkey_hash from DONATION_SCRIPT (P2PKH format: 76a914<20-bytes>88ac)
-                    # The pubkey_hash is bytes 3-23 of the script
-                    pubkey_hash = int(p2pool_data.DONATION_SCRIPT[3:23].encode('hex'), 16)
+                    # Extract pubkey_hash from DONATION_SCRIPT (P2PK script - need different handling)
+                    # For empty user, fall back to my_pubkey_hash
+                    pubkey_hash = self.my_pubkey_hash
                 else:
                     # Validate that miner's address is convertible for merged mining
                     is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
@@ -1062,6 +1096,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
         if True:
             # Build share_data differently based on share version
             # VERSION >= 34 uses 'address' (string), VERSION < 34 uses 'pubkey_hash' (int)
+            # Calculate primary donation percentage
+            # If SECONDARY_DONATION_ENABLED AND donation_percentage > 0: 
+            #   Split donation - half goes to primary via donation field, half to secondary via fake miner
+            # If donation_percentage = 0: No split (primary gets consensus dust only, secondary gets nothing)
+            # If SECONDARY_DONATION_ENABLED = False: Full donation goes to primary
+            primary_donation_pct = self.donation_percentage
+            if p2pool_data.SECONDARY_DONATION_ENABLED and self.donation_percentage > 0:
+                primary_donation_pct = self.donation_percentage / 2  # Half to primary, half to secondary via fake miner
+            
             share_data_base = dict(
                 previous_share_hash=self.node.best_share_var.value,
                 coinbase=(script.create_push_script([
@@ -1070,7 +1113,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 ]) + self.current_work.value['coinbaseflags'] + getattr(self.node.net, 'COINBASEEXT', b''))[:100],
                 nonce=random.randrange(2**32),
                 subsidy=self.current_work.value['subsidy'],
-                donation=math.perfect_round(65535*self.donation_percentage/100),
+                donation=math.perfect_round(65535*primary_donation_pct/100),
                 stale_info=(lambda (orphans, doas), total, (orphans_recorded_in_chain, doas_recorded_in_chain):
                     'orphan' if orphans > orphans_recorded_in_chain else
                     'doa' if doas > doas_recorded_in_chain else
