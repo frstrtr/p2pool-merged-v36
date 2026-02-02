@@ -817,6 +817,774 @@ def test_reward_distribution():
 
 ---
 
+## Part 10: Share Difficulty Stagnation Problem (Discovered Feb 2026)
+
+### 10.1 Problem Discovery
+
+During isolated testnet testing of V35/V36 compatibility, we discovered a **critical protocol flaw** in P2Pool's difficulty adjustment mechanism. When the network hashrate drops suddenly, share difficulty can become stuck at impossibly high levels.
+
+**Test Environment:**
+- 3 isolated P2Pool nodes (.29, .30, .31 on 192.168.86.x)
+- 3 weak miners (AntRouter R1, ~1.3 MH/s each, ~4 MH/s total)
+- Nodes isolated from global P2Pool network via iptables
+
+**Observed Behavior:**
+```
+Stale share found, LOST, share hash > target!
+Previous share's timestamp is 1548 seconds old
+Best share difficulty: 104.8 (requires ~37B attempts)
+With 4 MH/s total: Would take ~2.5 hours PER SHARE
+```
+
+### 10.2 Root Cause Analysis
+
+P2Pool's difficulty adjustment is **share-count based, not time-based**:
+
+```python
+# From p2pool/data.py lines 220-250
+if height < net.TARGET_LOOKBEHIND:
+    pre_target3 = net.MAX_TARGET  # Start at MIN difficulty
+else:
+    # Uses get_pool_attempts_per_second() which looks at:
+    # - Last TARGET_LOOKBEHIND shares (e.g., 720)
+    # - Calculates hashrate from share timestamps
+    attempts_per_second = get_pool_attempts_per_second(
+        tracker, share_data['previous_share_hash'], 
+        net.TARGET_LOOKBEHIND, min_work=True, integer=True
+    )
+    pre_target = 2**256 // (net.SHARE_PERIOD * attempts_per_second) - 1
+```
+
+**The Feedback Loop Problem:**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  DIFFICULTY STAGNATION DEATH SPIRAL                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Big miner leaves network (or network splits)                            │
+│     └─ Previous shares have HIGH difficulty (from high hashrate era)        │
+│                                                                             │
+│  2. Remaining small miners try to find shares                               │
+│     └─ Difficulty too high for their hashrate                               │
+│     └─ Takes hours/days to find even ONE share                              │
+│                                                                             │
+│  3. Difficulty adjustment cannot kick in                                    │
+│     └─ Needs new shares to see hashrate dropped                             │
+│     └─ But shares can't be found at current difficulty!                     │
+│                                                                             │
+│  4. Result: STUCK - Difficulty frozen at impossible level                   │
+│     └─ Small miners effectively locked out                                  │
+│     └─ Only solution: Delete share chain and restart                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.3 Real-World Impact: Pool Hopping Problem
+
+This isn't just a test issue - it affects production P2Pool networks:
+
+**Scenario: "Pool Hopper" Behavior**
+1. Large miner (e.g., 100 GH/s) joins P2Pool as backup pool
+2. Difficulty adjusts upward to accommodate high hashrate
+3. Large miner's primary pool recovers → leaves P2Pool
+4. Remaining miners (e.g., 1 GH/s total) stuck at 100x difficulty
+5. Takes DAYS to find enough shares to reset difficulty
+6. Meanwhile, miners have zero accounting and no payouts
+
+**Impact on Fair Mining:**
+- Large transient miners "burn" difficulty for everyone
+- Small consistent miners punished for others' behavior
+- Discourages small miners from using P2Pool
+
+### 10.4 Why Bitcoin Cash Had Similar Problem
+
+Bitcoin Cash faced this with their Emergency Difficulty Adjustment (EDA). When hashrate suddenly dropped, blocks became too slow to find. They implemented multiple fixes:
+
+- **BCH EDA**: If 6+ blocks took >12h, reduce difficulty by 20%
+- **BCH DAA**: Rolling 144-block window with time-weighted adjustment
+
+P2Pool's share chain is analogous to Bitcoin's blockchain here.
+
+### 10.5 Proposed Solution: Time-Based Difficulty Floor
+
+Add a time-based decay mechanism when shares are stale:
+
+```python
+# PROPOSED: Add to p2pool/data.py difficulty calculation
+
+def calculate_difficulty_with_time_decay(tracker, previous_share_hash, net):
+    """
+    Calculate share difficulty with time-based emergency adjustment.
+    
+    If last share is older than EMERGENCY_THRESHOLD, use time-based
+    estimation instead of share-based hashrate calculation.
+    """
+    EMERGENCY_THRESHOLD = net.SHARE_PERIOD * 20  # e.g., 200 seconds for 10s shares
+    DECAY_RATE = 0.5  # Halve estimated hashrate per threshold period
+    
+    if previous_share_hash is None:
+        return net.MAX_TARGET  # Genesis: minimum difficulty
+    
+    last_share = tracker.items[previous_share_hash]
+    time_since_share = time.time() - last_share.timestamp
+    
+    # Standard calculation for recent shares
+    if time_since_share < EMERGENCY_THRESHOLD:
+        return standard_difficulty_calculation(tracker, previous_share_hash, net)
+    
+    # EMERGENCY: Time-based difficulty decay
+    # Estimate current hashrate assuming it dropped
+    decay_periods = time_since_share / EMERGENCY_THRESHOLD
+    decay_factor = DECAY_RATE ** decay_periods
+    
+    # Get last known hashrate
+    last_known_hashrate = get_pool_attempts_per_second(
+        tracker, previous_share_hash, 
+        min(net.TARGET_LOOKBEHIND, tracker.get_height(previous_share_hash)),
+        min_work=True, integer=True
+    )
+    
+    # Apply decay - assume hashrate has dropped
+    estimated_hashrate = max(1, int(last_known_hashrate * decay_factor))
+    
+    # Calculate target for estimated hashrate
+    emergency_target = 2**256 // (net.SHARE_PERIOD * estimated_hashrate) - 1
+    
+    # Clamp to MAX_TARGET (minimum difficulty)
+    return min(emergency_target, net.MAX_TARGET)
+```
+
+### 10.6 Alternative Solutions Considered
+
+| Solution | Pros | Cons |
+|----------|------|------|
+| **Time decay (proposed)** | Simple, predictable, automatic | May briefly overshoot on recovery |
+| **Share weight vesting (alternative)** | Prevents problem entirely, fair | More complex, changes payout accounting |
+| **Manual reset (current)** | Works | Requires operator intervention, loses history |
+| **Hybrid lookback** | More accurate | Complex implementation |
+| **Minimum hashrate floor** | Prevents stagnation | May be too generous |
+
+### 10.6.1 Alternative: Share Weight Vesting (Prevention vs Cure)
+
+Instead of fixing stagnation AFTER it happens, **prevent it by dampening high-diff shares**:
+
+**Core Insight:**
+The problem isn't that difficulty goes up - it's that a TRANSIENT big miner can poison the difficulty for PERSISTENT small miners. If a big miner joins briefly, their high-diff shares dominate the window, then they leave and small miners are stuck.
+
+**Vesting Concept:**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SHARE WEIGHT VESTING: HIGH-DIFF SHARES EARN WEIGHT OVER TIME               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  STANDARD (Current):                                                        │
+│  └─ Share found at diff 100 → immediately counts as 100 weight              │
+│  └─ Big miner joins, finds 10 shares at diff 100 → 1000 weight instantly    │
+│  └─ Big miner leaves → difficulty stuck at 100, small miners stranded       │
+│                                                                             │
+│  WITH VESTING:                                                              │
+│  └─ Share found at diff 100 → counts as (100 * vesting_factor)              │
+│  └─ vesting_factor = min(1.0, shares_behind_this / VESTING_WINDOW)          │
+│  └─ New share: vesting_factor = 0.0 (just born)                             │
+│  └─ After VESTING_WINDOW shares: vesting_factor = 1.0 (fully vested)        │
+│                                                                             │
+│  RESULT:                                                                    │
+│  └─ Big miner's shares start with LOW effective weight                      │
+│  └─ Only count fully after VESTING_WINDOW more shares found                 │
+│  └─ If big miner leaves quickly → their shares never fully vest             │
+│  └─ Difficulty never spikes as high → small miners not stranded!            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Mathematical Model:**
+```python
+# PROPOSED: Share weight vesting for difficulty calculation
+
+VESTING_WINDOW = 100  # Shares needed to fully vest (e.g., ~16 minutes at 10s/share)
+
+def get_vested_weight(share, tracker, current_height):
+    """
+    Calculate vested weight of a share for difficulty calculation.
+    
+    New shares start with 0 weight and gradually vest to full weight
+    as more shares are added on top of them.
+    """
+    share_height = tracker.get_height(share.hash)
+    shares_on_top = current_height - share_height
+    
+    # Vesting factor: 0.0 at birth → 1.0 after VESTING_WINDOW shares
+    vesting_factor = min(1.0, shares_on_top / VESTING_WINDOW)
+    
+    # Raw weight from target (current behavior)
+    raw_weight = bitcoin_data.target_to_average_attempts(share.target)
+    
+    return raw_weight * vesting_factor
+
+def calculate_pool_hashrate_with_vesting(tracker, tip_hash, lookback):
+    """
+    Calculate pool hashrate using vested share weights.
+    
+    High-diff shares from transient miners count less until they've
+    been in the chain long enough to "prove" the hashrate is sustained.
+    """
+    current_height = tracker.get_height(tip_hash)
+    total_vested_work = 0
+    time_span = 0
+    
+    for share in tracker.get_chain(tip_hash, lookback):
+        vested_weight = get_vested_weight(share, tracker, current_height)
+        total_vested_work += vested_weight
+        # Time span calculation as usual...
+    
+    return total_vested_work / time_span if time_span > 0 else 0
+```
+
+**Scenario Comparison:**
+```
+SCENARIO: Big miner (100 GH/s) joins for 5 minutes, then leaves
+          Small miners (1 GH/s total) remain
+
+CURRENT BEHAVIOR:
+  - Big miner finds 30 shares at diff 100
+  - Difficulty immediately at 100
+  - Big miner leaves
+  - Small miners need ~2.7 hours PER SHARE at diff 100
+  - Takes DAYS to find 720 shares to reset difficulty
+
+WITH VESTING (VESTING_WINDOW=100):
+  - Big miner finds 30 shares at diff 100
+  - Those shares start at 0% vested weight
+  - After big miner leaves, only ~30% would be vested (30/100)
+  - Effective difficulty: ~30 (not 100)
+  - Small miners can find shares at reasonable difficulty
+  - As they find shares, big miner's shares continue vesting
+  - But NEW shares from small miners also count toward hashrate
+  - Difficulty naturally balances to sustainable level
+```
+
+**Trade-offs:**
+
+| Aspect | Time Decay | Share Vesting |
+|--------|------------|---------------|
+| **When it acts** | AFTER stagnation (reactive) | PREVENTS stagnation (proactive) |
+| **Complexity** | Simple time check | Changes weight calculation |
+| **Payout impact** | None | Potentially affects PPLNS weight? |
+| **Gaming resistance** | Moderate | High (can't "spike and leave") |
+| **Big miner fairness** | Full weight immediately | Earns weight over time |
+
+**Critical Question: Does Vesting Affect Payouts?**
+
+Two options:
+1. **Vesting for DIFFICULTY ONLY** - Shares still pay full weight in PPLNS
+   - Only dampens difficulty calculation
+   - Big miner still gets fair payout for work done
+   - Simpler, less controversial
+
+2. **Vesting for DIFFICULTY AND PAYOUTS** - Shares earn payout weight gradually
+   - "Pool hopper" gets reduced rewards (their shares aren't vested when block found)
+   - Strongly discourages transient mining
+   - More controversial but more effective
+
+**Recommendation:** Start with Option 1 (difficulty only). This solves the stagnation problem without changing payout economics. Option 2 could be considered for V37 if pool hopping remains a problem.
+
+### 10.6.2 Refined Alternative: Per-Miner Tenure Vesting
+
+Instead of vesting shares based on their position in the chain, vest based on **how long the MINER has been consistently participating**:
+
+**Core Insight:**
+The problem is TRANSIENT miners, not new shares. A miner who stays and keeps contributing should have full weight. A miner who "spikes and leaves" should have dampened weight.
+
+**Per-Miner Vesting Concept:**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  PER-MINER TENURE VESTING: WEIGHT BASED ON MINER'S CONSISTENCY              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  SHARE-BASED VESTING (10.6.1):                                              │
+│  └─ Share vests as more shares added ON TOP of it                           │
+│  └─ All miners' shares vest equally based on chain position                 │
+│  └─ Simple but doesn't distinguish persistent vs transient miners           │
+│                                                                             │
+│  PER-MINER TENURE VESTING (This approach):                                  │
+│  └─ Track how many shares each MINER has in the lookback window             │
+│  └─ Miner's vesting_factor = min(1.0, miner_share_count / VESTING_WINDOW)   │
+│  └─ ALL of that miner's shares use the SAME vesting factor                  │
+│                                                                             │
+│  EXAMPLE (VESTING_WINDOW = 100 shares):                                     │
+│                                                                             │
+│  Miner A (consistent small miner):                                          │
+│    - Has 150 shares in lookback window                                      │
+│    - vesting_factor = min(1.0, 150/100) = 1.0 (fully vested!)               │
+│    - All 150 shares count at 100% weight                                    │
+│                                                                             │
+│  Miner B (pool hopper, just arrived):                                       │
+│    - Has 10 shares in lookback window (high diff, just joined)              │
+│    - vesting_factor = min(1.0, 10/100) = 0.1 (10% vested)                   │
+│    - All 10 shares count at only 10% weight!                                │
+│    - Even if each share is 100x difficulty, effective = 10x                 │
+│                                                                             │
+│  RESULT:                                                                    │
+│  └─ Consistent miners: Full weight from day one (if they have tenure)       │
+│  └─ Pool hoppers: Dampened weight until they prove consistency              │
+│  └─ Difficulty reflects SUSTAINED hashrate, not spikes                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Mathematical Model:**
+```python
+# PROPOSED: Per-miner tenure vesting for difficulty calculation
+
+VESTING_WINDOW = 100  # Shares needed to fully vest
+
+def calculate_miner_vesting_factors(tracker, tip_hash, lookback):
+    """
+    Calculate vesting factor for each miner based on their tenure.
+    
+    Returns dict: {miner_address: vesting_factor}
+    """
+    miner_share_counts = {}  # {address: share_count}
+    
+    # Count shares per miner in lookback window
+    for share in tracker.get_chain(tip_hash, lookback):
+        address = share.share_info['share_data']['address']
+        miner_share_counts[address] = miner_share_counts.get(address, 0) + 1
+    
+    # Calculate vesting factor for each miner
+    vesting_factors = {}
+    for address, count in miner_share_counts.items():
+        vesting_factors[address] = min(1.0, count / VESTING_WINDOW)
+    
+    return vesting_factors
+
+def calculate_pool_hashrate_with_tenure_vesting(tracker, tip_hash, lookback):
+    """
+    Calculate pool hashrate using per-miner tenure vesting.
+    
+    Miners with long tenure have full weight.
+    New miners (potential pool hoppers) have dampened weight.
+    """
+    # First pass: calculate vesting factors
+    vesting_factors = calculate_miner_vesting_factors(tracker, tip_hash, lookback)
+    
+    # Second pass: calculate vested work
+    total_vested_work = 0
+    timestamps = []
+    
+    for share in tracker.get_chain(tip_hash, lookback):
+        address = share.share_info['share_data']['address']
+        vesting = vesting_factors.get(address, 0.0)
+        
+        raw_weight = bitcoin_data.target_to_average_attempts(share.target)
+        vested_weight = raw_weight * vesting
+        
+        total_vested_work += vested_weight
+        timestamps.append(share.timestamp)
+    
+    # Calculate hashrate from vested work
+    if len(timestamps) >= 2:
+        time_span = max(timestamps) - min(timestamps)
+        if time_span > 0:
+            return total_vested_work / time_span
+    
+    return 0
+```
+
+**Scenario Comparison:**
+```
+SCENARIO: Big miner (100 GH/s) joins for 5 minutes, then leaves
+          Small miner (1 GH/s) has been mining consistently
+
+LOOKBACK_WINDOW = 720 shares, VESTING_WINDOW = 100 shares
+
+CURRENT BEHAVIOR:
+  - Big miner finds 30 shares at diff 100 in 5 minutes
+  - Small miner has 200 shares at diff 1
+  - Difficulty immediately spikes based on (30*100 + 200*1) = 3200 work
+  - Big miner leaves → small miner stuck at high difficulty
+
+WITH PER-MINER TENURE VESTING:
+  - Small miner: 200 shares → vesting = min(1.0, 200/100) = 1.0 (100%)
+  - Big miner: 30 shares → vesting = min(1.0, 30/100) = 0.3 (30%)
+  
+  - Small miner effective work: 200 * 1 * 1.0 = 200
+  - Big miner effective work: 30 * 100 * 0.3 = 900
+  - Total effective work: 1100 (not 3200!)
+  
+  - Difficulty based on 1100 work, not 3200
+  - When big miner leaves, difficulty is already reasonable
+  - Small miner can continue finding shares!
+```
+
+**Why Per-Miner is Better Than Per-Share:**
+
+| Aspect | Per-Share Vesting | Per-Miner Tenure Vesting |
+|--------|-------------------|--------------------------|
+| **What it measures** | How old is this share | How consistent is this miner |
+| **New consistent miner** | Starts at 0%, slow ramp | Reaches 100% after VESTING_WINDOW shares |
+| **Pool hopper pattern** | Each share vests independently | ALL shares dampened by low tenure |
+| **Existing miners** | Affected by new high-diff shares | Protected - their tenure is already 100% |
+| **Fairness** | All shares treated equally | Rewards consistency over time |
+| **Gaming resistance** | Medium | High - can't fake tenure |
+
+**Edge Case: What About Brand New Pool?**
+```
+If pool is brand new (few total shares):
+  - All miners have low share counts
+  - All vesting factors are low
+  - But difficulty calculation still works because:
+    - Everyone is equally dampened
+    - Ratio between miners preserved
+    - Base difficulty still adjusts to find shares
+  
+Special handling for bootstrap:
+  if total_shares < VESTING_WINDOW:
+      # Everyone is "equally new" - use standard calculation
+      return standard_difficulty_calculation()
+```
+
+**Implementation Note:**
+This requires tracking shares per address, which is already done for PPLNS payouts. The calculation can reuse that infrastructure.
+
+### 10.6.3 Attack Vectors and Mitigations
+
+The per-miner tenure system can be gamed. Here are identified attacks and countermeasures:
+
+**Attack 1: "Tenure Farming" - Keep Weak Miner After Leaving**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ATTACK: TENURE FARMING                                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  EXPLOIT SEQUENCE:                                                          │
+│  1. Hopper joins with 100 GH/s miner                                        │
+│  2. Finds 100 shares at diff 100 → now "fully vested" (100%)                │
+│  3. Switches main miner away, leaves 1 MH/s "placeholder"                   │
+│  4. Placeholder finds 1 share/day, maintains share count > 100              │
+│  5. Old high-diff shares STILL count at 100% weight!                        │
+│  6. Difficulty stays poisoned even though real hashrate is gone             │
+│                                                                             │
+│  WHY IT WORKS:                                                              │
+│  └─ Tenure based on SHARE COUNT, not sustained HASHRATE                     │
+│  └─ 100 old high-diff shares + 1 new low-diff share = still 101 shares      │
+│  └─ Vesting factor still 100%                                               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Attack 2: Address Reuse Across Sessions**
+```
+Same hopper returns periodically:
+  - Week 1: Joins with high hashrate, builds tenure, leaves
+  - Week 2: Returns briefly, tenure still valid, spikes difficulty again
+  - Pattern: Periodic difficulty poisoning with minimal cost
+```
+
+**Attack 3: Cooperative Address Sharing**
+```
+Multiple hoppers share address:
+  - Hopper A builds tenure
+  - Hopper A leaves, Hopper B takes over same address
+  - Address always has tenure, hoppers rotate freely
+```
+
+---
+
+**MITIGATION: Weight-Based Tenure (Not Count-Based)**
+
+Instead of counting shares, count WORK (difficulty-weighted):
+
+```python
+# IMPROVED: Weight-based tenure vesting
+
+def calculate_miner_vesting_factors_weighted(tracker, tip_hash, lookback):
+    """
+    Calculate vesting factor based on WORK contribution, not share count.
+    
+    Key insight: If a miner's hashrate drops, their RECENT work drops,
+    which should reduce vesting of their HISTORICAL shares.
+    """
+    VESTING_WORK_THRESHOLD = net.SHARE_PERIOD * lookback  # Expected work for full tenure
+    RECENCY_WINDOW = lookback // 4  # Recent = last 25% of window
+    
+    miner_total_work = {}   # {address: total_work_in_window}
+    miner_recent_work = {}  # {address: work_in_recent_window}
+    
+    share_index = 0
+    for share in tracker.get_chain(tip_hash, lookback):
+        address = share.share_info['share_data']['address']
+        work = bitcoin_data.target_to_average_attempts(share.target)
+        
+        miner_total_work[address] = miner_total_work.get(address, 0) + work
+        
+        # Track recent work separately
+        if share_index < RECENCY_WINDOW:
+            miner_recent_work[address] = miner_recent_work.get(address, 0) + work
+        
+        share_index += 1
+    
+    # Calculate vesting with consistency check
+    vesting_factors = {}
+    for address in miner_total_work:
+        total_work = miner_total_work[address]
+        recent_work = miner_recent_work.get(address, 0)
+        
+        # Base vesting from total work
+        base_vesting = min(1.0, total_work / VESTING_WORK_THRESHOLD)
+        
+        # Consistency factor: recent work should be proportional to total
+        # If miner did 1000 work total but only 10 recently, they've "left"
+        expected_recent = total_work * RECENCY_WINDOW / lookback
+        if expected_recent > 0:
+            consistency = min(1.0, recent_work / expected_recent)
+        else:
+            consistency = 1.0
+        
+        # Final vesting = base * consistency
+        # Miner who left has low consistency → their old shares dampened
+        vesting_factors[address] = base_vesting * consistency
+    
+    return vesting_factors
+```
+
+**How This Defeats Attack 1:**
+```
+SCENARIO: Hopper with 100 GH/s finds 100 shares, then leaves placeholder
+
+With COUNT-BASED tenure (vulnerable):
+  - Total shares: 101 (100 old + 1 new)
+  - Vesting: min(1.0, 101/100) = 100%
+  - ATTACK SUCCEEDS
+
+With WORK-BASED tenure + consistency check:
+  - Total work: 100 * high_diff + 1 * low_diff ≈ 10,000 + 0.01 = 10,000.01
+  - Recent work (last 25%): 1 * low_diff = 0.01
+  - Expected recent: 10,000.01 * 0.25 = 2,500
+  - Consistency: 0.01 / 2,500 = 0.000004 (essentially 0!)
+  - Final vesting: base * 0.000004 ≈ 0%
+  - ATTACK DEFEATED - old shares don't count!
+```
+
+---
+
+**Additional Attack Vectors Identified:**
+
+| Attack | Description | Mitigation |
+|--------|-------------|------------|
+| **Tenure farming** | Keep weak miner to maintain share count | Work-based + consistency check |
+| **Address reuse** | Same hopper returns with historical tenure | Time-decay on old shares |
+| **Address sharing** | Multiple hoppers share address | Consistency check detects hashrate changes |
+| **Slow ramp down** | Gradually reduce hashrate to avoid detection | Exponential recency weighting |
+| **Split addresses** | Use multiple addresses to limit exposure | Per-pool minimum difficulty floor |
+
+---
+
+**REFINED SOLUTION: Multi-Factor Vesting**
+
+Combine multiple signals for robust anti-gaming:
+
+```python
+def calculate_robust_vesting(tracker, tip_hash, lookback, address):
+    """
+    Multi-factor vesting calculation resistant to gaming.
+    
+    Factors:
+    1. Work contribution (not just share count)
+    2. Consistency (recent vs historical hashrate)
+    3. Recency (exponential decay on old shares)
+    """
+    RECENCY_HALF_LIFE = lookback // 4  # Shares lose half weight every quarter window
+    
+    total_decayed_work = 0
+    recent_work = 0
+    share_index = 0
+    
+    for share in tracker.get_chain(tip_hash, lookback):
+        if share.share_info['share_data']['address'] != address:
+            continue
+            
+        work = bitcoin_data.target_to_average_attempts(share.target)
+        
+        # Exponential decay based on age
+        age_factor = 0.5 ** (share_index / RECENCY_HALF_LIFE)
+        decayed_work = work * age_factor
+        
+        total_decayed_work += decayed_work
+        
+        if share_index < RECENCY_HALF_LIFE:
+            recent_work += work
+        
+        share_index += 1
+    
+    # Vesting based on decayed work
+    # This naturally handles:
+    # - Old shares matter less (decay)
+    # - Consistent miners still have high total (continuous contribution)
+    # - Hoppers have low total (their old shares decayed)
+    
+    WORK_THRESHOLD = net.SHARE_PERIOD * lookback * 0.5  # Adjusted for decay
+    vesting = min(1.0, total_decayed_work / WORK_THRESHOLD)
+    
+    return vesting
+```
+
+**Why Exponential Decay Works:**
+```
+HONEST MINER (consistent 1 GH/s):
+  - Finds ~1 share per period continuously
+  - Each old share decays, but NEW shares added
+  - Steady state: constant decayed_work sum
+  - Vesting: 100% (stable)
+
+HOPPER (100 GH/s spike, then leaves):
+  - Day 1: Finds 100 shares at high diff, decayed_work = HIGH
+  - Day 2: No new shares, old shares decay by 50%
+  - Day 3: No new shares, old shares decay to 25%
+  - Day 7: Old shares decayed to ~1.5%
+  - Vesting drops rapidly even without consistency check!
+```
+
+---
+
+**Summary of Gaming Resistance:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ANTI-GAMING MEASURES                                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  COUNT-BASED TENURE (vulnerable):                                           │
+│  └─ Gaming: Keep 1 weak miner to maintain share count                       │
+│  └─ Result: Old high-diff shares still count at 100%                        │
+│                                                                             │
+│  WORK-BASED TENURE (better):                                                │
+│  └─ Gaming: Keep weak miner... but work contribution is tiny                │
+│  └─ Result: Need consistency check to catch hashrate drop                   │
+│                                                                             │
+│  WORK + CONSISTENCY CHECK (good):                                           │
+│  └─ Gaming: Gradually ramp down to avoid detection                          │
+│  └─ Result: Harder but possible with careful timing                         │
+│                                                                             │
+│  EXPONENTIAL DECAY + WORK (★ RECOMMENDED):                                  │
+│  └─ Gaming: Very difficult - old shares ALWAYS decay                        │
+│  └─ Leaving = vesting drops exponentially, no way to prevent                │
+│  └─ Must continuously contribute to maintain vesting                        │
+│  └─ Natural solution: rewards SUSTAINED contribution                        │
+│                                                                             │
+│  COMBINED APPROACH:                                                         │
+│  └─ Primary: Exponential decay on share weight                              │
+│  └─ Secondary: Consistency check (recent vs total)                          │
+│  └─ Failsafe: Time-based emergency difficulty adjustment                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.7 Implementation Considerations
+
+**Backward Compatibility:**
+- This is a LOCAL calculation, not part of share structure
+- Each node can implement independently
+- V35 and V36 can coexist with different difficulty algorithms
+- Share chain remains valid, only work generation changes
+
+**Testing Required:**
+- Verify difficulty doesn't oscillate wildly on hashrate changes
+- Test recovery when hashrate returns
+- Ensure no gaming by strategic disconnection
+
+### 10.8 Integration with V36
+
+This fix could be:
+1. **V35.1 hotfix** - Deploy independently of V36
+2. **V36 feature** - Bundle with merged mining upgrade
+3. **Both** - Fix V35 immediately, inherit in V36
+
+**Recommendation:** Fix as V35.1 hotfix since:
+- Benefits all miners immediately
+- Not dependent on V36 adoption
+- Critical for network stability
+
+### 10.9 Metrics and Monitoring
+
+Add monitoring for difficulty health:
+
+```python
+# Web dashboard endpoint: /difficulty_health
+def get_difficulty_health(tracker, best_share_hash, net):
+    """
+    Return difficulty health metrics for monitoring.
+    """
+    last_share = tracker.items[best_share_hash]
+    time_since_share = time.time() - last_share.timestamp
+    expected_time = net.SHARE_PERIOD
+    
+    return {
+        'time_since_last_share': time_since_share,
+        'expected_share_time': expected_time,
+        'share_delay_ratio': time_since_share / expected_time,
+        'current_difficulty': bitcoin_data.target_to_difficulty(last_share.target),
+        'is_stale': time_since_share > expected_time * 10,
+        'emergency_mode': time_since_share > expected_time * 20,
+        'estimated_time_to_share': calculate_estimated_time(tracker, net),
+    }
+```
+
+### 10.10 Summary: Difficulty Stagnation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  KEY FINDINGS                                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PROBLEM:                                                                   │
+│  └─ Difficulty adjustment requires NEW shares                               │
+│  └─ High difficulty prevents new shares from being found                    │
+│  └─ Death spiral when hashrate drops suddenly                               │
+│                                                                             │
+│  IMPACT:                                                                    │
+│  └─ Pool hopping damages remaining miners                                   │
+│  └─ Network splits leave miners stranded                                    │
+│  └─ Small miners punished for large miners' behavior                        │
+│                                                                             │
+│  SOLUTION EVOLUTION:                                                        │
+│                                                                             │
+│  A) TIME DECAY (Reactive failsafe):                                         │
+│     └─ If no share in 20x expected time, decay difficulty                   │
+│     └─ Simple emergency brake for extreme cases                             │
+│                                                                             │
+│  B) SHARE COUNT VESTING (Vulnerable to gaming):                             │
+│     └─ Vesting based on miner's share count                                 │
+│     └─ FLAW: Keep weak miner to farm tenure                                 │
+│                                                                             │
+│  C) WORK-BASED VESTING (Better but gameable):                               │
+│     └─ Vesting based on work contribution, not count                        │
+│     └─ Add consistency check (recent vs historical)                         │
+│     └─ FLAW: Can slowly ramp down to avoid detection                        │
+│                                                                             │
+│  D) EXPONENTIAL DECAY ON SHARES (★ RECOMMENDED):                            │
+│     └─ All shares lose weight over time (half-life decay)                   │
+│     └─ Recent shares count more than old shares                             │
+│     └─ Hopper leaves → their shares decay rapidly                           │
+│     └─ Consistent miner → new shares replace decayed ones                   │
+│     └─ NATURAL: Rewards sustained contribution, no gaming possible          │
+│                                                                             │
+│  COMBINED DEFENSE:                                                          │
+│  └─ PRIMARY: Exponential decay on share weight for difficulty calc          │
+│  └─ SECONDARY: Consistency check (detect sudden hashrate drops)             │
+│  └─ FAILSAFE: Time-based emergency adjustment (network split, etc.)         │
+│                                                                             │
+│  IMPLEMENTATION:                                                            │
+│  └─ Local calculation change (no protocol change needed)                    │
+│  └─ Only affects difficulty calculation, NOT payouts                        │
+│  └─ Can be V35.1 hotfix independent of V36                                  │
+│  └─ Backward compatible with existing share chain                           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Appendix A: Chain ID Reference
 
 | Chain | Chain ID (hex) | Chain ID (dec) | Notes |
@@ -1191,7 +1959,7 @@ function loadDonationStatus() {
 
 ---
 
-*Document Version: 1.6*
+*Document Version: 1.7*
 *Last Updated: February 2026*
 *Author: P2Pool Merged Mining Team*
 *Changelog:*
@@ -1202,3 +1970,4 @@ function loadDonationStatus() {
 - *v1.4: FINAL CORRECTION: Donation CANNOT change until V35 deprecated - all nodes must compute identical coinbase. Continue SECONDARY_DONATION_ENABLED hack (50/50 split) until flag day.*
 - *v1.5: FIXED: Corrected all donation addresses - they were completely wrong. Verified against actual script hash160 values.*
 - *v1.6: VERIFIED: BTC donation address confirmed as 1Kz5QaUPDtKrj5SqW5tFkn7WZh8LmQaQi4 (user-provided), all addresses now derived correctly from hash160 d03da6fca390166d020be0e7c28ac8cc70f58403*
+- *v1.7: NEW: Added Part 10 - Share Difficulty Stagnation Problem discovered during V35 compatibility testing. Documented death spiral issue and proposed time-based difficulty decay solution.*
