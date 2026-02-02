@@ -6,9 +6,9 @@ CHAIN_LENGTH = 24*60*60//10 # shares
 REAL_CHAIN_LENGTH = 24*60*60//10 # shares
 TARGET_LOOKBEHIND = 200 # shares
 SPREAD = 3 # blocks
-# EXPERIMENTAL: Changed magic bytes to isolate from production network
-IDENTIFIER = 'deadbeef12345678'.decode('hex')  # was e037d5b8c6923410
-PREFIX = 'cafebabe87654321'.decode('hex')  # was 7208c1a53ef629b0
+# Global Litecoin P2Pool network identifiers
+IDENTIFIER = 'e037d5b8c6923410'.decode('hex')
+PREFIX = '7208c1a53ef629b0'.decode('hex')
 P2P_PORT = 9326
 MIN_TARGET = 0
 # MAX_TARGET: Share Difficulty Floor (easiest allowed)
@@ -28,8 +28,18 @@ MIN_TARGET = 0
 MAX_TARGET = 2**256//2**21 - 1
 PERSIST = True
 WORKER_PORT = 9327
-# EXPERIMENTAL: Bootstrap disabled for isolated testing
-BOOTSTRAP_ADDRS = []
+BOOTSTRAP_ADDRS = [
+        'crypto.office-on-the.net',
+        'ltc.p2pool.leblancnet.us',
+        '51.148.43.34',
+        '68.131.29.131',
+        '87.102.46.100',
+        '89.237.60.231',
+        '95.79.35.133',
+        '96.255.61.32',
+        '174.56.93.93',
+        '178.238.236.130',
+]
 ANNOUNCE_CHANNEL = '#p2pool-ltc'
 VERSION_CHECK = lambda v: None if 100400 <= v else 'Litecoin version too old. Upgrade to 0.10.4 or newer!'
 VERSION_WARNING = lambda v: None
