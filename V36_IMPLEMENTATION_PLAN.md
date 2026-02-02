@@ -2614,6 +2614,400 @@ def decode_merged_addresses(payload, supported_chains):
 
 ---
 
+# Part 13: V36 Security Analysis
+
+## 13.1 P2Pool Block Analysis - MWEB Handling
+
+Analysis of recent P2Pool-mined Litecoin blocks reveals how jtoomim's P2Pool handles MWEB:
+
+### Blocks Examined
+
+| Block | Height | TXs | MWEB Kernels | MWEB TXOs | Mined By |
+|-------|--------|-----|--------------|-----------|----------|
+| [2751101](https://chainz.cryptoid.info/ltc/block.dws?2751101.htm) | 2,751,101 | 359 | **0** | 76,410 | Toomim Bros/p2pool |
+| [2752965](https://chainz.cryptoid.info/ltc/block.dws?2752965.htm) | 2,752,965 | 258 | **0** | 77,176 | Toomim Bros/p2pool |
+| [2754657](https://chainz.cryptoid.info/ltc/block.dws?2754657.htm) | 2,754,657 | 82 | **0** | 78,055 | Toomim Bros/p2pool |
+| [2760196](https://chainz.cryptoid.info/ltc/block.dws?2760196.htm) | 2,760,196 | 609 | **0** | 80,656 | Toomim Bros/p2pool |
+| [2770170](https://chainz.cryptoid.info/ltc/block.dws?2770170.htm) | 2,770,170 | 146 | **0** | 87,814 | Toomim Bros/p2pool |
+| [2870037](https://chainz.cryptoid.info/ltc/block.dws?2870037.htm) | 2,870,037 | 154 | **0** | 156,756 | Toomim Bros/p2pool |
+
+### Key Findings
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  JTOOMIM P2POOL MWEB HANDLING                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  DISCOVERY: jtoomim P2Pool includes ZERO MWEB transactions!                 │
+│                                                                             │
+│  Evidence:                                                                  │
+│  - All 6 blocks have num_kernels: 0 (no MWEB txs included)                  │
+│  - The num_txos field (76k-156k) is cumulative UTXO count, not block txs    │
+│  - Checked actual block tx data: no ismweb:true in any vin/vout             │
+│                                                                             │
+│  Coinbase Signature: "Toomim Bros/p2pool"                                   │
+│  SegWit Witness: "[P2Pool][P2Pool][P2Pool][P2Pool]"                         │
+│                                                                             │
+│  CONSEQUENCE:                                                               │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  P2Pool miners on jtoomim's code are LOSING ALL MWEB FEES!       │        │
+│  │                                                                  │        │
+│  │  Their "fix" for MWEB parsing failures:                          │        │
+│  │  → Skip MWEB transactions entirely                               │        │
+│  │  → 100% of MWEB fees lost (not just ~25% from retry hashrate)    │        │
+│  │                                                                  │        │
+│  │  Our fix (Part 11):                                              │        │
+│  │  → Try/except around tx_type.unpack()                            │        │
+│  │  → Store raw bytes with _mweb marker                             │        │
+│  │  → MWEB txs included in blocks, fees collected                   │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Coinbase Structure Analysis (Block 2870037)
+
+```
+Coinbase TX: d2fed4972b1b857e08658953ed5ac96a953f51cde19f470ce97e97f2a3d87fb1
+
+Inputs:
+  - coinbase: "0315cb2b2cfabe6d6d..." (block height + aux pow + "Toomim Bros/p2pool")
+  - witness: "[P2Pool][P2Pool][P2Pool][P2Pool]"
+
+Outputs (33 total):
+  - vout[0]:  OP_RETURN (segwit commitment)
+  - vout[1-30]: P2Pool miner payouts (various address types)
+  - vout[31]: 0.00000016 LTC to P2PK donation (BURNED - no private key)
+  - vout[32]: OP_RETURN (share chain commitment)
+
+Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
+```
+
+---
+
+## 13.2 Share Modification Attack Analysis
+
+**Question:** Can an attacker intercept and modify V36 shares to steal rewards?
+
+### V35 Security Model
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  V35 SHARE VERIFICATION CHAIN                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Share Creation:                                                            │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  share_data.pubkey_hash = miner's address (20 bytes)             │        │
+│  │           ↓                                                      │        │
+│  │  generate_transaction() builds coinbase with payouts             │        │
+│  │           ↓                                                      │        │
+│  │  gentx_hash = SHA256(SHA256(coinbase_tx))                        │        │
+│  │           ↓                                                      │        │
+│  │  hash_link = SHA256 state at coinbase prefix                     │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  Share Verification (data.py:669-670):                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  # Reconstruct coinbase from share_data                          │        │
+│  │  gentx = generate_transaction(share_data, ...)                   │        │
+│  │                                                                  │        │
+│  │  # Verify it matches the committed hash                          │        │
+│  │  if bitcoin_data.get_txid(gentx) != self.gentx_hash:             │        │
+│  │      raise ValueError("gentx doesn't match hash_link")           │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  PROTECTION: pubkey_hash → coinbase outputs → gentx_hash (committed)        │
+│              Changing pubkey_hash changes gentx_hash → REJECTED             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Attack Scenario: Litecoin Address Modification
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ATTACK: Modify share_data.pubkey_hash                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Attacker intercepts share in P2P network                                │
+│  2. Changes: pubkey_hash = 0xABC... → 0xDEF... (attacker's address)         │
+│  3. Forwards modified share to peers                                        │
+│                                                                             │
+│  Result:                                                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  Receiving node:                                                 │        │
+│  │  - Unpacks share with modified pubkey_hash = 0xDEF...            │        │
+│  │  - Calls generate_transaction(share_data, ...)                   │        │
+│  │  - Builds coinbase paying to 0xDEF... (attacker)                 │        │
+│  │  - Computes gentx_hash of new coinbase                           │        │
+│  │  - Compares to share's claimed gentx_hash                        │        │
+│  │  - MISMATCH! → ValueError → Share REJECTED                       │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  VERDICT: ✅ SECURE - pubkey_hash modification detected                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### V36 New Attack Surface: Merged Mining Addresses
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  V36 ADDS NEW FIELDS: merged_addresses for secondary chains                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  V36 Share Structure:                                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  share_data:                                                     │        │
+│  │    pubkey_hash: 20 bytes (Litecoin address) ← PROTECTED          │        │
+│  │    ...                                                           │        │
+│  │  share_info:                                                     │        │
+│  │    ...                                                           │        │
+│  │    merged_mining_version: 1 byte                                 │        │
+│  │    derivation_mode: 1 byte                                       │        │
+│  │    merged_payload: variable ← NEW! Is this protected?            │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  QUESTION: What commits to merged_payload?                                  │
+│                                                                             │
+│  The merged addresses affect SECONDARY CHAIN coinbases (Dogecoin, etc.)     │
+│  NOT the PRIMARY CHAIN coinbase (Litecoin)                                  │
+│                                                                             │
+│  Therefore: gentx_hash does NOT protect merged_payload!                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Attack Scenario: Merged Address Modification
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  POTENTIAL ATTACK: Modify merged_payload without affecting gentx_hash       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Attacker intercepts V36 share                                           │
+│  2. Changes merged_payload:                                                 │
+│     - Original: DERIVE_ALL, pubkey_hash = 0xABC... (miner's Doge addr)      │
+│     - Modified: DERIVE_ALL, pubkey_hash = 0xDEF... (attacker's Doge addr)   │
+│  3. Litecoin pubkey_hash unchanged → gentx_hash unchanged                   │
+│  4. Share passes gentx verification!                                        │
+│                                                                             │
+│  IF NO OTHER PROTECTION:                                                    │
+│  - Share accepted by network                                                │
+│  - When merged block found, Dogecoin rewards go to attacker!                │
+│  - Original miner gets Litecoin but loses Dogecoin                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 13.3 Security Solutions for V36
+
+### Solution A: Include merged_payload in share_info (RECOMMENDED)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SOLUTION A: share_info COMMITMENT                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  How it works:                                                              │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  share_info = {                                                  │        │
+│  │    share_data: {...},                                            │        │
+│  │    far_share_hash: ...,                                          │        │
+│  │    bits: ...,                                                    │        │
+│  │    timestamp: ...,                                               │        │
+│  │    merged_mining_version: 0x01,        ← NEW                     │        │
+│  │    derivation_mode: 0x01,              ← NEW                     │        │
+│  │    merged_payload: pubkey_hash,        ← NEW                     │        │
+│  │  }                                                               │        │
+│  │                                                                  │        │
+│  │  share_hash = SHA256(share_type.pack(share))                     │        │
+│  │                  ↑                                               │        │
+│  │            includes share_info which includes merged_payload     │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  Verification:                                                              │
+│  1. Share received with claimed share_hash                                  │
+│  2. Node unpacks share, computes SHA256 of packed data                      │
+│  3. If computed hash ≠ claimed hash → Share REJECTED                        │
+│  4. If attacker modified merged_payload → hash changes → REJECTED           │
+│                                                                             │
+│  VERDICT: ✅ SECURE - merged_payload modification changes share_hash        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Solution B: OP_RETURN Commitment in Primary Coinbase
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SOLUTION B: COINBASE OP_RETURN COMMITMENT                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Add commitment to Litecoin coinbase:                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  vout[N]: OP_RETURN <merged_address_commitment>                  │        │
+│  │           where commitment = SHA256(sorted_merged_addresses)     │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  Protection:                                                                │
+│  - Commitment is in coinbase → affects gentx_hash                           │
+│  - Changing merged addresses → changes commitment → changes gentx_hash      │
+│  - Share verification fails on gentx mismatch                               │
+│                                                                             │
+│  Drawbacks:                                                                 │
+│  - Adds ~40 bytes to every coinbase (OP_RETURN + 32-byte hash)              │
+│  - Affects ALL miners, not just merged mining participants                  │
+│  - Requires Litecoin coinbase format change (backward compatibility?)       │
+│                                                                             │
+│  VERDICT: ⚠️ SECURE but invasive - prefer Solution A                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Solution C: Signed Shares
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SOLUTION C: CRYPTOGRAPHIC SIGNATURES                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Miner signs entire share with their private key:                           │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  share.signature = sign(private_key, SHA256(share_contents))     │        │
+│  │                                                                  │        │
+│  │  Verification:                                                   │        │
+│  │  - Derive public key from pubkey_hash                            │        │
+│  │  - Verify signature over share contents                          │        │
+│  │  - If invalid → REJECT                                           │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  Problem:                                                                   │
+│  - pubkey_hash is HASH of public key, not public key itself                 │
+│  - Cannot derive public key from hash (one-way function)                    │
+│  - Would need to include full public key in share (+33 bytes)               │
+│  - Current shares already have a signature field (different purpose)        │
+│                                                                             │
+│  VERDICT: ❌ NOT PRACTICAL - would require major protocol changes           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 13.4 Recommended V36 Security Implementation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  V36 SECURITY SPECIFICATION                                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. merged_payload MUST be part of share_info structure                     │
+│     - Included in share serialization                                       │
+│     - Affects share_hash computation                                        │
+│     - Any modification invalidates share                                    │
+│                                                                             │
+│  2. Verification pseudocode:                                                │
+│     ┌───────────────────────────────────────────────────────────────┐       │
+│     │  def verify_share(share):                                      │       │
+│     │      # Existing verification                                   │       │
+│     │      if get_txid(reconstruct_gentx(share)) != share.gentx_hash:│       │
+│     │          raise ValueError("gentx mismatch")                    │       │
+│     │                                                                │       │
+│     │      # share_hash already covers share_info (implicit)         │       │
+│     │      # Since merged_payload is IN share_info, it's protected   │       │
+│     │                                                                │       │
+│     │      # V36-specific: validate merged_payload format            │       │
+│     │      if share.version >= 36:                                   │       │
+│     │          validate_merged_payload(share.share_info.merged_payload)│     │
+│     │          # Derivation mode must match actual address list      │       │
+│     │          verify_derivation_consistency(share)                  │       │
+│     └───────────────────────────────────────────────────────────────┘       │
+│                                                                             │
+│  3. Additional validation for derivation mode:                              │
+│     - DERIVE_ALL: All merged addresses must equal primary pubkey_hash       │
+│     - DERIVE_WITH_OVERRIDE: Overrides must be for valid chain_ids           │
+│     - EXPLICIT: All chain_ids must be unique and valid                      │
+│                                                                             │
+│  4. Migration safety:                                                       │
+│     - V35 nodes ignore merged_payload (don't parse it)                      │
+│     - V36 nodes verify merged_payload for V36 shares                        │
+│     - No retroactive attacks possible (V35 shares have no merged_payload)   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 13.5 Attack Vector Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  V36 SECURITY THREAT MODEL                                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Attack Vector                    Protected By         Status               │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│  Modify Litecoin pubkey_hash      gentx_hash           ✅ SECURE            │
+│  Modify share_data fields         gentx_hash           ✅ SECURE            │
+│  Modify share timestamps          share_info→hash      ✅ SECURE            │
+│  Modify transaction refs          merkle_link          ✅ SECURE            │
+│  Modify merged_payload            share_info→hash      ✅ SECURE (if in info)│
+│  Replay old shares                share_hash unique    ✅ SECURE            │
+│  Create fake shares               PoW requirement      ✅ SECURE            │
+│                                                                             │
+│  REMAINING RISKS:                                                           │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│  Eclipse attacks (isolate node)   Out of scope         ⚠️ P2P layer issue   │
+│  51% attacks on share chain       Inherent to PoW      ⚠️ Fundamental       │
+│  Sybil attacks (fake peers)       Peer limits          ⚠️ Mitigated         │
+│                                                                             │
+│  CONCLUSION: V36 with merged_payload in share_info is cryptographically     │
+│  secure against address modification attacks.                               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 13.6 Implementation Checklist
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  V36 SECURITY IMPLEMENTATION CHECKLIST                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  □ 1. Add merged_payload to share_info structure (data.py)                  │
+│       - Ensure it's included in share_type serialization                    │
+│       - Verify it affects share_hash computation                            │
+│                                                                             │
+│  □ 2. Add merged_payload validation in check() method                       │
+│       - Validate derivation_mode is 0x00, 0x01, or 0x02                     │
+│       - Validate payload length matches mode                                │
+│       - Validate chain_ids are valid for network                            │
+│                                                                             │
+│  □ 3. Add derivation consistency check                                      │
+│       - DERIVE_ALL: verify no addresses differ from primary                 │
+│       - DERIVE_WITH_OVERRIDE: verify overrides are necessary                │
+│       - EXPLICIT: verify all chains present                                 │
+│                                                                             │
+│  □ 4. Add unit tests for security                                           │
+│       - Test: modify merged_payload → share rejected                        │
+│       - Test: invalid derivation_mode → share rejected                      │
+│       - Test: mismatched derivation → share rejected                        │
+│                                                                             │
+│  □ 5. Document attack resistance in code comments                           │
+│       - Explain why merged_payload is in share_info                         │
+│       - Reference this security analysis                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Appendix C: Donation Address Reference
 
 **Script Formats:**
@@ -2632,7 +3026,7 @@ def decode_merged_addresses(payload, supported_chains):
 
 ---
 
-*Document Version: 1.9*
+*Document Version: 1.10*
 *Last Updated: February 2026*
 *Author: P2Pool Merged Mining Team*
 *Changelog:*
@@ -2646,3 +3040,4 @@ def decode_merged_addresses(payload, supported_chains):
 - *v1.7: NEW: Added Part 10 - Share Difficulty Stagnation Problem discovered during V35 compatibility testing. Documented death spiral issue and proposed time-based difficulty decay solution.*
 - *v1.8: NEW: Added Part 11 - MWEB Compatibility Issue. Documented jtoomim ~15-25% hashrate loss due to MWEB parsing failures. Our fix reduces failure rate from 97% to <1%. V35 shares remain compatible across MWEB/non-MWEB nodes.*
 - *v1.9: NEW: Added Part 12 - Share Size Optimization. Derivation mode encoding reduces V36 overhead from +57% to +3% for typical miners. Includes future compression and commitment scheme roadmap.*
+- *v1.10: NEW: Added Part 13 - Security Analysis. Analyzed P2Pool blocks (ZERO MWEB txs included - 100% fee loss). Documented share modification attack vectors and security solutions. Recommended: merged_payload in share_info for cryptographic protection.*
