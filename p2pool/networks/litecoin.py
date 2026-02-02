@@ -39,6 +39,7 @@ BOOTSTRAP_ADDRS = [
         '96.255.61.32',
         '174.56.93.93',
         '178.238.236.130',
+        '194.190.93.235',
 ]
 ANNOUNCE_CHANNEL = '#p2pool-ltc'
 VERSION_CHECK = lambda v: None if 100400 <= v else 'Litecoin version too old. Upgrade to 0.10.4 or newer!'
