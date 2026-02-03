@@ -73,6 +73,9 @@ class DashNetworkBroadcaster(object):
         self.connection_failures = {}  # (host, port) -> last failure time
         self.last_dashd_refresh = 0    # Timestamp of last dashd peer refresh
         
+        # Discovery control - stop when at capacity
+        self.discovery_enabled = True  # Enable/disable peer discovery (getaddr requests)
+        
         # Configuration
         self.max_peers = 20  # Total connections including local dashd
         self.min_peers = 5   # Minimum required for health
@@ -527,10 +530,20 @@ class DashNetworkBroadcaster(object):
         target_addrs = set(addr for _, addr, _ in target_peers)
         current_addrs = set(self.connections.keys())
         
+        # Check if we're at capacity - disable discovery if so
+        if len(current_addrs) >= self.max_peers:
+            if self.discovery_enabled:
+                print 'Broadcaster: At capacity (%d peers) - disabling discovery' % len(current_addrs)
+                self.discovery_enabled = False
+        elif not self.discovery_enabled and len(current_addrs) < self.max_peers:
+            print 'Broadcaster: Below capacity (%d/%d) - enabling discovery' % (len(current_addrs), self.max_peers)
+            self.discovery_enabled = True
+        
         print 'Broadcaster: Peer selection:'
         print '  Database size: %d peers' % len(self.peer_db)
         print '  Current connections: %d' % len(current_addrs)
         print '  Target connections: %d' % len(target_addrs)
+        print '  Discovery enabled: %s' % self.discovery_enabled
         
         # Disconnect from peers not in target list OR that overlap with dashd
         to_disconnect = current_addrs - target_addrs
@@ -747,15 +760,14 @@ class DashNetworkBroadcaster(object):
                     self.peer_db[addr]['last_seen'] = time.time()
                     self.peer_db[addr]['score'] += 10  # Bonus for successful connection
                 
-                # Request peer addresses from this peer (P2P discovery)
-                try:
-                    if hasattr(protocol, 'send_getaddr') and callable(protocol.send_getaddr):
-                        protocol.send_getaddr()
-                        print 'Broadcaster:   -> Sent getaddr request to %s' % _safe_addr_str(addr)
-                    else:
-                        print 'Broadcaster:   -> Skipping getaddr (protocol not ready)'
-                except Exception as e:
-                    print >>sys.stderr, 'Broadcaster: Error sending getaddr to %s: %s' % (_safe_addr_str(addr), e)
+                # Request peer addresses from this peer (P2P discovery) - only if enabled
+                if self.discovery_enabled:
+                    try:
+                        if hasattr(protocol, 'send_getaddr') and callable(protocol.send_getaddr):
+                            protocol.send_getaddr()
+                            print 'Broadcaster:   -> Sent getaddr request to %s' % _safe_addr_str(addr)
+                    except Exception as e:
+                        print >>sys.stderr, 'Broadcaster: Error sending getaddr to %s: %s' % (_safe_addr_str(addr), e)
                 
                 # Hook addr message handler for P2P discovery
                 original_handle_addr = getattr(protocol, 'handle_addr', None)
