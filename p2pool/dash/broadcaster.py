@@ -685,8 +685,9 @@ class DashNetworkBroadcaster(object):
             for addr in to_connect:
                 # Mark as pending before starting
                 self.pending_connections.add(addr)
-                # Start connection (non-blocking)
-                self._connect_peer(addr)
+                # Start connection attempt (don't yield - let it run in background)
+                d = self._connect_peer(addr)
+                d.addErrback(lambda f, a=addr: self._handle_connection_error(a, f))
         
         print 'Broadcaster: Connection status: %d connected (local dashd: %s)' % (
             len(self.connections),
@@ -748,11 +749,14 @@ class DashNetworkBroadcaster(object):
         
         return max(0, score)
     
+    @defer.inlineCallbacks
     def _connect_peer(self, addr):
-        """Establish P2P connection to a Dash network peer with retry tracking
+        """Establish P2P connection to a Dash network peer
+        
+        Uses async/yield pattern to wait for handshake completion.
+        This ensures we only log and track the connection once it's fully established.
         
         Note: Local dashd is already connected via main.py's connect_p2p()
-        Uses non-blocking callbacks with exponential backoff on failure.
         """
         # Don't connect during shutdown
         if self.stopping:
@@ -774,163 +778,16 @@ class DashNetworkBroadcaster(object):
         
         self.stats['connection_stats']['total_attempts'] += 1
         
+        print 'Broadcaster: Connecting to %s...' % _safe_addr_str(addr)
+        
+        factory = dash_p2p.ClientFactory(self.net.PARENT)
+        connector = reactor.connectTCP(host, port, factory, timeout=30)
+        
         try:
-            factory = dash_p2p.ClientFactory(self.net.PARENT)
+            # Wait for handshake with timeout (like Litecoin branch)
+            protocol = yield _with_timeout(factory.getProtocol(), 15)
             
-            # Track connection success/failure
-            connection_start_time = time.time()
-            connection_logged = [False]  # Use list to allow mutation in nested function
-            
-            # Hook to handle connection success
-            original_gotConnection = getattr(factory, 'gotConnection', None)
-            
-            def gotConnection_wrapper(protocol):
-                # Ignore connections during shutdown
-                if self.stopping:
-                    return
-                
-                # Prevent duplicate logging - gotConnection may be called multiple times
-                if connection_logged[0]:
-                    if original_gotConnection:
-                        original_gotConnection(protocol)
-                    return
-                connection_logged[0] = True
-                    
-                connection_time = time.time() - connection_start_time
-                
-                # Log with current attempt count (before reset)
-                current_attempts = self.connection_attempts.get(addr, 1)
-                if current_attempts == 0:
-                    current_attempts = 1  # Handle reconnection case
-                    
-                print 'Broadcaster: CONNECTED to %s (%.3fs, attempt %d/%d)' % (
-                    _safe_addr_str(addr), connection_time, 
-                    current_attempts, self.max_connection_attempts)
-                
-                # Record successful connection (resets backoff)
-                self._record_connection_success(addr)
-                self.stats['connection_stats']['successful_connections'] += 1
-                
-                # Update peer database
-                if addr in self.peer_db:
-                    self.peer_db[addr]['last_seen'] = time.time()
-                    self.peer_db[addr]['score'] += 10  # Bonus for successful connection
-                
-                # Request peer addresses from this peer (P2P discovery) - only if enabled
-                if self.discovery_enabled:
-                    try:
-                        if hasattr(protocol, 'send_getaddr') and callable(protocol.send_getaddr):
-                            protocol.send_getaddr()
-                            print 'Broadcaster:   -> Sent getaddr request to %s' % _safe_addr_str(addr)
-                    except Exception as e:
-                        print >>sys.stderr, 'Broadcaster: Error sending getaddr to %s: %s' % (_safe_addr_str(addr), e)
-                
-                # Hook addr message handler for P2P discovery
-                original_handle_addr = getattr(protocol, 'handle_addr', None)
-                if original_handle_addr:
-                    def handle_addr_wrapper(addrs):
-                        # Convert to our format and pass to handler
-                        addr_list = []
-                        for addr_data in addrs:
-                            addr_list.append({
-                                'host': addr_data['address'].get('address', ''),
-                                'port': addr_data['address'].get('port', self.net.PARENT.P2P_PORT),
-                                'timestamp': addr_data.get('timestamp', time.time())
-                            })
-                        self.handle_addr_message(addr_list)
-                        return original_handle_addr(addrs)
-                    
-                    protocol.handle_addr = handle_addr_wrapper
-                
-                # Hook block message handler to track block propagation
-                original_handle_block = getattr(protocol, 'handle_block', None)
-                if original_handle_block:
-                    def handle_block_wrapper(block):
-                        block_hash = dash_data.hash256(dash_data.block_header_type.pack(block['header']))
-                        self.handle_block_message(addr, block_hash)
-                        return original_handle_block(block)
-                    
-                    protocol.handle_block = handle_block_wrapper
-                
-                # Hook inv message handler to track activity
-                original_handle_inv = getattr(protocol, 'handle_inv', None)
-                if original_handle_inv:
-                    def handle_inv_wrapper(invs):
-                        for inv in invs:
-                            if inv.get('type') == 2:  # MSG_BLOCK
-                                block_hash = inv.get('hash', 0)
-                                self.handle_block_message(addr, block_hash)
-                            elif inv.get('type') == 1:  # MSG_TX
-                                self.handle_tx_message(addr)
-                        return original_handle_inv(invs)
-                    
-                    protocol.handle_inv = handle_inv_wrapper
-                
-                # Hook ping message handler
-                original_handle_ping = getattr(protocol, 'handle_ping', None)
-                if original_handle_ping:
-                    def handle_ping_wrapper(nonce):
-                        self.handle_ping_message(addr)
-                        return original_handle_ping(nonce)
-                    
-                    protocol.handle_ping = handle_ping_wrapper
-                
-                if original_gotConnection:
-                    original_gotConnection(protocol)
-            
-            factory.gotConnection = gotConnection_wrapper
-            
-            # Hook to handle connection failure
-            original_clientConnectionFailed = getattr(factory, 'clientConnectionFailed', None)
-            
-            def clientConnectionFailed_wrapper(connector, reason):
-                connection_time = time.time() - connection_start_time
-                error_msg = str(reason.value)
-                
-                # Track failure type
-                if 'timed out' in error_msg.lower() or 'timeout' in error_msg.lower():
-                    self.stats['connection_stats']['timeouts'] += 1
-                    failure_type = 'TIMEOUT'
-                    should_log = True  # Always log timeouts
-                elif 'refused' in error_msg.lower():
-                    self.stats['connection_stats']['refused'] += 1
-                    failure_type = 'REFUSED'
-                    should_log = (self.stats['connection_stats']['refused'] % 50 == 1)  # Log every 50th
-                elif 'unreachable' in error_msg.lower() or 'no route' in error_msg.lower():
-                    failure_type = 'UNREACHABLE'
-                    should_log = (self.stats['connection_stats']['failed_connections'] % 50 == 1)  # Log every 50th
-                else:
-                    failure_type = 'ERROR'
-                    should_log = True  # Always log other errors
-                
-                self.stats['connection_stats']['failed_connections'] += 1
-                
-                # Record failure with exponential backoff
-                self._record_connection_failure(addr)
-                
-                attempts = self.connection_attempts.get(addr, 1)
-                if should_log:
-                    print >>sys.stderr, 'Broadcaster: CONNECTION %s to %s (%.3fs, attempt %d/%d): %s' % (
-                        failure_type, _safe_addr_str(addr), connection_time,
-                        attempts, self.max_connection_attempts,
-                        error_msg[:100])
-                
-                # Update peer database
-                if addr in self.peer_db:
-                    self.peer_db[addr]['score'] -= 20  # Penalty for failed connection
-                
-                # Remove from connections dict
-                if addr in self.connections:
-                    del self.connections[addr]
-                
-                if original_clientConnectionFailed:
-                    original_clientConnectionFailed(connector, reason)
-            
-            factory.clientConnectionFailed = clientConnectionFailed_wrapper
-            
-            # Initiate connection
-            connector = reactor.connectTCP(host, port, factory, timeout=30)
-            
+            # Connection established - add to connections dict
             self.connections[addr] = {
                 'factory': factory,
                 'connector': connector,
@@ -938,15 +795,121 @@ class DashNetworkBroadcaster(object):
                 'protected': False
             }
             
-            print 'Broadcaster: Initiated connection to %s (timeout=30s)' % _safe_addr_str(addr)
+            # Record successful connection (resets backoff)
+            self._record_connection_success(addr)
+            
+            # Update peer database score
+            if addr in self.peer_db:
+                self.peer_db[addr]['last_seen'] = time.time()
+                self.peer_db[addr]['score'] += 10  # Bonus for successful connection
+            
+            self.stats['connection_stats']['successful_connections'] += 1
+            print 'Broadcaster: Connected to %s' % _safe_addr_str(addr)
+            
+            # Hook P2P messages for discovery and monitoring
+            self._hook_protocol_messages(addr, protocol)
+            
+            # Request peer addresses for P2P discovery (only if discovery is enabled)
+            if self.discovery_enabled:
+                try:
+                    if hasattr(protocol, 'send_getaddr') and callable(protocol.send_getaddr):
+                        protocol.send_getaddr()
+                        print 'Broadcaster:   -> Sent getaddr request to %s' % _safe_addr_str(addr)
+                except Exception as e:
+                    print >>sys.stderr, 'Broadcaster: Error sending getaddr to %s: %s' % (
+                        _safe_addr_str(addr), e)
+            
+            defer.returnValue(True)
             
         except Exception as e:
-            print >>sys.stderr, 'Broadcaster: EXCEPTION connecting to %s: %s' % (_safe_addr_str(addr), e)
             self.stats['connection_stats']['failed_connections'] += 1
+            error_msg = str(e)
+            
+            # Track failure type for stats
+            if 'timeout' in error_msg.lower():
+                self.stats['connection_stats']['timeouts'] += 1
+            elif 'refused' in error_msg.lower():
+                self.stats['connection_stats']['refused'] += 1
+            
+            # Log the failure
+            attempts = self.connection_attempts.get(addr, 0) + 1
+            print >>sys.stderr, 'Broadcaster: Failed to connect to %s (attempt %d/%d): %s' % (
+                _safe_addr_str(addr), attempts, self.max_connection_attempts, error_msg[:100])
+            
+            # Record failure with exponential backoff
             self._record_connection_failure(addr)
-            if addr in self.connections:
-                del self.connections[addr]
+            
+            # Update peer database
+            if addr in self.peer_db:
+                self.peer_db[addr]['score'] -= 20  # Penalty for failed connection
+            
+            try:
+                connector.disconnect()
+            except:
+                pass
+            
+            raise
     
+    def _hook_protocol_messages(self, addr, protocol):
+        """Hook P2P message handlers for peer discovery and monitoring"""
+        # Hook addr message handler for P2P discovery
+        original_handle_addr = getattr(protocol, 'handle_addr', None)
+        if original_handle_addr:
+            broadcaster = self  # Capture reference for closure
+            
+            def handle_addr_wrapper(addrs):
+                # Convert to our format and pass to handler
+                addr_list = []
+                for addr_data in addrs:
+                    addr_list.append({
+                        'host': addr_data['address'].get('address', ''),
+                        'port': addr_data['address'].get('port', broadcaster.net.PARENT.P2P_PORT),
+                        'timestamp': addr_data.get('timestamp', time.time())
+                    })
+                broadcaster.handle_addr_message(addr_list)
+                return original_handle_addr(addrs)
+            
+            protocol.handle_addr = handle_addr_wrapper
+        
+        # Hook block message handler to track block propagation
+        original_handle_block = getattr(protocol, 'handle_block', None)
+        if original_handle_block:
+            broadcaster = self
+            
+            def handle_block_wrapper(block):
+                block_hash = dash_data.hash256(dash_data.block_header_type.pack(block['header']))
+                broadcaster.handle_block_message(addr, block_hash)
+                return original_handle_block(block)
+            
+            protocol.handle_block = handle_block_wrapper
+        
+        # Hook inv message handler to track activity
+        original_handle_inv = getattr(protocol, 'handle_inv', None)
+        if original_handle_inv:
+            broadcaster = self
+            
+            def handle_inv_wrapper(invs):
+                for inv in invs:
+                    if inv.get('type') == 2:  # MSG_BLOCK
+                        block_hash = inv.get('hash', 0)
+                        broadcaster.handle_block_message(addr, block_hash)
+                    elif inv.get('type') == 1:  # MSG_TX
+                        broadcaster.handle_tx_message(addr)
+                return original_handle_inv(invs)
+            
+            protocol.handle_inv = handle_inv_wrapper
+        
+        # Hook ping message handler
+        original_handle_ping = getattr(protocol, 'handle_ping', None)
+        if original_handle_ping:
+            broadcaster = self
+            
+            def handle_ping_wrapper(nonce):
+                broadcaster.handle_ping_message(addr)
+                return original_handle_ping(nonce)
+            
+            protocol.handle_ping = handle_ping_wrapper
+
     def _disconnect_peer(self, addr):
         """Close connection to a peer
         
