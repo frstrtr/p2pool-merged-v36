@@ -779,6 +779,7 @@ class DashNetworkBroadcaster(object):
             
             # Track connection success/failure
             connection_start_time = time.time()
+            connection_logged = [False]  # Use list to allow mutation in nested function
             
             # Hook to handle connection success
             original_gotConnection = getattr(factory, 'gotConnection', None)
@@ -787,6 +788,13 @@ class DashNetworkBroadcaster(object):
                 # Ignore connections during shutdown
                 if self.stopping:
                     return
+                
+                # Prevent duplicate logging - gotConnection may be called multiple times
+                if connection_logged[0]:
+                    if original_gotConnection:
+                        original_gotConnection(protocol)
+                    return
+                connection_logged[0] = True
                     
                 connection_time = time.time() - connection_start_time
                 
