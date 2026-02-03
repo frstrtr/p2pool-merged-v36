@@ -673,7 +673,11 @@ class DashNetworkBroadcaster(object):
             )
             
             # Get peers to connect to (already filtered in scored_peers)
-            to_connect = [addr for score, addr, info in scored_peers if addr not in self.connections and not info.get('protected')][:available_slots]
+            # Also exclude pending connections to prevent duplicate concurrent attempts
+            to_connect = [addr for score, addr, info in scored_peers 
+                         if addr not in self.connections 
+                         and addr not in self.pending_connections
+                         and not info.get('protected')][:available_slots]
             
             if to_connect:
                 print 'Broadcaster: Starting %d new connection attempts (max %d concurrent):' % (len(to_connect), self.max_concurrent_connections)
