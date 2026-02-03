@@ -599,18 +599,22 @@ class NetworkBroadcaster(object):
         
         current_connections = len(self.connections)
         
-        # Check if we're at capacity - disable discovery if so
-        if current_connections >= self.max_peers:
+        # Check if we're at or near capacity - skip expensive peer scoring if so
+        # Use max_peers - 1 because: 1) local coind is protected and always counts as 1
+        # 2) connection churn means we're often at N-1 while trying to connect 1 more
+        # 3) scoring many peers just to connect 1 more is wasteful CPU
+        capacity_threshold = self.max_peers - 1
+        if current_connections >= capacity_threshold:
             if self.discovery_enabled:
-                print('Broadcaster[%s]: At capacity (%d peers) - disabling discovery' % (
-                    self.chain_name, current_connections))
+                print('Broadcaster[%s]: At capacity (%d/%d peers) - disabling discovery' % (
+                    self.chain_name, current_connections, self.max_peers))
                 self.discovery_enabled = False
-            return  # Nothing to do - we're at capacity
+            return  # Nothing to do - we're at/near capacity
         
-        # Re-enable discovery if we dropped below capacity
-        if not self.discovery_enabled and current_connections < self.max_peers:
-            print('Broadcaster[%s]: Below capacity (%d/%d) - enabling discovery' % (
-                self.chain_name, current_connections, self.max_peers))
+        # Re-enable discovery if we dropped below capacity threshold
+        if not self.discovery_enabled and current_connections < capacity_threshold:
+            print('Broadcaster[%s]: Below capacity (%d/%d, threshold %d) - enabling discovery' % (
+                self.chain_name, current_connections, self.max_peers, capacity_threshold))
             self.discovery_enabled = True
         
         # Check how many connections we're already attempting
@@ -632,25 +636,44 @@ class NetworkBroadcaster(object):
         # Use dynamic scoring that considers success rate, recency, and source
         scored_peers = []
         
+        # Skip reason counters for detailed logging
+        skip_ipv6 = 0
+        skip_protected = 0
+        skip_coind_overlap = 0
+        skip_already_connected = 0
+        skip_pending = 0
+        skip_backoff = 0
+        skip_max_attempts = 0
+        
         for addr, info in self.peer_db.items():
             host, port = addr
+            # Skip IPv6 addresses (they often timeout and waste resources)
+            if ':' in host:
+                skip_ipv6 += 1
+                continue
             # Skip protected peers (local coind)
             if info.get('protected'):
+                skip_protected += 1
                 continue
             # Skip already connected
             if addr in self.connections:
+                skip_already_connected += 1
                 continue
             # Skip already pending
             if addr in self.pending_connections:
+                skip_pending += 1
                 continue
             # Skip peers that coind is already connected to (avoid duplication)
             if addr in self.coind_peers:
+                skip_coind_overlap += 1
                 continue
             # Check exponential backoff
             if self._get_backoff_time(addr) > current_time:
+                skip_backoff += 1
                 continue
             # Check max attempt count (give up after too many failures)
             if self.connection_attempts.get(addr, 0) >= self.max_connection_attempts:
+                skip_max_attempts += 1
                 continue
             
             # Calculate dynamic score
@@ -659,6 +682,15 @@ class NetworkBroadcaster(object):
         
         # Sort by score (highest first)
         scored_peers.sort(reverse=True)
+        
+        # Detailed peer selection logging
+        print('Broadcaster[%s]: Peer selection:' % self.chain_name)
+        print('  Database size: %d peers' % len(self.peer_db))
+        print('  Skipped - IPv6: %d, protected: %d, coind overlap: %d, connected: %d, pending: %d, backoff: %d, max attempts: %d' % (
+            skip_ipv6, skip_protected, skip_coind_overlap, skip_already_connected, skip_pending, skip_backoff, skip_max_attempts))
+        print('  Candidates scored: %d' % len(scored_peers))
+        print('  Current connections: %d' % len(self.connections))
+        print('  Discovery enabled: %s' % self.discovery_enabled)
         
         # Attempt connections to top peers (non-blocking)
         attempts_started = 0
