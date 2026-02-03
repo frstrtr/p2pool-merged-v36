@@ -796,6 +796,8 @@ class DashNetworkBroadcaster(object):
             }
             
             # Record successful connection (resets backoff)
+            # Get attempt count before resetting
+            attempts = self.connection_attempts.get(addr, 0) + 1
             self._record_connection_success(addr)
             
             # Update peer database score
@@ -804,7 +806,8 @@ class DashNetworkBroadcaster(object):
                 self.peer_db[addr]['score'] += 10  # Bonus for successful connection
             
             self.stats['connection_stats']['successful_connections'] += 1
-            print 'Broadcaster: Connected to %s' % _safe_addr_str(addr)
+            print 'Broadcaster: Connected to %s (attempt %d/%d)' % (
+                _safe_addr_str(addr), attempts, self.max_connection_attempts)
             
             # Hook P2P messages for discovery and monitoring
             self._hook_protocol_messages(addr, protocol)
