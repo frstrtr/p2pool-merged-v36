@@ -358,7 +358,7 @@ class NetworkBroadcaster(object):
         print('')
         
         # Start connecting to top peers
-        yield self.refresh_connections()
+        self.refresh_connections()
         defer.returnValue(len(self.peer_db))
     
     @defer.inlineCallbacks
@@ -527,12 +527,12 @@ class NetworkBroadcaster(object):
                 print('Broadcaster[%s]: Emergency refresh - only %d active peers' % (
                     self.chain_name, active_peers))
                 yield self._refresh_peers_from_coind()
-                yield self.refresh_connections()
+            self.refresh_connections()
         
         # Scheduled refresh
         elif current_time - self.last_coind_refresh > self.coind_refresh_interval:
             yield self._refresh_peers_from_coind()
-            yield self.refresh_connections()
+            self.refresh_connections()
     
     def _get_backoff_time(self, addr):
         """Get exponential backoff time for a peer"""
@@ -817,7 +817,7 @@ class NetworkBroadcaster(object):
         if len(self.connections) < self.min_peers:
             print('Broadcaster[%s]: Insufficient peers (%d < %d), refreshing...' % (
                 self.chain_name, len(self.connections), self.min_peers))
-            yield self.refresh_connections()
+            self.refresh_connections()
         
         block_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(block['header']))
         
