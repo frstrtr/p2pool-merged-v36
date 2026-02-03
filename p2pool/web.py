@@ -511,7 +511,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root.putChild('connected_miners', WebInterface(get_connected_miners))
     
     # ==== Individual miner stats endpoint ====
-    def get_miner_stats(address):
+    def get_miner_stats(address=None):
         """Get detailed statistics for a specific miner address"""
         if not address:
             return {'error': 'No address provided', 'active': False}
@@ -717,7 +717,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root.putChild('miner_stats', WebInterface(get_miner_stats))
     
     # ==== Individual miner payouts endpoint ====
-    def get_miner_payouts(address):
+    def get_miner_payouts(address=None):
         """Get payout history for a specific miner address"""
         if not address:
             return {'error': 'No address provided'}
