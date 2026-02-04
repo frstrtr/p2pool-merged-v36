@@ -45,6 +45,10 @@ MAX_TARGET = 2**256//2**20 - 1
 PERSIST = True
 WORKER_PORT = 9327
 BOOTSTRAP_ADDRS = [
+        # Local test nodes
+        '192.168.86.30',        # jtoomim test node (local)
+        '192.168.86.29',        # merged test node (local)
+        '192.168.86.31',        # merged test node (local)
         # Active nodes discovered 2025 (protocol 3502)
         'ml.toom.im',           # jtoomim's node - healthy, 1.5% orphan rate
         '31.25.241.224',        # peer from ml.toom.im
