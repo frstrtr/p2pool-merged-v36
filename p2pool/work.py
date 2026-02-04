@@ -205,9 +205,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Track recently found merged mined blocks
         self.recent_merged_blocks = []
         
-        # Guarantee first share goes to secondary donation, then probabilistic
-        # This flag is set when we actually FIND a share (in got_response), not when work is generated
+        # Secondary donation tracking:
+        # - first_secondary_donation_share_found: Until True, ALL work uses secondary donation
+        # - last_secondary_donation_share_time: Tracks when last secondary donation share was found
+        #   Used to ensure at least one secondary share per PPLNS window period
         self.first_secondary_donation_share_found = False
+        self.last_secondary_donation_share_time = 0  # epoch time of last secondary donation share
 
         self.address_throttle = 0
         self.address = None  # Dynamic address, set later if --dynamic-address used
@@ -862,22 +865,35 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Split donation_percentage: half stays as primary donation, half goes to secondary via this mechanism
         # 
         # SECONDARY DONATION LOGIC:
-        # - First share on node startup ALWAYS goes to secondary donation (guarantees visibility)
-        # - After first share: probabilistic approach
-        # - For --give-author 0: Use MARKER_CHANCE (0.012%) to ensure ~1 share per PPLNS window
-        #   This gives ~72,000 litoshis (~0.00072 LTC) per block as blockchain marker
-        #   Primary donation still gets only consensus dust
-        # - For --give-author >0: Split 50/50 between primary and secondary
-        #   Use max(MARKER_CHANCE, donation/2) to ensure marker always appears
+        # 1. Until first share FOUND: ALL work uses secondary donation (guarantees initial visibility)
+        # 2. After first share found: probabilistic approach with safety net
+        # 3. Safety net: If no secondary donation share found for half PPLNS window time,
+        #    force secondary donation to ensure it stays in payouts
+        # 
+        # PPLNS window = 8640 shares. At ~1 share/min = 8640 minutes = 144 hours = 6 days
+        # We use half window (72 hours) as safety threshold
         elif p2pool_data.SECONDARY_DONATION_ENABLED:
             MARKER_CHANCE = 0.012  # ~1 share per 8640 PPLNS window = marker in every block
             secondary_donation_chance = max(MARKER_CHANCE, self.donation_percentage / 2)
+            
+            # Check if we need to force secondary donation (safety net)
+            # Half PPLNS window in seconds: 8640 shares / 2 * ~60 sec/share = ~259200 sec = 72 hours
+            HALF_PPLNS_WINDOW_SECONDS = 259200
+            time_since_last_secondary = time.time() - self.last_secondary_donation_share_time
+            needs_safety_secondary = (self.first_secondary_donation_share_found and 
+                                      time_since_last_secondary > HALF_PPLNS_WINDOW_SECONDS)
+            
             # Until first share is FOUND, ALL work uses secondary donation to guarantee it appears
-            # After first share found, switch to probabilistic
-            use_secondary = not self.first_secondary_donation_share_found or random.uniform(0, 100) < secondary_donation_chance
+            # OR if safety net triggered (too long since last secondary share)
+            # OR probabilistic chance
+            use_secondary = (not self.first_secondary_donation_share_found or 
+                           needs_safety_secondary or 
+                           random.uniform(0, 100) < secondary_donation_chance)
             if use_secondary:
                 if not self.first_secondary_donation_share_found:
                     print '[SECONDARY DONATION] Work assigned to secondary donation (waiting for first share). user=%s' % user
+                elif needs_safety_secondary:
+                    print '[SECONDARY DONATION] Safety net triggered (%.1f hours since last). user=%s' % (time_since_last_secondary/3600, user)
                 # Credit this share to secondary donation address (our project's donation)
                 # Use precomputed constant for performance
                 pubkey_hash = p2pool_data.SECONDARY_DONATION_PUBKEY_HASH
@@ -1941,10 +1957,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 )
                 
                 # Check if this share was assigned to secondary donation
-                # Mark that we've found our first secondary donation share
-                if not self.first_secondary_donation_share_found:
-                    share_pubkey_hash = share.share_data.get('pubkey_hash') if hasattr(share.share_data, 'get') else getattr(share.share_data, 'pubkey_hash', None)
-                    if share_pubkey_hash == p2pool_data.SECONDARY_DONATION_PUBKEY_HASH:
+                # Track both first share and last share time for safety net
+                share_pubkey_hash = share.share_data.get('pubkey_hash') if hasattr(share.share_data, 'get') else getattr(share.share_data, 'pubkey_hash', None)
+                if share_pubkey_hash == p2pool_data.SECONDARY_DONATION_PUBKEY_HASH:
+                    self.last_secondary_donation_share_time = time.time()
+                    if not self.first_secondary_donation_share_found:
                         self.first_secondary_donation_share_found = True
                         print '[SECONDARY DONATION] First share with secondary donation FOUND! hash=%s' % p2pool_data.format_hash(share.hash)
                 
