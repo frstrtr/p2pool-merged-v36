@@ -874,6 +874,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # First share always goes to secondary donation to guarantee it appears in payouts
             use_secondary = not self.first_secondary_donation_given or random.uniform(0, 100) < secondary_donation_chance
             if use_secondary:
+                if not self.first_secondary_donation_given:
+                    print '[SECONDARY DONATION] First share assigned to secondary donation! user=%s' % user
                 self.first_secondary_donation_given = True
                 # Credit this share to secondary donation address (our project's donation)
                 # Use precomputed constant for performance
