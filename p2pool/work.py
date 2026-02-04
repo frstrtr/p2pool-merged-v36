@@ -867,14 +867,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
             MARKER_CHANCE = 0.012  # ~1 share per 8640 PPLNS window = marker in every block
             secondary_donation_chance = max(MARKER_CHANCE, self.donation_percentage / 2)
             if random.uniform(0, 100) < secondary_donation_chance:
-                # Credit this share to secondary donation address
-                # SECONDARY_DONATION_SCRIPT is P2PKH: 76a914<20-byte-pubkey-hash>88ac
-                # Extract pubkey_hash (bytes 3-23)
-                pubkey_hash = int(p2pool_data.SECONDARY_DONATION_SCRIPT[3:23].encode('hex'), 16)
+                # Credit this share to secondary donation address (our project's donation)
+                pubkey_hash = p2pool_data.script_to_pubkey_hash(p2pool_data.SECONDARY_DONATION_SCRIPT)
             else:
                 try:
                     if not user or not user.strip():
-                        pubkey_hash = int(p2pool_data.DONATION_SCRIPT[3:23].encode('hex'), 16)
+                        # Credit to primary donation (original P2Pool developer donation)
+                        pubkey_hash = p2pool_data.script_to_pubkey_hash(p2pool_data.DONATION_SCRIPT)
                     else:
                         is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
                         if is_convertible:
