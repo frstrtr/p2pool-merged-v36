@@ -16,16 +16,16 @@ MIN_TARGET = 0
 # This sets the MINIMUM share difficulty. Vardiff auto-adjusts UP from here.
 #
 # Formula: stratum_diff = (0xffff0000 * 2**192 / target) * 65536
-#   2**256//2**20 = diff 16  -> 5.3 sec/share at 13 GH/s (too fast, floods)
-#   2**256//2**21 = diff 32  -> 10.6 sec/share at 13 GH/s (good balance)
+#   2**256//2**20 = diff 16  -> 5.3 sec/share at 13 GH/s (jtoomim default)
+#   2**256//2**21 = diff 32  -> 10.6 sec/share at 13 GH/s
 #   2**256//2**22 = diff 64  -> 21.1 sec/share at 13 GH/s
 #   2**256//2**24 = diff 256 -> 84.6 sec/share at 13 GH/s (too slow for small pools)
 #
 # If floor is too easy: share flooding -> network can't propagate -> orphans
 # If floor is too hard: small miners wait too long -> vardiff stuck at floor
 #
-# Current: diff 32, optimal for ~10-50 GH/s pools. Larger pools auto-adjust higher.
-MAX_TARGET = 2**256//2**21 - 1
+# NOTE: MUST match jtoomim/p2pool for V35 compatibility!
+MAX_TARGET = 2**256//2**20 - 1
 # PERSIST: Sharechain persistence and peer sync mode
 # ===================================================
 # Controls whether node participates in sharechain sync with network:
