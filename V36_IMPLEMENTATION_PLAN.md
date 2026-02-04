@@ -2182,14 +2182,14 @@ TOTAL: ~1100 bytes per share (+57% increase!)
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  Litecoin P2Pool Mainnet:                                                   │
-│  - Current share rate: ~1 share/30 seconds = 2880 shares/day               │
+│  - Current share rate: ~1 share/30 seconds = 2880 shares/day                │
 │  - V35: 2880 × 700 bytes = 2.0 MB/day                                       │
-│  - V36 naive: 2880 × 1100 bytes = 3.2 MB/day (+1.2 MB)                     │
+│  - V36 naive: 2880 × 1100 bytes = 3.2 MB/day (+1.2 MB)                      │
 │                                                                             │
 │  With target 1 share/10 seconds (higher hashrate):                          │
 │  - 8640 shares/day                                                          │
 │  - V35: 6.0 MB/day                                                          │
-│  - V36 naive: 9.5 MB/day (+3.5 MB)                                         │
+│  - V36 naive: 9.5 MB/day (+3.5 MB)                                          │
 │                                                                             │
 │  Seems small, but consider:                                                 │
 │  - Full share chain sync from 0: 10× more data                              │
@@ -2216,17 +2216,17 @@ TOTAL: ~1100 bytes per share (+57% increase!)
 │                                                                             │
 │  Case A: All addresses derived from primary (90%+ of miners)                │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  derivation_mode: 0x01 (DERIVE_ALL)                              │        │
-│  │  primary_pubkey_hash: 20 bytes                                   │        │
-│  │  TOTAL: 21 bytes                                                 │        │
+│  │  derivation_mode: 0x01 (DERIVE_ALL)                             │        │
+│  │  primary_pubkey_hash: 20 bytes                                  │        │
+│  │  TOTAL: 21 bytes                                                │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  Case B: Different addresses per chain (power users)                        │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  derivation_mode: 0x00 (EXPLICIT)                                │        │
-│  │  address_count: 1 byte                                           │        │
-│  │  addresses: N × (chain_id:1 + pubkey_hash:20)                    │        │
-│  │  TOTAL: 2 + (21 × N) bytes                                       │        │
+│  │  derivation_mode: 0x00 (EXPLICIT)                               │        │
+│  │  address_count: 1 byte                                          │        │
+│  │  addresses: N × (chain_id:1 + pubkey_hash:20)                   │        │
+│  │  TOTAL: 2 + (21 × N) bytes                                      │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  SAVINGS: 400 bytes → 21 bytes for 90% of shares!                           │
@@ -2266,7 +2266,7 @@ else:
 │                                                                             │
 │  Share payload:                                                             │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  merged_address_commitment: SHA256(sorted addresses) = 32 bytes  │        │
+│  │  merged_address_commitment: SHA256(sorted addresses) = 32 bytes │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  Verification:                                                              │
@@ -2298,15 +2298,15 @@ else:
 │                                                                             │
 │  First share from miner:                                                    │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  registration_flag: 0x01                                         │        │
-│  │  miner_id: new unique 4-byte ID                                  │        │
-│  │  full_addresses: all addresses (~400 bytes)                      │        │
+│  │  registration_flag: 0x01                                        │        │
+│  │  miner_id: new unique 4-byte ID                                 │        │
+│  │  full_addresses: all addresses (~400 bytes)                     │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  Subsequent shares:                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  registration_flag: 0x00                                         │        │
-│  │  miner_id: existing 4-byte ID                                    │        │
+│  │  registration_flag: 0x00                                        │        │
+│  │  miner_id: existing 4-byte ID                                   │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  SAVINGS: 400 bytes → 5 bytes (after first share)                           │
@@ -2376,14 +2376,14 @@ else:
 │                                                                             │
 │  SIZE COMPARISON:                                                           │
 │  ┌──────────────────────────────────────────────────────────────────┐       │
-│  │  Scenario                          V35    V36-naive  V36-optimized│       │
+│  │  Scenario                         V35    V36-naive  V36-optimized│       │
 │  ├──────────────────────────────────────────────────────────────────┤       │
-│  │  Single chain (just LTC)           700    721        721 (+3%)    │       │
-│  │  2 chains, same address            700    742        722 (+3%)    │       │
-│  │  4 chains, same address            700    784        722 (+3%)    │       │
-│  │  16 chains, same address           700   1036        722 (+3%)    │       │
-│  │  4 chains, all different           700    784        786 (+12%)   │       │
-│  │  16 chains, all different          700   1036       1038 (+48%)   │       │
+│  │  Single chain (just LTC)          700    721        721 (+3%)    │       │
+│  │  2 chains, same address           700    742        722 (+3%)    │       │
+│  │  4 chains, same address           700    784        722 (+3%)    │       │
+│  │  16 chains, same address          700   1036        722 (+3%)    │       │
+│  │  4 chains, all different          700    784        786 (+12%)   │       │
+│  │  16 chains, all different         700   1036       1038 (+48%)   │       │
 │  └──────────────────────────────────────────────────────────────────┘       │
 │                                                                             │
 │  EXPECTED REAL-WORLD: 90%+ miners use DERIVE_ALL = ~722 bytes (+3%)         │
@@ -2408,10 +2408,10 @@ else:
 │                                                                             │
 │  SIZE WITH LZ4:                                                             │
 │  ┌──────────────────────────────────────────────────────────────────┐       │
-│  │  Scenario                          V36-opt  V36-opt+LZ4           │       │
+│  │  Scenario                          V36-opt  V36-opt+LZ4          │       │
 │  ├──────────────────────────────────────────────────────────────────┤       │
-│  │  Typical share (DERIVE_ALL)        722      ~360 (-50%)           │       │
-│  │  Complex share (16 chains diff)   1038      ~550 (-47%)           │       │
+│  │  Typical share (DERIVE_ALL)        722      ~360 (-50%)          │       │
+│  │  Complex share (16 chains diff)   1038      ~550 (-47%)          │       │
 │  └──────────────────────────────────────────────────────────────────┘       │
 │                                                                             │
 │  NOTE: Compression can be negotiated per-peer at protocol handshake         │
@@ -2601,12 +2601,12 @@ def decode_merged_addresses(payload, supported_chains):
 │                                                                             │
 │  FINAL SIZES:                                                               │
 │  ┌──────────────────────────────────────────────────────────────────┐       │
-│  │  Version    Typical Share    Notes                                │       │
+│  │  Version    Typical Share    Notes                               │       │
 │  ├──────────────────────────────────────────────────────────────────┤       │
-│  │  V35        ~700 bytes       Current baseline                     │       │
-│  │  V36 naive  ~1100 bytes      Without optimization                 │       │
-│  │  V36 opt    ~722 bytes       With derivation mode (90% of shares) │       │
-│  │  V36+LZ4    ~360 bytes       With compression (future)            │       │
+│  │  V35        ~700 bytes       Current baseline                    │       │
+│  │  V36 naive  ~1100 bytes      Without optimization                │       │
+│  │  V36 opt    ~722 bytes       With derivation mode (90% of shares)│       │
+│  │  V36+LZ4    ~360 bytes       With compression (future)           │       │
 │  └──────────────────────────────────────────────────────────────────┘       │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -2650,16 +2650,16 @@ Analysis of recent P2Pool-mined Litecoin blocks reveals how jtoomim's P2Pool han
 │                                                                             │
 │  CONSEQUENCE:                                                               │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  P2Pool miners on jtoomim's code are LOSING ALL MWEB FEES!       │        │
-│  │                                                                  │        │
-│  │  Their "fix" for MWEB parsing failures:                          │        │
-│  │  → Skip MWEB transactions entirely                               │        │
-│  │  → 100% of MWEB fees lost (not just ~25% from retry hashrate)    │        │
-│  │                                                                  │        │
-│  │  Our fix (Part 11):                                              │        │
-│  │  → Try/except around tx_type.unpack()                            │        │
-│  │  → Store raw bytes with _mweb marker                             │        │
-│  │  → MWEB txs included in blocks, fees collected                   │        │
+│  │  P2Pool miners on jtoomim's code are LOSING ALL MWEB FEES!      │        │
+│  │                                                                 │        │
+│  │  Their "fix" for MWEB parsing failures:                         │        │
+│  │  → Skip MWEB transactions entirely                              │        │
+│  │  → 100% of MWEB fees lost (not just ~25% from retry hashrate)   │        │
+│  │                                                                 │        │
+│  │  Our fix (Part 11):                                             │        │
+│  │  → Try/except around tx_type.unpack()                           │        │
+│  │  → Store raw bytes with _mweb marker                            │        │
+│  │  → MWEB txs included in blocks, fees collected                  │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -2698,23 +2698,23 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 │                                                                             │
 │  Share Creation:                                                            │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  share_data.pubkey_hash = miner's address (20 bytes)             │        │
-│  │           ↓                                                      │        │
-│  │  generate_transaction() builds coinbase with payouts             │        │
-│  │           ↓                                                      │        │
-│  │  gentx_hash = SHA256(SHA256(coinbase_tx))                        │        │
-│  │           ↓                                                      │        │
-│  │  hash_link = SHA256 state at coinbase prefix                     │        │
+│  │  share_data.pubkey_hash = miner's address (20 bytes)            │        │
+│  │           ↓                                                     │        │
+│  │  generate_transaction() builds coinbase with payouts            │        │
+│  │           ↓                                                     │        │
+│  │  gentx_hash = SHA256(SHA256(coinbase_tx))                       │        │
+│  │           ↓                                                     │        │
+│  │  hash_link = SHA256 state at coinbase prefix                    │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  Share Verification (data.py:669-670):                                      │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  # Reconstruct coinbase from share_data                          │        │
-│  │  gentx = generate_transaction(share_data, ...)                   │        │
-│  │                                                                  │        │
-│  │  # Verify it matches the committed hash                          │        │
-│  │  if bitcoin_data.get_txid(gentx) != self.gentx_hash:             │        │
-│  │      raise ValueError("gentx doesn't match hash_link")           │        │
+│  │  # Reconstruct coinbase from share_data                         │        │
+│  │  gentx = generate_transaction(share_data, ...)                  │        │
+│  │                                                                 │        │
+│  │  # Verify it matches the committed hash                         │        │
+│  │  if bitcoin_data.get_txid(gentx) != self.gentx_hash:            │        │
+│  │      raise ValueError("gentx doesn't match hash_link")          │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  PROTECTION: pubkey_hash → coinbase outputs → gentx_hash (committed)        │
@@ -2736,13 +2736,13 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 │                                                                             │
 │  Result:                                                                    │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  Receiving node:                                                 │        │
-│  │  - Unpacks share with modified pubkey_hash = 0xDEF...            │        │
-│  │  - Calls generate_transaction(share_data, ...)                   │        │
-│  │  - Builds coinbase paying to 0xDEF... (attacker)                 │        │
-│  │  - Computes gentx_hash of new coinbase                           │        │
-│  │  - Compares to share's claimed gentx_hash                        │        │
-│  │  - MISMATCH! → ValueError → Share REJECTED                       │        │
+│  │  Receiving node:                                                │        │
+│  │  - Unpacks share with modified pubkey_hash = 0xDEF...           │        │
+│  │  - Calls generate_transaction(share_data, ...)                  │        │
+│  │  - Builds coinbase paying to 0xDEF... (attacker)                │        │
+│  │  - Computes gentx_hash of new coinbase                          │        │
+│  │  - Compares to share's claimed gentx_hash                       │        │
+│  │  - MISMATCH! → ValueError → Share REJECTED                      │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  VERDICT: ✅ SECURE - pubkey_hash modification detected                     │
@@ -2759,14 +2759,14 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 │                                                                             │
 │  V36 Share Structure:                                                       │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  share_data:                                                     │        │
-│  │    pubkey_hash: 20 bytes (Litecoin address) ← PROTECTED          │        │
-│  │    ...                                                           │        │
-│  │  share_info:                                                     │        │
-│  │    ...                                                           │        │
-│  │    merged_mining_version: 1 byte                                 │        │
-│  │    derivation_mode: 1 byte                                       │        │
-│  │    merged_payload: variable ← NEW! Is this protected?            │        │
+│  │  share_data:                                                    │        │
+│  │    pubkey_hash: 20 bytes (Litecoin address) ← PROTECTED         │        │
+│  │    ...                                                          │        │
+│  │  share_info:                                                    │        │
+│  │    ...                                                          │        │
+│  │    merged_mining_version: 1 byte                                │        │
+│  │    derivation_mode: 1 byte                                      │        │
+│  │    merged_payload: variable ← NEW! Is this protected?           │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  QUESTION: What commits to merged_payload?                                  │
@@ -2814,19 +2814,19 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 │                                                                             │
 │  How it works:                                                              │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  share_info = {                                                  │        │
-│  │    share_data: {...},                                            │        │
-│  │    far_share_hash: ...,                                          │        │
-│  │    bits: ...,                                                    │        │
-│  │    timestamp: ...,                                               │        │
-│  │    merged_mining_version: 0x01,        ← NEW                     │        │
-│  │    derivation_mode: 0x01,              ← NEW                     │        │
-│  │    merged_payload: pubkey_hash,        ← NEW                     │        │
-│  │  }                                                               │        │
-│  │                                                                  │        │
-│  │  share_hash = SHA256(share_type.pack(share))                     │        │
-│  │                  ↑                                               │        │
-│  │            includes share_info which includes merged_payload     │        │
+│  │  share_info = {                                                 │        │
+│  │    share_data: {...},                                           │        │
+│  │    far_share_hash: ...,                                         │        │
+│  │    bits: ...,                                                   │        │
+│  │    timestamp: ...,                                              │        │
+│  │    merged_mining_version: 0x01,        ← NEW                    │        │
+│  │    derivation_mode: 0x01,              ← NEW                    │        │
+│  │    merged_payload: pubkey_hash,        ← NEW                    │        │
+│  │  }                                                              │        │
+│  │                                                                 │        │
+│  │  share_hash = SHA256(share_type.pack(share))                    │        │
+│  │                  ↑                                              │        │
+│  │            includes share_info which includes merged_payload    │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  Verification:                                                              │
@@ -2849,8 +2849,8 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 │                                                                             │
 │  Add commitment to Litecoin coinbase:                                       │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  vout[N]: OP_RETURN <merged_address_commitment>                  │        │
-│  │           where commitment = SHA256(sorted_merged_addresses)     │        │
+│  │  vout[N]: OP_RETURN <merged_address_commitment>                 │        │
+│  │           where commitment = SHA256(sorted_merged_addresses)    │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  Protection:                                                                │
@@ -2877,12 +2877,12 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 │                                                                             │
 │  Miner signs entire share with their private key:                           │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  share.signature = sign(private_key, SHA256(share_contents))     │        │
-│  │                                                                  │        │
-│  │  Verification:                                                   │        │
-│  │  - Derive public key from pubkey_hash                            │        │
-│  │  - Verify signature over share contents                          │        │
-│  │  - If invalid → REJECT                                           │        │
+│  │  share.signature = sign(private_key, SHA256(share_contents))    │        │
+│  │                                                                 │        │
+│  │  Verification:                                                  │        │
+│  │  - Derive public key from pubkey_hash                           │        │
+│  │  - Verify signature over share contents                         │        │
+│  │  - If invalid → REJECT                                          │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │                                                                             │
 │  Problem:                                                                   │
@@ -2911,21 +2911,21 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 │     - Any modification invalidates share                                    │
 │                                                                             │
 │  2. Verification pseudocode:                                                │
-│     ┌───────────────────────────────────────────────────────────────┐       │
-│     │  def verify_share(share):                                      │       │
-│     │      # Existing verification                                   │       │
-│     │      if get_txid(reconstruct_gentx(share)) != share.gentx_hash:│       │
-│     │          raise ValueError("gentx mismatch")                    │       │
-│     │                                                                │       │
-│     │      # share_hash already covers share_info (implicit)         │       │
-│     │      # Since merged_payload is IN share_info, it's protected   │       │
-│     │                                                                │       │
-│     │      # V36-specific: validate merged_payload format            │       │
-│     │      if share.version >= 36:                                   │       │
-│     │          validate_merged_payload(share.share_info.merged_payload)│     │
-│     │          # Derivation mode must match actual address list      │       │
-│     │          verify_derivation_consistency(share)                  │       │
-│     └───────────────────────────────────────────────────────────────┘       │
+│     ┌─────────────────────────────────────────────────────────────────┐     │
+│     │ def verify_share(share):                                        │     │
+│     │     # Existing verification                                     │     │
+│     │     if get_txid(reconstruct_gentx(share)) != share.gentx_hash:  │     │
+│     │         raise ValueError("gentx mismatch")                      │     │
+│     │                                                                 │     │
+│     │     # share_hash already covers share_info (implicit)           │     │
+│     │     # Since merged_payload is IN share_info, it's protected     │     │
+│     │                                                                 │     │
+│     │     # V36-specific: validate merged_payload format              │     │
+│     │     if share.version >= 36:                                     │     │
+│     │         validate_merged_payload(share.share_info.merged_payload)│     │
+│     │         # Derivation mode must match actual address list        │     │
+│     │         verify_derivation_consistency(share)                    │     │
+│     └─────────────────────────────────────────────────────────────────┘     │
 │                                                                             │
 │  3. Additional validation for derivation mode:                              │
 │     - DERIVE_ALL: All merged addresses must equal primary pubkey_hash       │
@@ -2945,30 +2945,30 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 ## 13.5 Attack Vector Summary
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  V36 SECURITY THREAT MODEL                                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Attack Vector                    Protected By         Status               │
-│  ─────────────────────────────────────────────────────────────────────────  │
-│  Modify Litecoin pubkey_hash      gentx_hash           ✅ SECURE            │
-│  Modify share_data fields         gentx_hash           ✅ SECURE            │
-│  Modify share timestamps          share_info→hash      ✅ SECURE            │
-│  Modify transaction refs          merkle_link          ✅ SECURE            │
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  V36 SECURITY THREAT MODEL                                                   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Attack Vector                    Protected By         Status                │
+│  ──────────────────────────────────────────────────────────────────────────  │
+│  Modify Litecoin pubkey_hash      gentx_hash           ✅ SECURE             │
+│  Modify share_data fields         gentx_hash           ✅ SECURE             │
+│  Modify share timestamps          share_info→hash      ✅ SECURE             │
+│  Modify transaction refs          merkle_link          ✅ SECURE             │
 │  Modify merged_payload            share_info→hash      ✅ SECURE (if in info)│
-│  Replay old shares                share_hash unique    ✅ SECURE            │
-│  Create fake shares               PoW requirement      ✅ SECURE            │
-│                                                                             │
-│  REMAINING RISKS:                                                           │
-│  ─────────────────────────────────────────────────────────────────────────  │
-│  Eclipse attacks (isolate node)   Out of scope         ⚠️ P2P layer issue   │
-│  51% attacks on share chain       Inherent to PoW      ⚠️ Fundamental       │
-│  Sybil attacks (fake peers)       Peer limits          ⚠️ Mitigated         │
-│                                                                             │
-│  CONCLUSION: V36 with merged_payload in share_info is cryptographically     │
-│  secure against address modification attacks.                               │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+│  Replay old shares                share_hash unique    ✅ SECURE             │
+│  Create fake shares               PoW requirement      ✅ SECURE             │
+│                                                                              │
+│  REMAINING RISKS:                                                            │
+│  ──────────────────────────────────────────────────────────────────────────  │
+│  Eclipse attacks (isolate node)   Out of scope         ⚠️ P2P layer issue    │
+│  51% attacks on share chain       Inherent to PoW      ⚠️ Fundamental        │
+│  Sybil attacks (fake peers)       Peer limits          ⚠️ Mitigated          │
+│                                                                              │
+│  CONCLUSION: V36 with merged_payload in share_info is cryptographically      │
+│  secure against address modification attacks.                                │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
