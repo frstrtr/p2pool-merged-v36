@@ -105,39 +105,75 @@ def is_segwit_activated(version, net):
 # Address: LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd (Litecoin mainnet)
 DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac'.decode('hex')
 
+# Precomputed pubkey_hash for DONATION_SCRIPT (performance optimization)
+# This matches the hash160 hack in bitcoin/data.py for the donation pubkey
+# Avoids recalculating hash160 on every share
+DONATION_PUBKEY_HASH = 0x384f570ccc88ac2e7e00b026d1690a3fca63dd0
+
 # SECONDARY_DONATION_SCRIPT: Our project's donation (P2PKH format)
 # This is added as a regular payout BEFORE the original donation, preserving share compatibility
 # P2PKH script: 0x76 0xa9 0x14 <20-byte pubkey_hash> 0x88 0xac
 # Address: LU66WRMeuxt45vwGh9bWopRsBaZ8owBAb6 (Litecoin mainnet)
 SECONDARY_DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'.decode('hex')
 
+# Precomputed pubkey_hash for SECONDARY_DONATION_SCRIPT (performance optimization)
+# Extracted from P2PKH script bytes [3:23], avoids parsing on every share
+SECONDARY_DONATION_PUBKEY_HASH = 0x20cb5c22b1e4d5947e5c112c7696b51ad9af3c61
+
 # Enable/disable secondary donation during transition period
 SECONDARY_DONATION_ENABLED = True
 
 def script_to_pubkey_hash(script):
     """
-    Extract pubkey_hash from a script (supports both P2PK and P2PKH formats).
+    Extract pubkey_hash from a script (supports P2PK, P2PKH, and P2MS formats).
     
     P2PK format: <push_len> <pubkey> OP_CHECKSIG (0xac)
       - Returns hash160(pubkey)
-    P2PKH format: OP_DUP (0x76) OP_HASH160 (0xa9) <push_len> <pubkey_hash> OP_EQUALVERIFY (0x88) OP_CHECKSIG (0xac)
+    P2PKH format: OP_DUP (0x76) OP_HASH160 (0xa9) 0x14 <pubkey_hash> OP_EQUALVERIFY (0x88) OP_CHECKSIG (0xac)
       - Returns pubkey_hash directly
+    P2MS (n-of-m): OP_n <pubkey1> ... <pubkeym> OP_m OP_CHECKMULTISIG (0xae)
+      - Returns hash160 of first pubkey (for share attribution)
     
     Returns: pubkey_hash as integer
     """
+    # Performance optimization: check for known donation scripts first
+    if script == DONATION_SCRIPT:
+        return DONATION_PUBKEY_HASH
+    if script == SECONDARY_DONATION_SCRIPT:
+        return SECONDARY_DONATION_PUBKEY_HASH
+    
+    # P2PKH script: 76 a9 14 <20-byte-hash> 88 ac (25 bytes)
     if len(script) == 25 and script[0] == '\x76' and script[1] == '\xa9' and script[2] == '\x14':
-        # P2PKH script: 76 a9 14 <20-byte-hash> 88 ac
         return int(script[3:23].encode('hex'), 16)
-    elif len(script) == 67 and script[0] == '\x41' and script[-1] == '\xac':
-        # P2PK script with uncompressed pubkey: 41 <65-byte-pubkey> ac
+    
+    # P2PK script with uncompressed pubkey: 41 <65-byte-pubkey> ac (67 bytes)
+    if len(script) == 67 and script[0] == '\x41' and script[-1] == '\xac':
         pubkey = script[1:-1]
         return bitcoin_data.hash160(pubkey)
-    elif len(script) == 35 and script[0] == '\x21' and script[-1] == '\xac':
-        # P2PK script with compressed pubkey: 21 <33-byte-pubkey> ac
+    
+    # P2PK script with compressed pubkey: 21 <33-byte-pubkey> ac (35 bytes)
+    if len(script) == 35 and script[0] == '\x21' and script[-1] == '\xac':
         pubkey = script[1:-1]
         return bitcoin_data.hash160(pubkey)
-    else:
-        raise ValueError('Unsupported script format (length=%d)' % len(script))
+    
+    # P2MS (n-of-m multisig): OP_n <pubkeys...> OP_m OP_CHECKMULTISIG
+    # OP_n = 0x51-0x60 (1-16), OP_m = 0x51-0x60 (1-16), OP_CHECKMULTISIG = 0xae
+    if len(script) >= 4 and script[-1] == '\xae':
+        n_op = ord(script[0])
+        m_op = ord(script[-2])
+        # Valid OP_n and OP_m are 0x51 (OP_1) through 0x60 (OP_16)
+        if 0x51 <= n_op <= 0x60 and 0x51 <= m_op <= 0x60:
+            # Extract first pubkey for hash160
+            # Format: OP_n <push_len> <pubkey1> [<push_len> <pubkey2> ...] OP_m OP_CHECKMULTISIG
+            push_len = ord(script[1])
+            if push_len == 0x41:  # 65-byte uncompressed pubkey
+                pubkey = script[2:2+65]
+                return bitcoin_data.hash160(pubkey)
+            elif push_len == 0x21:  # 33-byte compressed pubkey
+                pubkey = script[2:2+33]
+                return bitcoin_data.hash160(pubkey)
+    
+    raise ValueError('Unsupported script format (length=%d)' % len(script))
 
 def donation_script_to_address(net):
     try:
