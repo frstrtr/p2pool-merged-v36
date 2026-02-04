@@ -931,7 +931,7 @@ class NetworkBroadcaster(object):
             block: Block to send
             
         Returns:
-            True on success, False on failure
+            Deferred that fires with True on success, False on failure
         """
         try:
             factory = conn['factory']
@@ -940,17 +940,17 @@ class NetworkBroadcaster(object):
             if factory.conn.value is None:
                 print('Broadcaster[%s]: Peer %s not connected, skipping' % (
                     self.chain_name, _safe_addr_str(addr)))
-                return False
+                return defer.succeed(False)
             
-            # Send block via P2P
+            # Send block via P2P (synchronous - just queues to write buffer)
             factory.conn.value.send_block(block=block)
             
-            return True
+            return defer.succeed(True)
             
         except Exception as e:
             print('Broadcaster[%s]: Error sending block to %s: %s' % (
                 self.chain_name, _safe_addr_str(addr), e), file=sys.stderr)
-            return False
+            return defer.succeed(False)
     
     def _get_peer_db_path(self):
         """Get path to peer database file"""
