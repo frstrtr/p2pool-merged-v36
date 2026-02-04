@@ -101,17 +101,43 @@ def is_segwit_activated(version, net):
 
 # DONATION_SCRIPT: Original global P2Pool donation (P2PK format)
 # This MUST match global P2Pool exactly for share compatibility (used in gentx_before_refhash)
-# P2PK script: <65-byte uncompressed pubkey> OP_CHECKSIG
+# P2PK script: 0x41 <65-byte uncompressed pubkey> 0xac (OP_CHECKSIG)
+# Address: LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd (Litecoin mainnet)
 DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac'.decode('hex')
 
 # SECONDARY_DONATION_SCRIPT: Our project's donation (P2PKH format)
 # This is added as a regular payout BEFORE the original donation, preserving share compatibility
-# During transition period, both donations receive funds. After migration, old can be phased out.
-# P2PKH script for LTC address (derived from pubkey_hash 20cb5c22b1e4d5947e5c112c7696b51ad9af3c61)
+# P2PKH script: 0x76 0xa9 0x14 <20-byte pubkey_hash> 0x88 0xac
+# Address: LU66WRMeuxt45vwGh9bWopRsBaZ8owBAb6 (Litecoin mainnet)
 SECONDARY_DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'.decode('hex')
 
 # Enable/disable secondary donation during transition period
 SECONDARY_DONATION_ENABLED = True
+
+def script_to_pubkey_hash(script):
+    """
+    Extract pubkey_hash from a script (supports both P2PK and P2PKH formats).
+    
+    P2PK format: <push_len> <pubkey> OP_CHECKSIG (0xac)
+      - Returns hash160(pubkey)
+    P2PKH format: OP_DUP (0x76) OP_HASH160 (0xa9) <push_len> <pubkey_hash> OP_EQUALVERIFY (0x88) OP_CHECKSIG (0xac)
+      - Returns pubkey_hash directly
+    
+    Returns: pubkey_hash as integer
+    """
+    if len(script) == 25 and script[0] == '\x76' and script[1] == '\xa9' and script[2] == '\x14':
+        # P2PKH script: 76 a9 14 <20-byte-hash> 88 ac
+        return int(script[3:23].encode('hex'), 16)
+    elif len(script) == 67 and script[0] == '\x41' and script[-1] == '\xac':
+        # P2PK script with uncompressed pubkey: 41 <65-byte-pubkey> ac
+        pubkey = script[1:-1]
+        return bitcoin_data.hash160(pubkey)
+    elif len(script) == 35 and script[0] == '\x21' and script[-1] == '\xac':
+        # P2PK script with compressed pubkey: 21 <33-byte-pubkey> ac
+        pubkey = script[1:-1]
+        return bitcoin_data.hash160(pubkey)
+    else:
+        raise ValueError('Unsupported script format (length=%d)' % len(script))
 
 def donation_script_to_address(net):
     try:
