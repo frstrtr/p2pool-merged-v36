@@ -922,7 +922,6 @@ class NetworkBroadcaster(object):
         
         defer.returnValue(successes)
     
-    @defer.inlineCallbacks
     def _send_block_to_peer(self, addr, conn, block):
         """Send block to a single peer
         
@@ -932,7 +931,7 @@ class NetworkBroadcaster(object):
             block: Block to send
             
         Returns:
-            Deferred that fires with True on success, False on failure
+            True on success, False on failure
         """
         try:
             factory = conn['factory']
@@ -941,17 +940,17 @@ class NetworkBroadcaster(object):
             if factory.conn.value is None:
                 print('Broadcaster[%s]: Peer %s not connected, skipping' % (
                     self.chain_name, _safe_addr_str(addr)))
-                defer.returnValue(False)
+                return False
             
             # Send block via P2P
             factory.conn.value.send_block(block=block)
             
-            defer.returnValue(True)
+            return True
             
         except Exception as e:
             print('Broadcaster[%s]: Error sending block to %s: %s' % (
                 self.chain_name, _safe_addr_str(addr), e), file=sys.stderr)
-            defer.returnValue(False)
+            return False
     
     def _get_peer_db_path(self):
         """Get path to peer database file"""
