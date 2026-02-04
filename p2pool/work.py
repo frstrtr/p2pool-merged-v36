@@ -206,7 +206,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.recent_merged_blocks = []
         
         # Guarantee first share goes to secondary donation, then probabilistic
-        self.first_secondary_donation_given = False
+        # This flag is set when we actually FIND a share (in got_response), not when work is generated
+        self.first_secondary_donation_share_found = False
 
         self.address_throttle = 0
         self.address = None  # Dynamic address, set later if --dynamic-address used
@@ -871,12 +872,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
         elif p2pool_data.SECONDARY_DONATION_ENABLED:
             MARKER_CHANCE = 0.012  # ~1 share per 8640 PPLNS window = marker in every block
             secondary_donation_chance = max(MARKER_CHANCE, self.donation_percentage / 2)
-            # First share always goes to secondary donation to guarantee it appears in payouts
-            use_secondary = not self.first_secondary_donation_given or random.uniform(0, 100) < secondary_donation_chance
+            # Until first share is FOUND, ALL work uses secondary donation to guarantee it appears
+            # After first share found, switch to probabilistic
+            use_secondary = not self.first_secondary_donation_share_found or random.uniform(0, 100) < secondary_donation_chance
             if use_secondary:
-                if not self.first_secondary_donation_given:
-                    print '[SECONDARY DONATION] First share assigned to secondary donation! user=%s' % user
-                self.first_secondary_donation_given = True
+                if not self.first_secondary_donation_share_found:
+                    print '[SECONDARY DONATION] Work assigned to secondary donation (waiting for first share). user=%s' % user
                 # Credit this share to secondary donation address (our project's donation)
                 # Use precomputed constant for performance
                 pubkey_hash = p2pool_data.SECONDARY_DONATION_PUBKEY_HASH
@@ -1938,6 +1939,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     time.time() - getwork_time,
                     ' DEAD ON ARRIVAL' if not on_time else '',
                 )
+                
+                # Check if this share was assigned to secondary donation
+                # Mark that we've found our first secondary donation share
+                if not self.first_secondary_donation_share_found:
+                    share_pubkey_hash = share.share_data.get('pubkey_hash') if hasattr(share.share_data, 'get') else getattr(share.share_data, 'pubkey_hash', None)
+                    if share_pubkey_hash == p2pool_data.SECONDARY_DONATION_PUBKEY_HASH:
+                        self.first_secondary_donation_share_found = True
+                        print '[SECONDARY DONATION] First share with secondary donation FOUND! hash=%s' % p2pool_data.format_hash(share.hash)
+                
                 self.my_share_hashes.add(share.hash)
                 if not on_time:
                     self.my_doa_share_hashes.add(share.hash)
