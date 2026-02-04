@@ -632,7 +632,93 @@ def script2_to_human(script2, net):
         if script2_test2 == script2:
             return 'Address. Address: %s' % (pubkey_hash_to_address(pubkey_hash, net),)
     
+    # Try P2MS (n-of-m multisig)
+    p2ms_display = p2ms_script_to_addresses(script2, net)
+    if p2ms_display is not None:
+        return 'Multisig. %s' % (p2ms_display,)
+    
     return 'Unknown. Script: %s'  % (script2.encode('hex'),)
+
+def parse_p2ms_script(script):
+    """
+    Parse a P2MS (n-of-m multisig) script and extract all pubkeys.
+    
+    P2MS format: OP_n <pubkey1> <pubkey2> ... <pubkeym> OP_m OP_CHECKMULTISIG
+    - OP_n = 0x51-0x60 (1-16 required signatures)
+    - OP_m = 0x51-0x60 (1-16 total pubkeys)
+    - OP_CHECKMULTISIG = 0xae
+    
+    Returns: (n, m, [pubkey1, pubkey2, ...]) or None if not a valid P2MS script
+    """
+    if len(script) < 4 or script[-1] != '\xae':
+        return None
+    
+    n_op = ord(script[0])
+    m_op = ord(script[-2])
+    
+    # Valid OP_n and OP_m are 0x51 (OP_1) through 0x60 (OP_16)
+    if not (0x51 <= n_op <= 0x60 and 0x51 <= m_op <= 0x60):
+        return None
+    
+    n = n_op - 0x50  # Number of required signatures
+    m = m_op - 0x50  # Number of pubkeys
+    
+    if n > m:
+        return None
+    
+    # Parse pubkeys
+    pubkeys = []
+    pos = 1  # Start after OP_n
+    
+    while pos < len(script) - 2:  # Stop before OP_m and OP_CHECKMULTISIG
+        push_len = ord(script[pos])
+        
+        if push_len == 0x41:  # 65-byte uncompressed pubkey
+            if pos + 66 > len(script) - 2:
+                return None
+            pubkeys.append(script[pos+1:pos+66])
+            pos += 66
+        elif push_len == 0x21:  # 33-byte compressed pubkey
+            if pos + 34 > len(script) - 2:
+                return None
+            pubkeys.append(script[pos+1:pos+34])
+            pos += 34
+        else:
+            # Invalid push length or we've hit OP_m
+            break
+    
+    if len(pubkeys) != m:
+        return None
+    
+    return (n, m, pubkeys)
+
+def p2ms_script_to_addresses(script, net):
+    """
+    Convert a P2MS script to a display-friendly string showing all addresses.
+    
+    Returns: "n-of-m: addr1, addr2, ..." or None if not a valid P2MS script
+    """
+    parsed = parse_p2ms_script(script)
+    if parsed is None:
+        return None
+    
+    n, m, pubkeys = parsed
+    addresses = [pubkey_to_address(pk, net) for pk in pubkeys]
+    return "%d-of-%d: %s" % (n, m, ", ".join(addresses))
+
+def p2ms_script_to_address_list(script, net):
+    """
+    Convert a P2MS script to a list of addresses with metadata.
+    
+    Returns: {'n': int, 'm': int, 'addresses': [addr1, addr2, ...]} or None
+    """
+    parsed = parse_p2ms_script(script)
+    if parsed is None:
+        return None
+    
+    n, m, pubkeys = parsed
+    addresses = [pubkey_to_address(pk, net) for pk in pubkeys]
+    return {'n': n, 'm': m, 'addresses': addresses}
 
 def is_segwit_script(script):
     return script.startswith('\x00\x14') or script.startswith('\xa9\x14')
