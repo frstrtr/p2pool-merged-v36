@@ -26,6 +26,22 @@ MIN_TARGET = 0
 #
 # Current: diff 32, optimal for ~10-50 GH/s pools. Larger pools auto-adjust higher.
 MAX_TARGET = 2**256//2**21 - 1
+# PERSIST: Sharechain persistence and peer sync mode
+# ===================================================
+# Controls whether node participates in sharechain sync with network:
+#
+# True  = Normal operation (RECOMMENDED for production):
+#         - Saves sharechain to disk (shares.0, shares.1, ...)
+#         - Loads sharechain from disk at startup
+#         - Downloads missing parent shares from peers
+#         - Connects to BOOTSTRAP_ADDRS and syncs with network
+#         - Stricter work event tolerance (3 events) for network consistency
+#
+# False = Bootstrap/solo mode (for testing or new network):
+#         - Does NOT save shares to disk (fresh start each time)
+#         - Does NOT require peers - can start its own sharechain
+#         - Higher work event tolerance (30 events) for isolated testing
+#         - Use when: bootstrapping new sharechain, running solo, testing
 PERSIST = True
 WORKER_PORT = 9327
 BOOTSTRAP_ADDRS = [
