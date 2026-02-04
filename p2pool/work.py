@@ -204,6 +204,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         # Track recently found merged mined blocks
         self.recent_merged_blocks = []
+        
+        # Guarantee first share goes to secondary donation, then probabilistic
+        self.first_secondary_donation_given = False
 
         self.address_throttle = 0
         self.address = None  # Dynamic address, set later if --dynamic-address used
@@ -858,6 +861,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Split donation_percentage: half stays as primary donation, half goes to secondary via this mechanism
         # 
         # SECONDARY DONATION LOGIC:
+        # - First share on node startup ALWAYS goes to secondary donation (guarantees visibility)
+        # - After first share: probabilistic approach
         # - For --give-author 0: Use MARKER_CHANCE (0.012%) to ensure ~1 share per PPLNS window
         #   This gives ~72,000 litoshis (~0.00072 LTC) per block as blockchain marker
         #   Primary donation still gets only consensus dust
@@ -866,7 +871,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
         elif p2pool_data.SECONDARY_DONATION_ENABLED:
             MARKER_CHANCE = 0.012  # ~1 share per 8640 PPLNS window = marker in every block
             secondary_donation_chance = max(MARKER_CHANCE, self.donation_percentage / 2)
-            if random.uniform(0, 100) < secondary_donation_chance:
+            # First share always goes to secondary donation to guarantee it appears in payouts
+            use_secondary = not self.first_secondary_donation_given or random.uniform(0, 100) < secondary_donation_chance
+            if use_secondary:
+                self.first_secondary_donation_given = True
                 # Credit this share to secondary donation address (our project's donation)
                 # Use precomputed constant for performance
                 pubkey_hash = p2pool_data.SECONDARY_DONATION_PUBKEY_HASH
