@@ -95,6 +95,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         """
         Get version signaling statistics for V36 upgrade tracking.
         Returns breakdown of share versions and signaling thresholds.
+        
+        Two key metrics:
+        - share_types: Actual share class VERSION (V17=Share, V35=PaddingBugfixShare, V36=MergedMiningShare)
+        - versions (desired_version): What each share is voting FOR (signals next upgrade)
         """
         if node.best_share_var.value is None:
             return None
@@ -120,7 +124,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         if total_weight == 0:
             return None
         
-        # Calculate percentages for each version
+        # Calculate percentages for desired_version (what shares vote FOR)
         version_percentages = {}
         for version, weight in counts.iteritems():
             version_percentages[str(version)] = {
@@ -128,9 +132,51 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'percentage': (weight / total_weight) * 100
             }
         
+        # Count actual share types (the VERSION of the share class itself)
+        # This shows V17 -> V35 -> V36 transition of the actual share format
+        share_type_counts = {}
+        share_type_names = {
+            17: 'Share',
+            32: 'PreSegwitShare',
+            33: 'NewShare',
+            34: 'SegwitMiningShare',
+            35: 'PaddingBugfixShare',
+            36: 'MergedMiningShare'
+        }
+        try:
+            share_hash = node.best_share_var.value
+            count = 0
+            max_count = min(chain_height, node.net.CHAIN_LENGTH)  # Count up to full chain
+            while share_hash is not None and count < max_count:
+                share = node.tracker.items.get(share_hash)
+                if share is None:
+                    break
+                share_version = share.VERSION
+                share_type_counts[share_version] = share_type_counts.get(share_version, 0) + 1
+                share_hash = share.previous_hash
+                count += 1
+        except:
+            pass
+        
+        # Convert to percentages - show ALL versions found, not just known ones
+        total_shares = sum(share_type_counts.values()) if share_type_counts else 0
+        share_types = {}
+        for version, count in sorted(share_type_counts.items()):
+            name = share_type_names.get(version, 'V%d' % version)  # Unknown versions just show "V{num}"
+            share_types[str(version)] = {
+                'name': name,
+                'count': count,
+                'percentage': (count / total_shares * 100) if total_shares > 0 else 0
+            }
+        
         # V36 specific signaling
         v36_weight = counts.get(36, 0)
         v36_percentage = (v36_weight / total_weight) * 100
+        
+        # Current share type being produced
+        current_share = node.tracker.items.get(node.best_share_var.value)
+        current_share_type = current_share.VERSION if current_share else None
+        current_share_name = share_type_names.get(current_share_type, 'V%d' % current_share_type) if current_share_type else 'Unknown'
         
         # Determine status message
         status = 'pre_signaling'
@@ -156,6 +202,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             chain_ready=chain_height >= node.net.CHAIN_LENGTH,
             lookbehind=lookbehind,
             total_weight=total_weight,
+            # Actual share format versions (V17 -> V35 -> V36 transition)
+            share_types=share_types,
+            current_share_type=current_share_type,
+            current_share_name=current_share_name,
+            # Desired version voting (what shares signal FOR)
             versions=version_percentages,
             v36_percentage=v36_percentage,
             v36_active=v36_percentage >= 95,
