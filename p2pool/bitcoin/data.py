@@ -138,10 +138,16 @@ tx_id_type = pack.ComposedType([
 ])
 
 def get_stripped_size(tx):
+    # MWEB transactions stored as raw bytes - return stored size
+    if isinstance(tx, dict) and tx.get('_mweb'):
+        return tx['_raw_size']
     if not 'stripped_size' in tx:
         tx['stripped_size'] = tx_id_type.packed_size(tx)
     return tx['stripped_size']
 def get_size(tx):
+    # MWEB transactions stored as raw bytes - return stored size
+    if isinstance(tx, dict) and tx.get('_mweb'):
+        return tx['_raw_size']
     if not 'size' in tx:
         tx['size'] = tx_id_type.packed_size(tx)
     return tx['size']
@@ -185,6 +191,12 @@ class TransactionType(pack.Type):
             return dict(version=version, tx_ins=tx_ins, tx_outs=next['tx_outs'], lock_time=next['lock_time'])
     
     def write(self, file, item):
+        # Handle MWEB raw transactions stored as dicts with '_mweb': True
+        # These are transactions we couldn't parse (HogEx format) but need to
+        # serialize for P2P propagation. Write the raw bytes directly.
+        if isinstance(item, dict) and item.get('_mweb'):
+            file.write(item['_raw_tx'])
+            return
         if is_segwit_tx(item):
             assert len(item['tx_ins']) == len(item['witness'])
             self._write_type.write(file, item)
@@ -477,6 +489,9 @@ def get_witness_commitment_hash(witness_root_hash, witness_reserved_value):
     return hash256(merkle_record_type.pack(dict(left=witness_root_hash, right=witness_reserved_value)))
 
 def get_wtxid(tx, txid=None, txhash=None):
+    # Handle MWEB raw transactions - wtxid is hash of full raw transaction
+    if isinstance(tx, dict) and tx.get('_mweb'):
+        return hash256(tx['_raw_tx'])
     has_witness = False
     if is_segwit_tx(tx):
         assert len(tx['tx_ins']) == len(tx['witness'])
@@ -487,6 +502,9 @@ def get_wtxid(tx, txid=None, txhash=None):
         return hash256(tx_id_type.pack(tx)) if txid is None else txid
 
 def get_txid(tx):
+    # Handle MWEB raw transactions stored as dict with _raw_tx key
+    if isinstance(tx, dict) and tx.get('_mweb'):
+        return hash256(tx['_raw_tx'])
     return hash256(tx_id_type.pack(tx))
 
 def pubkey_to_script2(pubkey):

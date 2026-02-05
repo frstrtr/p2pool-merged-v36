@@ -99,7 +99,23 @@ def getwork(bitcoind, net, use_getblocktemplate=False, txidcache={}, feecache={}
             knownmisses += 1
             if not packed:
                 packed = x.decode('hex')
-            unpacked = bitcoin_data.tx_type.unpack(packed)
+            try:
+                unpacked = bitcoin_data.tx_type.unpack(packed)
+            except Exception as e:
+                # Transaction parsing failed - likely MWEB (MimbleWimble Extension Block)
+                # transaction on Litecoin. The HogEx transaction (last tx in block template)
+                # has a special format that the standard parser cannot decode.
+                #
+                # MWEB was activated on Litecoin mainnet in May 2022. Since then, every
+                # getblocktemplate response includes a HogEx transaction that integrates
+                # the MWEB sidechain with the main chain. Without this fix, the entire
+                # getwork() function fails, leaving known_txs cache stale and causing
+                # all shares to be rejected with "unknown transaction" errors.
+                #
+                # Store as raw bytes for share propagation.
+                if p2pool.DEBUG:
+                    print >>sys.stderr, '[MWEB] Transaction parsing failed: %s' % str(e)[:50]
+                unpacked = {'_raw_tx': packed, '_raw_size': len(packed), '_mweb': True}
         unpacked_transactions.append(unpacked)
         # The only place where we can get information on transaction fees is in GBT results, so we need to store those
         # for a while so we can spot shares that miscalculate the block reward
