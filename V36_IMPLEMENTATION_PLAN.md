@@ -733,66 +733,113 @@ def calculate_merged_payouts(tracker, best_share_hash, chain_id, total_reward,
     return payouts
 ```
 
-### Phase 4: CLI and Configuration (Week 4-5)
+### Phase 4: CLI and Stratum Configuration (Week 4-5)
 
-#### 4.1 New Command Line Options
+#### 4.1 Address Flow Architecture
+
+There are TWO distinct address types for merged mining:
+
+| Address Type | Source | Purpose | Storage |
+|--------------|--------|---------|---------|
+| **Node Operator Address** | CLI `--merged-operator-doge` | Node fee payout | Local config |
+| **Miner Address** | Stratum username | Miner reward | V36 share chain |
+
+**Miner Address Format (Stratum Username):**
+```
+LTC_ADDRESS,DOGE_ADDRESS.worker_name
+```
+
+Examples:
+- `LfXy...abc,DQnZ...xyz` - LTC and DOGE addresses
+- `LfXy...abc,DQnZ...xyz.rig1` - With worker name
+- `ltc1q...abc,DQnZ...xyz_rig1` - Bech32 LTC with underscore worker
+
+The DOGE address is parsed in `get_user_details()` and stored in the miner's share's `merged_addresses` field.
+
+#### 4.2 Node Operator CLI Options (Fee Address Only)
 
 ```python
 # In p2pool/main.py
 
-parser.add_argument('--merged-address-doge',
-    help='Explicit Dogecoin address for merged mining rewards',
-    type=str, action='store', default=None, dest='merged_address_doge')
+# Node operator's fee address for merged chains (NOT miner addresses!)
+parser.add_argument('--merged-operator-doge',
+    help='Node operator Dogecoin address for worker_fee payment',
+    type=str, action='store', default=None, dest='merged_operator_doge')
 
-parser.add_argument('--merged-address-bells',
-    help='Explicit Bellscoin address for merged mining rewards',
-    type=str, action='store', default=None, dest='merged_address_bells')
-
-# Generic format for future chains
-parser.add_argument('--merged-address',
-    help='Merged chain address in format CHAIN:ADDRESS (e.g., doge:D9xyz...)',
-    type=str, action='append', default=[], dest='merged_addresses')
+# NOTE: Miners specify their own addresses in stratum login!
+# Format: ltc_addr,doge_addr or ltc_addr,doge_addr.worker
 ```
 
-#### 4.2 Share Generation with Merged Addresses
+#### 4.3 Stratum Username Parsing (Already Implemented)
 
 ```python
-# In p2pool/work.py WorkerBridge.get_work()
+# In p2pool/work.py get_user_details() - ALREADY EXISTS
+# Parses miner's merged addresses from stratum username
 
-def build_merged_addresses(self):
+merged_addresses = {}
+if ',' in user:
+    parts = user.split(',', 1)
+    user = parts[0]  # Primary address (Litecoin)
+    if len(parts) > 1:
+        merged_addr = parts[1]
+        # Handle worker name attached to merged address
+        if '.' in merged_addr:
+            merged_addr, worker = merged_addr.split('.', 1)
+        merged_addresses['dogecoin'] = merged_addr
+```
+
+#### 4.4 V36 Share Generation with Miner's Merged Addresses
+
+```python
+# In p2pool/work.py get_work() - NEEDS IMPLEMENTATION
+
+def build_merged_addresses_for_share(self, miner_merged_addresses, share_type):
     """
-    Build merged_addresses list from CLI options and miner requests.
+    Build merged_addresses list for V36 share from miner's stratum login.
+    
+    Args:
+        miner_merged_addresses: dict from get_user_details() e.g. {'dogecoin': 'D9xyz...'}
+        share_type: The share class being generated
+        
+    Returns:
+        List of {'chain_id': int, 'script': bytes} or None for V35-
     """
-    merged_addresses = []
+    if share_type.VERSION < 36:
+        return None  # V35 doesn't have merged_addresses field
+        
+    if not miner_merged_addresses:
+        return []  # Empty = use auto-conversion
     
-    # From CLI options
-    if self.args.merged_address_doge:
-        doge_script = bitcoin_data.address_to_script2(
-            self.args.merged_address_doge, dogecoin_net)
-        merged_addresses.append({
-            'chain_id': 0x62,  # Dogecoin
-            'script': doge_script
-        })
+    result = []
     
-    if self.args.merged_address_bells:
-        bells_script = bitcoin_data.address_to_script2(
-            self.args.merged_address_bells, bellscoin_net)
-        merged_addresses.append({
-            'chain_id': 0x...,  # Bellscoin chain ID
-            'script': bells_script
-        })
+    # Dogecoin
+    if 'dogecoin' in miner_merged_addresses:
+        try:
+            from p2pool.bitcoin.networks import dogecoin
+            doge_addr = miner_merged_addresses['dogecoin']
+            doge_script = bitcoin_data.address_to_script2(doge_addr, dogecoin)
+            result.append({
+                'chain_id': 0x62,  # Dogecoin AuxPoW chain ID
+                'script': doge_script
+            })
+        except Exception as e:
+            print >>sys.stderr, '[WARN] Invalid DOGE address in stratum login: %s' % str(e)
     
-    # From --merged-address format
-    for entry in self.args.merged_addresses:
-        chain, address = entry.split(':', 1)
-        chain_id, net = get_chain_info(chain)
-        script = bitcoin_data.address_to_script2(address, net)
-        merged_addresses.append({
-            'chain_id': chain_id,
-            'script': script
-        })
-    
-    return merged_addresses if merged_addresses else None
+    return result if result else []
+```
+
+#### 4.5 Share Generation Update
+
+```python
+# In p2pool/work.py WorkerBridge.get_work() - share_data_base construction
+
+# For V36+ shares, include merged_addresses from miner's stratum login
+if share_type.VERSION >= 36:
+    merged_addresses_list = self.build_merged_addresses_for_share(
+        merged_addresses,  # from get_user_details()
+        share_type
+    )
+    # merged_addresses will be included in share_info by generate_transaction
 ```
 
 ### Phase 5: Network Protocol (Week 5-6)
