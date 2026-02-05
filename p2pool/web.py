@@ -178,6 +178,21 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         current_share_type = current_share.VERSION if current_share else None
         current_share_name = share_type_names.get(current_share_type, 'V%d' % current_share_type) if current_share_type else 'Unknown'
         
+        # Find the dominant desired version (what most shares are voting for)
+        target_version = None
+        target_percentage = 0
+        for ver, weight in counts.iteritems():
+            pct = (weight / total_weight) * 100 if total_weight > 0 else 0
+            if pct > target_percentage:
+                target_version = ver
+                target_percentage = pct
+        target_version_name = share_type_names.get(target_version, 'V%d' % target_version) if target_version else 'Unknown'
+        
+        # Determine if there's an active transition
+        # Transition is active when current share type differs from what shares are voting for
+        is_transitioning = current_share_type is not None and target_version is not None and current_share_type != target_version
+        show_transition = is_transitioning
+        
         # Determine status message
         status = 'pre_signaling'
         message = 'V36 upgrade in progress'
@@ -187,7 +202,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         elif v36_percentage >= 95:
             status = 'active'
             message = 'V36 ACTIVE - Dual donation scripts in coinbase, MWEB enabled'
-        elif v36_percentage >= 65:
+        elif v36_percentage >= 60:
             status = 'imminent'
             message = 'V36 switchover imminent - 95%% threshold approaching (%.1f%%)' % v36_percentage
         elif v36_percentage > 0:
