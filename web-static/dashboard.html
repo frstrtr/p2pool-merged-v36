@@ -1134,6 +1134,12 @@
                     <span class="signaling-message" id="signaling-message"></span>
                 </div>
                 <div class="signaling-versions" id="signaling-versions"></div>
+                <div class="share-types-section" style="margin-top: 10px;">
+                    <span style="color: #888; font-size: 0.9em;">Current Share Type: </span>
+                    <span id="current-share-type" style="font-weight: bold; color: #4CAF50;">-</span>
+                    <span style="color: #888; font-size: 0.9em; margin-left: 15px;">Share Types in Chain: </span>
+                    <span id="share-types-breakdown" style="color: #fff;"></span>
+                </div>
             </div>
         </div>
         
@@ -1941,7 +1947,7 @@
                     // Update message
                     d3.select('#signaling-message').text(vs.message);
                     
-                    // Update version breakdown
+                    // Update version breakdown (desired_version voting)
                     var versionsDiv = d3.select('#signaling-versions');
                     versionsDiv.selectAll('.version-tag').remove();
                     if (vs.versions) {
@@ -1949,8 +1955,25 @@
                             var verData = vs.versions[ver];
                             versionsDiv.append('span')
                                 .attr('class', 'version-tag' + (ver === '36' ? ' v36' : ''))
-                                .text('v' + ver + ': ' + d3.format('.1f')(verData.percentage) + '%');
+                                .text('Signaling v' + ver + ': ' + d3.format('.1f')(verData.percentage) + '%');
                         }
+                    }
+                    
+                    // Update current share type
+                    if (vs.current_share_name) {
+                        d3.select('#current-share-type').text(vs.current_share_name + ' (V' + vs.current_share_type + ')');
+                    }
+                    
+                    // Update share types breakdown (actual share class versions in chain)
+                    var shareTypesSpan = d3.select('#share-types-breakdown');
+                    shareTypesSpan.text('');
+                    if (vs.share_types) {
+                        var parts = [];
+                        for (var ver in vs.share_types) {
+                            var typeData = vs.share_types[ver];
+                            parts.push(typeData.name + ': ' + typeData.count + ' (' + d3.format('.1f')(typeData.percentage) + '%)');
+                        }
+                        shareTypesSpan.text(parts.join(' | '));
                     }
                 });
                 
