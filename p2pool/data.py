@@ -214,6 +214,13 @@ class BaseShare(object):
     share_type = None
     ref_type = None
 
+    # Donation scripts in coinbase:
+    # Pre-V36: DONATION_SCRIPT only (original P2Pool author - Forrest Voight)
+    # Post-V36 (95%+): BOTH scripts in coinbase:
+    #   - SECONDARY_DONATION_SCRIPT: receives DUST marker only (our project's visibility marker)
+    #   - DONATION_SCRIPT: receives --give-author fee (fair to original author) - LAST in coinbase
+    #   - If --give-author 0: both scripts share DUST
+    #   - DONATION_SCRIPT MUST be LAST (before OP_RETURN) - same gentx_before_refhash for all versions
     gentx_before_refhash = pack.VarStrType().pack(DONATION_SCRIPT) + pack.IntType(64).pack(0) + pack.VarStrType().pack('\x6a\x28' + pack.IntType(256).pack(0) + pack.IntType(64).pack(0))[:3]
 
     gentx_size = 50000 # conservative estimate, will be overwritten during execution
@@ -276,10 +283,11 @@ class BaseShare(object):
         return t
 
     @classmethod
-    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None):
-        # Secondary donation is now handled via "fake miner" mechanism in work.py
-        # The secondary donation address appears in weights dict as a regular miner payout
-        # This means all nodes (old and new) generate identical coinbases
+    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False):
+        # V36 Donation Switch:
+        # - Pre-V36 (<95%): Uses DONATION_SCRIPT (global P2Pool donation)
+        # - Post-V36 (>=95%): Uses SECONDARY_DONATION_SCRIPT (our project's donation)
+        # This switch happens at coinbase generation level for consensus compatibility
         t0 = time.time()
         previous_share = tracker.items[share_data['previous_share_hash']] if share_data['previous_share_hash'] is not None else None
         
@@ -390,8 +398,21 @@ class BaseShare(object):
                     -1, net.PARENT)
         else:
             this_address = share_data['address']
-        donation_address = donation_script_to_address(net)
-        # Secondary donation now appears as a regular miner in weights dict (via "fake miner" in work.py)
+        
+        # V36 Donation System:
+        # =====================
+        # Pre-V36: DONATION_SCRIPT only (global P2Pool - Forrest Voight)
+        # Post-V36: BOTH scripts in coinbase (fair to author + our marker):
+        #   - SECONDARY_DONATION_SCRIPT: receives DUST marker only (our project's visibility)
+        #   - DONATION_SCRIPT: receives --give-author fee (original author) - MUST BE LAST
+        #   - DONATION_SCRIPT MUST be LAST (before OP_RETURN) for gentx_before_refhash compatibility
+        #
+        # Primary donation always goes to original author (DONATION_SCRIPT)
+        primary_donation_address = donation_script_to_address(net)
+        
+        # Secondary donation (marker) goes to our project (SECONDARY_DONATION_SCRIPT)
+        secondary_donation_address = secondary_donation_script_to_address(net)
+        
         # 0.5% goes to block finder
         amounts[this_address] = amounts.get(this_address, 0) \
                                 + share_data['subsidy']//200
@@ -399,12 +420,27 @@ class BaseShare(object):
         # satoshis due to rounding
         total_donation = share_data['subsidy'] - sum(amounts.itervalues())
         
-        # All donation goes to primary donation script (the one in gentx_before_refhash)
-        # Secondary donation is now handled via "fake miner" mechanism in work.py:
-        # - Secondary donation address appears in weights dict as a regular miner
-        # - This is compatible with old nodes - they see it as a normal miner payout
-        # - The split is done probabilistically at share creation time
-        amounts[donation_address] = amounts.get(donation_address, 0) + total_donation
+        if v36_active:
+            # V36 (95%+): BOTH scripts in coinbase
+            # SECONDARY_DONATION_SCRIPT: DUST marker only (our project's visibility marker)
+            # DONATION_SCRIPT: receives --give-author fee (fair to original author)
+            # If --give-author 0: both scripts share DUST
+            marker_amount = net.PARENT.DUST_THRESHOLD  # dust amount as marker
+            
+            if total_donation <= marker_amount:
+                # --give-author 0 or very small: both scripts share the dust
+                # Split evenly between author and marker
+                author_share = total_donation // 2
+                marker_share = total_donation - author_share
+                amounts[secondary_donation_address] = amounts.get(secondary_donation_address, 0) + marker_share
+                amounts[primary_donation_address] = amounts.get(primary_donation_address, 0) + author_share
+            else:
+                # Normal case: author gets donation minus marker, we get DUST marker only
+                amounts[secondary_donation_address] = amounts.get(secondary_donation_address, 0) + marker_amount
+                amounts[primary_donation_address] = amounts.get(primary_donation_address, 0) + (total_donation - marker_amount)
+        else:
+            # Pre-V36: All donation goes to primary (original author)
+            amounts[primary_donation_address] = amounts.get(primary_donation_address, 0) + total_donation
             
         if cls.VERSION < 34 and 'pubkey_hash' not in share_data:
             share_data['pubkey_hash'], _, _ = bitcoin_data.address_to_pubkey_hash(
@@ -415,8 +451,10 @@ class BaseShare(object):
             raise ValueError()
 
         # block length limit, unlikely to ever be hit
-        dests = sorted(amounts.iterkeys(), key=lambda address: (
-            address == donation_address, amounts[address], address))[-4000:]
+        # Exclude donation addresses from dests - they are added separately at the end
+        excluded_dests = {primary_donation_address, secondary_donation_address}
+        dests = sorted([addr for addr in amounts.iterkeys() if addr not in excluded_dests], 
+                       key=lambda address: (amounts[address], address))[-4000:]
         if len(dests) >= 200:
             print "found %i payment dests. Antminer S9s may crash when this is close to 226." % len(dests)
 
@@ -468,15 +506,32 @@ class BaseShare(object):
         if segwit_activated:
             share_info['segwit_data'] = segwit_data
         
-        # Build payouts list - IMPORTANT: DONATION_SCRIPT must be LAST for gentx_before_refhash compatibility
-        # Secondary donation now appears as a regular miner payout in the weights dict
-        # (handled via "fake miner" mechanism in work.py)
+        # Build payouts list - IMPORTANT: donation scripts must be at END for gentx_before_refhash compatibility
+        # Pre-V36: DONATION_SCRIPT only (original author)
+        # V36 (95%+): BOTH scripts - SECONDARY first (marker), DONATION_SCRIPT LAST (author fee)
+        # DONATION_SCRIPT MUST be LAST for gentx_before_refhash (same for all versions)
+        
+        # Exclude both donation addresses from regular payouts
+        # Build payouts from dests (donation addresses already excluded from dests above)
         payouts = [dict(value=amounts[addr],
                         script=bitcoin_data.address_to_script2(addr, net.PARENT)
-                        ) for addr in dests if amounts[addr] and addr != donation_address]
+                        ) for addr in dests if amounts[addr]]
         
-        # Primary donation MUST be last (for gentx_before_refhash compatibility with global p2pool)
-        payouts.append({'script': DONATION_SCRIPT, 'value': amounts[donation_address]})
+        if v36_active:
+            # V36 (95%+): BOTH donation scripts in coinbase
+            # Order: SECONDARY_DONATION_SCRIPT first (marker), DONATION_SCRIPT LAST (author fee)
+            # This order ensures DONATION_SCRIPT is always last for gentx_before_refhash compatibility
+            
+            # 1. Our marker (SECONDARY_DONATION_SCRIPT) - DUST only
+            if amounts.get(secondary_donation_address, 0) > 0:
+                payouts.append({'script': SECONDARY_DONATION_SCRIPT, 'value': amounts[secondary_donation_address]})
+            
+            # 2. Original author (DONATION_SCRIPT) - MUST BE LAST!
+            if amounts.get(primary_donation_address, 0) > 0:
+                payouts.append({'script': DONATION_SCRIPT, 'value': amounts[primary_donation_address]})
+        else:
+            # Pre-V36: Only primary donation script (MUST BE LAST!)
+            payouts.append({'script': DONATION_SCRIPT, 'value': amounts[primary_donation_address]})
         
         # Debug: Uncomment to trace payout structure (confirmed working)
         # import sys
@@ -517,6 +572,10 @@ class BaseShare(object):
         # DEBUG: Verify gentx_before_refhash structure
         packed_gentx = bitcoin_data.tx_id_type.pack(gentx)
         cutoff_prefix = packed_gentx[:-32-8-4]  # Remove ref_hash + nonce + lock_time
+        
+        # DONATION_SCRIPT is always LAST (for both pre-V36 and V36)
+        # So we use the same gentx_before_refhash for all versions
+        
         # Debug: Uncomment to trace gentx validation (confirmed working)
         #print >>sys.stderr, '[GENTX DEBUG] Total packed length: %d bytes' % len(packed_gentx)
         #print >>sys.stderr, '[GENTX DEBUG] Prefix length (after cut): %d bytes' % len(cutoff_prefix)
@@ -526,6 +585,7 @@ class BaseShare(object):
         if not cutoff_prefix.endswith(cls.gentx_before_refhash):
             # Keep ERROR logs - these indicate actual problems
             print >>sys.stderr, '[GENTX ERROR] Prefix does NOT end with gentx_before_refhash!'
+            print >>sys.stderr, '[GENTX ERROR] V36 active: %s' % v36_active
             print >>sys.stderr, '[GENTX ERROR] Expected ending: %s' % cls.gentx_before_refhash.encode('hex')
             print >>sys.stderr, '[GENTX ERROR] Actual ending:   %s' % cutoff_prefix[-len(cls.gentx_before_refhash):].encode('hex')
         #else:

@@ -791,6 +791,40 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.pubkeys.updatestamp(c)
         print " Next address rotation in : %fs" % (time.time()-c+self.args.timeaddresses)
 
+    def is_v36_active(self):
+        """
+        Check if V36 share version is active (95%+ signaling).
+        
+        Returns (v36_active, v36_signaling):
+            v36_active: True if >= 95% of shares signal V36
+            v36_signaling: Float 0.0-1.0 representing V36 signaling ratio
+        """
+        v36_active = False
+        v36_signaling = 0.0
+        
+        if self.node.best_share_var.value is None:
+            return v36_active, v36_signaling
+            
+        try:
+            previous_share = self.node.tracker.items[self.node.best_share_var.value]
+            chain_height = self.node.tracker.get_height(previous_share.hash)
+            
+            if chain_height >= self.node.net.CHAIN_LENGTH:
+                counts = p2pool_data.get_desired_version_counts(
+                    self.node.tracker,
+                    self.node.tracker.get_nth_parent_hash(previous_share.hash, self.node.net.CHAIN_LENGTH*9//10),
+                    self.node.net.CHAIN_LENGTH//10
+                )
+                total_weight = sum(counts.itervalues())
+                if total_weight > 0:
+                    v36_signaling = counts.get(36, 0) / total_weight
+                    v36_active = v36_signaling >= 0.95
+        except Exception as e:
+            if p2pool.DEBUG:
+                print >>sys.stderr, '[V36] Error checking V36 status: %s' % e
+        
+        return v36_active, v36_signaling
+
     def get_user_details(self, username):
         # Debug: Uncomment to trace user details lookup
         #print '[DEBUG] get_user_details called with username:', repr(username)
@@ -860,59 +894,82 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         if random.uniform(0, 100) < self.worker_fee:
             pubkey_hash = self.my_pubkey_hash
-        # Secondary donation: Credit some shares to secondary donation address (like a fake miner)
-        # This is compatible with old nodes - they see it as a regular miner payout
-        # Split donation_percentage: half stays as primary donation, half goes to secondary via this mechanism
+        # Secondary donation logic:
         # 
-        # SECONDARY DONATION LOGIC:
-        # 1. Until first share FOUND: ALL work uses secondary donation (guarantees initial visibility)
-        # 2. After first share found: probabilistic approach with safety net
-        # 3. Safety net: If no secondary donation share found for half PPLNS window time,
-        #    force secondary donation to ensure it stays in payouts
-        # 
+        # PRE-V36 (<95% signaling) - FAKE MINER MECHANISM:
+        #   Split donation: half goes to primary (DONATION_SCRIPT in coinbase),
+        #   half to secondary (via fake miner - shares credited to SECONDARY_DONATION_PUBKEY_HASH)
+        #   First share guarantee ensures secondary donation appears in PPLNS window.
+        #   Safety net re-credits if too long since last secondary share.
+        #
+        # POST-V36 (>=95% signaling) - BOTH SCRIPTS IN COINBASE:
+        #   Fair approach: BOTH donation scripts are in every coinbase:
+        #   - DONATION_SCRIPT receives donation % (original author forrestv - FAIR!)
+        #   - SECONDARY_DONATION_SCRIPT receives dust marker (our project - VISIBILITY!)
+        #   No fake miner needed - normal user address resolution.
+        #
         # PPLNS window = 8640 shares. At ~1 share/min = 8640 minutes = 144 hours = 6 days
-        # We use half window (72 hours) as safety threshold
+        # We use half window (72 hours) as safety threshold for pre-V36
         elif p2pool_data.SECONDARY_DONATION_ENABLED:
-            MARKER_CHANCE = 0.012  # ~1 share per 8640 PPLNS window = marker in every block
-            secondary_donation_chance = max(MARKER_CHANCE, self.donation_percentage / 2)
+            # Check V36 status for donation switch
+            v36_active, v36_signaling = self.is_v36_active()
             
-            # Check if we need to force secondary donation (safety net)
-            # Half PPLNS window in seconds: 8640 shares / 2 * ~60 sec/share = ~259200 sec = 72 hours
-            HALF_PPLNS_WINDOW_SECONDS = 259200
-            time_since_last_secondary = time.time() - self.last_secondary_donation_share_time
-            needs_safety_secondary = (self.first_secondary_donation_share_found and 
-                                      time_since_last_secondary > HALF_PPLNS_WINDOW_SECONDS)
-            
-            # Until first share is FOUND, ALL work uses secondary donation to guarantee it appears
-            # OR if safety net triggered (too long since last secondary share)
-            # OR probabilistic chance
-            use_secondary = (not self.first_secondary_donation_share_found or 
-                           needs_safety_secondary or 
-                           random.uniform(0, 100) < secondary_donation_chance)
-            if use_secondary:
-                if not self.first_secondary_donation_share_found:
-                    print '[SECONDARY DONATION] Work assigned to secondary donation (waiting for first share). user=%s' % user
-                elif needs_safety_secondary:
-                    print '[SECONDARY DONATION] Safety net triggered (%.1f hours since last). user=%s' % (time_since_last_secondary/3600, user)
-                # Credit this share to secondary donation address (our project's donation)
-                # Use precomputed constant for performance
-                pubkey_hash = p2pool_data.SECONDARY_DONATION_PUBKEY_HASH
-            else:
+            if v36_active:
+                # V36 ACTIVE: BOTH scripts in coinbase - no fake miner needed!
+                # Original author gets donation %, our project gets marker.
+                # Just resolve normal user address.
                 try:
                     if not user or not user.strip():
-                        # Credit to primary donation (original P2Pool developer donation)
-                        # Use precomputed constant for performance
-                        pubkey_hash = p2pool_data.DONATION_PUBKEY_HASH
+                        pubkey_hash = self.my_pubkey_hash
                     else:
                         is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
                         if is_convertible:
                             pubkey_hash = validated_pubkey_hash
                         else:
                             print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
-                            print >>sys.stderr, '[WARN] This miner will NOT receive merged mining rewards! Use P2PKH or P2WPKH address.'
                             pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                 except:
                     pubkey_hash = self.my_pubkey_hash
+            else:
+                # PRE-V36: Split donation - half to primary via coinbase, half to secondary via fake miner
+                # Check if we need to force secondary donation (safety net)
+                # Half PPLNS window in seconds: 8640 shares / 2 * ~60 sec/share = ~259200 sec = 72 hours
+                HALF_PPLNS_WINDOW_SECONDS = 259200
+                time_since_last_secondary = time.time() - self.last_secondary_donation_share_time
+                needs_safety_secondary = (self.first_secondary_donation_share_found and 
+                                          time_since_last_secondary > HALF_PPLNS_WINDOW_SECONDS)
+                
+                MARKER_CHANCE = 0.012  # ~1 share per 8640 PPLNS window = marker in every block
+                secondary_donation_chance = max(MARKER_CHANCE, self.donation_percentage / 2)
+                
+                # Until first share is FOUND, ALL work uses secondary donation to guarantee it appears
+                # OR if safety net triggered (too long since last secondary share)
+                # OR probabilistic chance (for ongoing secondary donation)
+                use_secondary = (not self.first_secondary_donation_share_found or 
+                               needs_safety_secondary or 
+                               random.uniform(0, 100) < secondary_donation_chance)
+                
+                if use_secondary:
+                    if not self.first_secondary_donation_share_found:
+                        print '[SECONDARY DONATION] Pre-V36 - Work assigned to secondary donation (waiting for first share). user=%s' % user
+                    elif needs_safety_secondary:
+                        print '[SECONDARY DONATION] Pre-V36 - Safety net triggered (%.1f hours since last). user=%s' % (time_since_last_secondary/3600, user)
+                    # Credit this share to secondary donation address (our project's donation)
+                    pubkey_hash = p2pool_data.SECONDARY_DONATION_PUBKEY_HASH
+                else:
+                    try:
+                        if not user or not user.strip():
+                            # Credit to primary donation (original P2Pool developer donation)
+                            pubkey_hash = p2pool_data.DONATION_PUBKEY_HASH
+                        else:
+                            is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
+                            if is_convertible:
+                                pubkey_hash = validated_pubkey_hash
+                            else:
+                                print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
+                                pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
+                    except:
+                        pubkey_hash = self.my_pubkey_hash
         else:
             # SECONDARY_DONATION_ENABLED=False
             # Standard behavior - no secondary donation
@@ -1093,33 +1150,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # - Pre-V36: Skip MWEB txs (lose fees, but shares are compatible)
         # - Post-V36: Include MWEB txs (full fee capture, all nodes patched)
         
-        # Check V36 signaling status
-        v36_active = False
+        # Check V36 signaling status using helper method
+        v36_active, v36_signaling = self.is_v36_active()
         previous_share = self.node.tracker.items[self.node.best_share_var.value] if self.node.best_share_var.value is not None else None
-        if previous_share is not None:
-            try:
-                chain_height = self.node.tracker.get_height(previous_share.hash)
-                if chain_height >= self.node.net.CHAIN_LENGTH:
-                    counts = p2pool_data.get_desired_version_counts(
-                        self.node.tracker,
-                        self.node.tracker.get_nth_parent_hash(previous_share.hash, self.node.net.CHAIN_LENGTH*9//10),
-                        self.node.net.CHAIN_LENGTH//10
-                    )
-                    total_weight = sum(counts.itervalues())
-                    if total_weight > 0:
-                        v36_signaling = counts.get(36, 0) / total_weight
-                        v36_active = v36_signaling >= 0.95
-            except Exception as e:
-                if p2pool.DEBUG:
-                    print >>sys.stderr, '[MWEB] Error checking V36 status: %s' % e
         
         # Filter transactions based on V36 status
         all_transactions = self.current_work.value['transactions']
         if v36_active:
             # V36 active: Include all transactions including MWEB
             transactions = all_transactions
-            if p2pool.DEBUG and any(tx.get('_mweb') for tx in all_transactions if isinstance(tx, dict)):
-                print >>sys.stderr, '[MWEB] V36 active - including MWEB transactions in block template'
+            mweb_in_template = sum(1 for tx in all_transactions if isinstance(tx, dict) and tx.get('_mweb'))
+            if mweb_in_template > 0:
+                print >>sys.stderr, '[MWEB] V36 ACTIVE (%.1f%%) - Including %d MWEB tx(s) in block template' % (
+                    v36_signaling * 100, mweb_in_template)
         else:
             # Pre-V36: Exclude MWEB transactions for compatibility
             mweb_count = 0
@@ -1179,14 +1222,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
         if True:
             # Build share_data differently based on share version
             # VERSION >= 34 uses 'address' (string), VERSION < 34 uses 'pubkey_hash' (int)
-            # Calculate primary donation percentage
-            # If SECONDARY_DONATION_ENABLED AND donation_percentage > 0: 
-            #   Split donation - half goes to primary via donation field, half to secondary via fake miner
-            # If donation_percentage = 0: No split (primary gets consensus dust only, secondary gets nothing)
-            # If SECONDARY_DONATION_ENABLED = False: Full donation goes to primary
-            primary_donation_pct = self.donation_percentage
-            if p2pool_data.SECONDARY_DONATION_ENABLED and self.donation_percentage > 0:
-                primary_donation_pct = self.donation_percentage / 2  # Half to primary, half to secondary via fake miner
+            # 
+            # DONATION SYSTEM (based on V36 signaling):
+            # ==========================================
+            # Pre-V36 (<95%): Split donation - half to primary (DONATION_SCRIPT in coinbase),
+            #                 half to secondary (via fake miner shares to SECONDARY_DONATION_PUBKEY_HASH)
+            #
+            # Post-V36 (>=95%): BOTH scripts in coinbase - fair to original author + our marker:
+            #                   - DONATION_SCRIPT receives donation % (original author - forrestv)
+            #                   - SECONDARY_DONATION_SCRIPT receives dust marker (our project)
+            #                   No fake miner needed - both scripts always in coinbase!
+            #
+            # The donation field controls total donation %. Distribution between scripts is in data.py
+            coinbase_donation_pct = self.donation_percentage
+            if p2pool_data.SECONDARY_DONATION_ENABLED and self.donation_percentage > 0 and not v36_active:
+                # Pre-V36: Split donation - half to primary via coinbase, half to secondary via fake miner
+                coinbase_donation_pct = self.donation_percentage / 2
             
             share_data_base = dict(
                 previous_share_hash=self.node.best_share_var.value,
@@ -1196,7 +1247,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 ]) + self.current_work.value['coinbaseflags'] + getattr(self.node.net, 'COINBASEEXT', b''))[:100],
                 nonce=random.randrange(2**32),
                 subsidy=self.current_work.value['subsidy'],
-                donation=math.perfect_round(65535*primary_donation_pct/100),
+                donation=math.perfect_round(65535*coinbase_donation_pct/100),
                 stale_info=(lambda (orphans, doas), total, (orphans_recorded_in_chain, doas_recorded_in_chain):
                     'orphan' if orphans > orphans_recorded_in_chain else
                     'doa' if doas > doas_recorded_in_chain else
@@ -1223,6 +1274,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 net=self.node.net,
                 known_txs=tx_map,
                 base_subsidy=self.current_work.value['subsidy'],
+                v36_active=v36_active,  # Pass V36 status for donation script switch
             )
 
         packed_gentx = bitcoin_data.tx_type.pack(gentx)
