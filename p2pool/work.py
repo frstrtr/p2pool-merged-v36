@@ -1083,10 +1083,58 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # If unpatched jtoomim nodes don't have MWEB transactions in their known_txs cache,
         # they will disconnect with "unknown transaction" when receiving our shares. This is
         # unavoidable without patching jtoomim's code - see patches/jtoomim_mweb_fix.patch.
-        tx_hashes = [bitcoin_data.get_txid(tx) for tx in self.current_work.value['transactions']]
-        tx_map = dict(zip(tx_hashes, self.current_work.value['transactions']))
-
+        #
+        # MWEB EXCLUSION FLAG (V36 Migration):
+        # Until V36 shares are active (95% signaling), we EXCLUDE MWEB transactions from
+        # block templates to maintain compatibility with unpatched jtoomim nodes.
+        # Once V36 is active, we include MWEB transactions (all V36 nodes have the patch).
+        #
+        # This allows graceful migration:
+        # - Pre-V36: Skip MWEB txs (lose fees, but shares are compatible)
+        # - Post-V36: Include MWEB txs (full fee capture, all nodes patched)
+        
+        # Check V36 signaling status
+        v36_active = False
         previous_share = self.node.tracker.items[self.node.best_share_var.value] if self.node.best_share_var.value is not None else None
+        if previous_share is not None:
+            try:
+                chain_height = self.node.tracker.get_height(previous_share.hash)
+                if chain_height >= self.node.net.CHAIN_LENGTH:
+                    counts = p2pool_data.get_desired_version_counts(
+                        self.node.tracker,
+                        self.node.tracker.get_nth_parent_hash(previous_share.hash, self.node.net.CHAIN_LENGTH*9//10),
+                        self.node.net.CHAIN_LENGTH//10
+                    )
+                    total_weight = sum(counts.itervalues())
+                    if total_weight > 0:
+                        v36_signaling = counts.get(36, 0) / total_weight
+                        v36_active = v36_signaling >= 0.95
+            except Exception as e:
+                if p2pool.DEBUG:
+                    print >>sys.stderr, '[MWEB] Error checking V36 status: %s' % e
+        
+        # Filter transactions based on V36 status
+        all_transactions = self.current_work.value['transactions']
+        if v36_active:
+            # V36 active: Include all transactions including MWEB
+            transactions = all_transactions
+            if p2pool.DEBUG and any(tx.get('_mweb') for tx in all_transactions if isinstance(tx, dict)):
+                print >>sys.stderr, '[MWEB] V36 active - including MWEB transactions in block template'
+        else:
+            # Pre-V36: Exclude MWEB transactions for compatibility
+            mweb_count = 0
+            transactions = []
+            for tx in all_transactions:
+                if isinstance(tx, dict) and tx.get('_mweb'):
+                    mweb_count += 1
+                else:
+                    transactions.append(tx)
+            if mweb_count > 0:
+                print >>sys.stderr, '[MWEB] Pre-V36 mode: Excluding %d MWEB tx(s) for jtoomim compatibility (V36 signaling: %.1f%%)' % (
+                    mweb_count, v36_signaling * 100 if 'v36_signaling' in dir() else 0)
+        
+        tx_hashes = [bitcoin_data.get_txid(tx) for tx in transactions]
+        tx_map = dict(zip(tx_hashes, transactions))
         if previous_share is None:
             share_type = p2pool_data.Share
         else:
