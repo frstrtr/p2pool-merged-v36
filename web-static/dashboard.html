@@ -202,11 +202,12 @@
             text-transform: uppercase;
         }
         
-        .signaling-badge.pre_signaling { background: var(--text-muted); color: #fff; }
+        .signaling-badge.building_chain { background: #FFC107; color: #000; }
+        .signaling-badge.waiting { background: var(--text-muted); color: #fff; }
         .signaling-badge.signaling { background: var(--primary); color: #fff; }
-        .signaling-badge.imminent { background: var(--warning); color: #000; }
-        .signaling-badge.active { background: var(--success); color: #fff; }
-        .signaling-badge.complete { background: #6f42c1; color: #fff; }
+        .signaling-badge.signaling_strong { background: var(--warning); color: #000; }
+        .signaling-badge.activating { background: var(--success); color: #fff; }
+        .signaling-badge.no_transition { background: #6f42c1; color: #fff; }
         
         .signaling-bar-container {
             position: relative;
@@ -1124,14 +1125,28 @@
                 <span class="signaling-badge" id="signaling-status">-</span>
             </div>
             <div class="signaling-content">
-                <div class="signaling-bar-container">
-                    <div class="signaling-bar" id="signaling-bar" style="width: 0%"></div>
-                    <div class="signaling-threshold" style="left: 60%"><span>60%</span></div>
-                    <div class="signaling-threshold" style="left: 95%"><span>95%</span></div>
+                <!-- Chain maturity bar (shown when chain not ready) -->
+                <div id="chain-maturity-section" style="display: none;">
+                    <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
+                        Chain Maturity: <span id="chain-maturity-text" style="color: #FFC107;">-</span>
+                    </div>
+                    <div class="signaling-bar-container">
+                        <div class="signaling-bar" id="chain-maturity-bar" style="width: 0%; background: linear-gradient(90deg, #FFC107, #FF9800);"></div>
+                    </div>
+                </div>
+                <!-- Signaling bar (sampling window) -->
+                <div id="signaling-bar-section">
+                    <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
+                        Sampling Window Signaling: <span id="sampling-signaling-text" style="color: #4CAF50;">-</span>
+                    </div>
+                    <div class="signaling-bar-container">
+                        <div class="signaling-bar" id="signaling-bar" style="width: 0%"></div>
+                        <div class="signaling-threshold" style="left: 60%"><span>60%</span></div>
+                        <div class="signaling-threshold" style="left: 95%"><span>95%</span></div>
+                    </div>
                 </div>
                 <div class="signaling-stats">
-                    <span id="signaling-percentage">0%</span> signaling for target
-                    <span class="signaling-message" id="signaling-message"></span>
+                    <span class="signaling-message" id="signaling-message" style="font-size: 0.9em;"></span>
                 </div>
                 <div class="signaling-versions" id="signaling-versions"></div>
                 <div class="share-types-section" style="margin-top: 10px;">
@@ -1941,17 +1956,39 @@
                     d3.select('#version-signaling').style('display', 'block');
                     
                     // Update title to show current transition
-                    d3.select('.signaling-title').text('V' + vs.current_share_type + ' → V' + vs.target_version + ' Transition');
-                    
-                    // Update progress bar with target percentage
-                    var pct = Math.min(100, vs.target_percentage);
-                    d3.select('#signaling-bar').style('width', pct + '%');
-                    d3.select('#signaling-percentage').text(d3.format('.1f')(pct) + '%');
+                    d3.select('.signaling-title').text('V' + vs.current_share_type + ' \u2192 V' + vs.target_version + ' Transition');
                     
                     // Update status badge
                     var badge = d3.select('#signaling-status');
-                    badge.text(vs.status.toUpperCase().replace('_', ' '));
+                    var statusLabel = vs.status.toUpperCase().replace(/_/g, ' ');
+                    badge.text(statusLabel);
                     badge.attr('class', 'signaling-badge ' + vs.status);
+                    
+                    // Chain maturity section - show when chain not ready
+                    if (!vs.chain_ready) {
+                        d3.select('#chain-maturity-section').style('display', 'block');
+                        d3.select('#chain-maturity-bar').style('width', vs.chain_maturity + '%');
+                        d3.select('#chain-maturity-text').text(
+                            vs.chain_height + ' / ' + vs.chain_length_required + 
+                            ' (' + d3.format('.1f')(vs.chain_maturity) + '%) — need ' + 
+                            (vs.chain_length_required - vs.chain_height) + ' more shares');
+                    } else {
+                        d3.select('#chain-maturity-section').style('display', 'none');
+                    }
+                    
+                    // Sampling window signaling bar
+                    var sigPct = vs.sampling_signaling;
+                    d3.select('#signaling-bar').style('width', Math.min(100, sigPct) + '%');
+                    if (vs.chain_ready) {
+                        d3.select('#sampling-signaling-text').text(
+                            d3.format('.1f')(sigPct) + '% of sampling window (' + 
+                            vs.sampling_window_size + ' shares) voting for V' + vs.target_version +
+                            ' — need 95% to activate');
+                    } else {
+                        d3.select('#sampling-signaling-text').text(
+                            d3.format('.1f')(vs.target_percentage) + '% overall signaling for V' + vs.target_version +
+                            ' (sampling window activates at ' + vs.chain_length_required + ' shares)');
+                    }
                     
                     // Update message
                     d3.select('#signaling-message').text(vs.message);

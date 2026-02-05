@@ -61,37 +61,64 @@
                     }
                     
                     d3.select('#version-signaling').style('display', 'block');
-                    var pct = vs.target_percentage;
                     
-                    // Universal transition display
-                    var statusText = 'V' + vs.current_share_type + ' → V' + vs.target_version + ': ' + d3.format('.1f')(pct) + '%';
+                    // Title
+                    d3.select('#version-transition-title').text(
+                        'V' + vs.current_share_type + ' → V' + vs.target_version + ' Transition');
                     
-                    // Add status emoji based on thresholds
-                    if (pct >= 100) {
-                        statusText += ' ✅ COMPLETE';
-                    } else if (pct >= 95) {
-                        statusText += ' 🟢 ACTIVE';
-                    } else if (pct >= 60) {
-                        statusText += ' 🟡 IMMINENT';
+                    // Status badge
+                    var statusBadge = d3.select('#version-signaling-status');
+                    var statusLabel = vs.status.toUpperCase().replace(/_/g, ' ');
+                    statusBadge.text(statusLabel);
+                    var badgeColors = {
+                        'building_chain': '#FFC107', 'waiting': '#888',
+                        'signaling': '#6f42c1', 'signaling_strong': '#FF9800',
+                        'activating': '#28a745', 'no_transition': '#6f42c1'
+                    };
+                    statusBadge.style('background', badgeColors[vs.status] || '#888')
+                        .style('color', vs.status === 'building_chain' ? '#000' : '#fff');
+                    
+                    // Chain maturity (when chain not ready)
+                    if (!vs.chain_ready) {
+                        d3.select('#index-chain-maturity').style('display', 'block');
+                        d3.select('#index-chain-bar').style('width', vs.chain_maturity + '%');
+                        d3.select('#index-chain-progress-text').text(
+                            vs.chain_height + ' / ' + vs.chain_length_required + 
+                            ' (' + d3.format('.1f')(vs.chain_maturity) + '%) — need ' +
+                            (vs.chain_length_required - vs.chain_height) + ' more');
                     } else {
-                        statusText += ' 🔵 SIGNALING';
+                        d3.select('#index-chain-maturity').style('display', 'none');
                     }
                     
-                    // Share types breakdown (actual share class versions in chain)
-                    var shareTypesText = '';
+                    // Sampling window bar
+                    var sigPct = vs.sampling_signaling;
+                    d3.select('#version-signaling-bar').style('width', Math.min(100, sigPct) + '%');
+                    if (vs.chain_ready) {
+                        d3.select('#index-sampling-text').text(
+                            d3.format('.1f')(sigPct) + '% of ' + vs.sampling_window_size + 
+                            ' shares voting V' + vs.target_version + ' (need 95%)');
+                    } else {
+                        d3.select('#index-sampling-text').text(
+                            d3.format('.1f')(vs.target_percentage) + '% overall (activates at ' +
+                            vs.chain_length_required + ' shares)');
+                    }
+                    
+                    // Status message
+                    d3.select('#index-status-message').text(vs.message);
+                    
+                    // Current share type
+                    d3.select('#index-current-type').text(
+                        vs.current_share_name + ' (V' + vs.current_share_type + ')');
+                    
+                    // Chain types breakdown
                     if (vs.share_types) {
-                        var typeStrs = [];
+                        var parts = [];
                         for (var ver in vs.share_types) {
-                            var typeData = vs.share_types[ver];
-                            typeStrs.push('V' + ver + ': ' + d3.format('.1f')(typeData.percentage) + '%');
+                            var t = vs.share_types[ver];
+                            parts.push('V' + ver + ': ' + d3.format('.1f')(t.percentage) + '% (' + t.count + ')');
                         }
-                        shareTypesText = ' | Chain: ' + typeStrs.join(', ');
+                        d3.select('#index-chain-types').text(parts.join(' | '));
                     }
-                    
-                    d3.select('#version-signaling-text').text(statusText + shareTypesText);
-                    
-                    // Progress bar width
-                    d3.select('#version-signaling-bar').style('width', Math.min(100, pct) + '%');
                 });
                 
                 var time_to_share = local_stats.attempts_to_share/local;

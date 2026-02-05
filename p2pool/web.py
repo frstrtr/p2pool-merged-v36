@@ -193,30 +193,73 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         is_transitioning = current_share_type is not None and target_version is not None and current_share_type != target_version
         show_transition = is_transitioning
         
-        # Determine status message
-        status = 'pre_signaling'
-        message = 'V36 upgrade in progress'
-        if v36_percentage >= 100:
-            status = 'complete'
-            message = 'V36 upgrade complete - all shares are V36'
-        elif v36_percentage >= 95:
-            status = 'active'
-            message = 'V36 ACTIVE - Dual donation scripts in coinbase, MWEB enabled'
-        elif v36_percentage >= 60:
-            status = 'imminent'
-            message = 'V36 switchover imminent - 95%% threshold approaching (%.1f%%)' % v36_percentage
-        elif v36_percentage > 0:
-            status = 'signaling'
-            message = 'V36 signaling in progress - %.1f%% of shares' % v36_percentage
+        # Calculate ACTUAL transition progress
+        # The upgrade check in work.py uses a specific sampling window:
+        #   - Start: CHAIN_LENGTH*9//10 shares back from tip  
+        #   - Length: CHAIN_LENGTH//10 shares (864 for litecoin)
+        # This window only exists once chain_height >= CHAIN_LENGTH
+        chain_length = node.net.CHAIN_LENGTH
+        chain_maturity = min(chain_height / float(chain_length), 1.0) if chain_length > 0 else 0
+        sampling_window_size = chain_length // 10  # 864
+        
+        # Calculate signaling % in the actual sampling window (same as work.py)
+        sampling_signaling = 0
+        if chain_height >= chain_length:
+            # Chain is mature - sample from the exact same window work.py uses
+            try:
+                sampling_start = node.tracker.get_nth_parent_hash(
+                    node.best_share_var.value, chain_length * 9 // 10)
+                sampling_counts = p2pool_data.get_desired_version_counts(
+                    node.tracker, sampling_start, sampling_window_size)
+                sampling_total = sum(sampling_counts.itervalues())
+                if sampling_total > 0 and target_version is not None:
+                    sampling_signaling = (sampling_counts.get(target_version, 0) / float(sampling_total)) * 100
+            except:
+                sampling_signaling = target_percentage  # fallback
         else:
-            message = 'No V36 signaling detected yet'
+            # Chain not mature yet - version check hasn't activated
+            # Show what we know from the available shares
+            sampling_signaling = target_percentage
+        
+        # Determine precise transition status and message
+        if not is_transitioning:
+            status = 'no_transition'
+            message = 'No version transition in progress'
+            transition_progress = 100
+        elif not chain_height >= chain_length:
+            status = 'building_chain'
+            shares_remaining = chain_length - chain_height
+            message = 'Building chain: %d/%d shares (need %d more before upgrade check activates)' % (
+                chain_height, chain_length, shares_remaining)
+            transition_progress = (chain_height / float(chain_length)) * 100
+        elif sampling_signaling >= 95:
+            status = 'activating'
+            message = 'V%d activation threshold reached! (%.1f%% in sampling window) - switchover imminent' % (
+                target_version, sampling_signaling)
+            transition_progress = 100
+        elif sampling_signaling >= 60:
+            status = 'signaling_strong'
+            message = 'Strong signaling for V%d: %.1f%% in sampling window (need 95%% for activation)' % (
+                target_version, sampling_signaling)
+            transition_progress = sampling_signaling
+        elif sampling_signaling > 0:
+            status = 'signaling'
+            message = 'Signaling for V%d: %.1f%% in sampling window' % (target_version, sampling_signaling)
+            transition_progress = sampling_signaling
+        else:
+            status = 'waiting'
+            message = 'Waiting for V%d signaling in sampling window' % target_version
+            transition_progress = 0
         
         return dict(
             chain_height=chain_height,
-            chain_length_required=node.net.CHAIN_LENGTH,
-            chain_ready=chain_height >= node.net.CHAIN_LENGTH,
+            chain_length_required=chain_length,
+            chain_ready=chain_height >= chain_length,
+            chain_maturity=round(chain_maturity * 100, 2),
             lookbehind=lookbehind,
             total_weight=total_weight,
+            sampling_window_size=sampling_window_size,
+            sampling_signaling=round(sampling_signaling, 2),
             # Actual share format versions (V17 -> V35 -> V36 transition)
             share_types=share_types,
             current_share_type=current_share_type,
@@ -224,19 +267,19 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             # Target version (what most shares are signaling FOR)
             target_version=target_version,
             target_version_name=target_version_name,
-            target_percentage=target_percentage,
+            target_percentage=round(target_percentage, 2),
             # Desired version voting breakdown
             versions=version_percentages,
             # Transition state
             show_transition=show_transition,
             is_transitioning=is_transitioning,
+            transition_progress=round(transition_progress, 2),
             # V36 specific (backward compat)
             v36_percentage=v36_percentage,
             v36_active=v36_percentage >= 95,
             thresholds=dict(
-                warning=60,
-                active=95,
-                complete=100
+                accept=60,
+                activate=95,
             ),
             status=status,
             message=message
