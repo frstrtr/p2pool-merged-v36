@@ -1126,7 +1126,7 @@
             <div class="signaling-content">
                 <div class="signaling-bar-container">
                     <div class="signaling-bar" id="signaling-bar" style="width: 0%"></div>
-                    <div class="signaling-threshold" style="left: 65%"><span>65%</span></div>
+                    <div class="signaling-threshold" style="left: 60%"><span>60%</span></div>
                     <div class="signaling-threshold" style="left: 95%"><span>95%</span></div>
                 </div>
                 <div class="signaling-stats">
@@ -1971,7 +1971,7 @@
                         var parts = [];
                         for (var ver in vs.share_types) {
                             var typeData = vs.share_types[ver];
-                            parts.push(typeData.name + ': ' + typeData.count + ' (' + d3.format('.1f')(typeData.percentage) + '%)');
+                            parts.push('V' + ver + ': ' + d3.format('.1f')(typeData.percentage) + '% (' + typeData.count + ')');
                         }
                         shareTypesSpan.text(parts.join(' | '));
                     }

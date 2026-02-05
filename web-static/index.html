@@ -69,23 +69,34 @@
                         statusText += ' ✅ COMPLETE - All shares V36';
                     } else if (pct >= 95) {
                         statusText += ' 🟢 ACTIVE - Dual donation + MWEB enabled';
-                    } else if (pct >= 65) {
+                    } else if (pct >= 60) {
                         statusText += ' 🟡 IMMINENT - Approaching 95% threshold';
                     } else if (pct > 0) {
                         statusText += ' 🔵 Signaling in progress';
                     }
                     
-                    // Version breakdown
+                    // Version breakdown (desired_version signaling)
                     var versionsText = '';
                     if (vs.versions) {
                         var verStrs = [];
                         for (var ver in vs.versions) {
-                            verStrs.push('v' + ver + ': ' + d3.format('.1f')(vs.versions[ver].percentage) + '%');
+                            verStrs.push('Signaling v' + ver + ': ' + d3.format('.1f')(vs.versions[ver].percentage) + '%');
                         }
                         versionsText = ' | ' + verStrs.join(', ');
                     }
                     
-                    d3.select('#version-signaling-text').text(statusText + versionsText);
+                    // Share types breakdown (actual share class versions in chain)
+                    var shareTypesText = '';
+                    if (vs.share_types) {
+                        var typeStrs = [];
+                        for (var ver in vs.share_types) {
+                            var typeData = vs.share_types[ver];
+                            typeStrs.push('V' + ver + ': ' + d3.format('.1f')(typeData.percentage) + '%');
+                        }
+                        shareTypesText = ' | Chain: ' + typeStrs.join(', ');
+                    }
+                    
+                    d3.select('#version-signaling-text').text(statusText + versionsText + shareTypesText);
                     
                     // Progress bar width
                     d3.select('#version-signaling-bar').style('width', Math.min(100, pct) + '%');

@@ -211,7 +211,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             v36_percentage=v36_percentage,
             v36_active=v36_percentage >= 95,
             thresholds=dict(
-                warning=65,
+                warning=60,
                 active=95,
                 complete=100
             ),
