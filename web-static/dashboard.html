@@ -168,6 +168,109 @@
             font-size: 1.2rem;
         }
         
+        /* Version Signaling */
+        .version-signaling {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(111, 66, 193, 0.3);
+        }
+        
+        .signaling-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        
+        .signaling-icon {
+            font-size: 1.3rem;
+        }
+        
+        .signaling-title {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .signaling-badge {
+            margin-left: auto;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .signaling-badge.pre_signaling { background: var(--text-muted); color: #fff; }
+        .signaling-badge.signaling { background: var(--primary); color: #fff; }
+        .signaling-badge.imminent { background: var(--warning); color: #000; }
+        .signaling-badge.active { background: var(--success); color: #fff; }
+        .signaling-badge.complete { background: #6f42c1; color: #fff; }
+        
+        .signaling-bar-container {
+            position: relative;
+            height: 24px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            overflow: visible;
+            margin-bottom: 10px;
+        }
+        
+        .signaling-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--success) 100%);
+            border-radius: 12px;
+            transition: width 0.5s ease;
+        }
+        
+        .signaling-threshold {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            border-left: 2px dashed rgba(255,255,255,0.5);
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+        
+        .signaling-threshold span {
+            position: absolute;
+            top: -18px;
+            left: -10px;
+        }
+        
+        .signaling-stats {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        
+        .signaling-message {
+            margin-left: 10px;
+            padding: 2px 8px;
+            background: rgba(111, 66, 193, 0.2);
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        
+        .signaling-versions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            font-size: 0.8rem;
+        }
+        
+        .version-tag {
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .version-tag.v36 {
+            background: rgba(111, 66, 193, 0.3);
+            color: #b794f6;
+        }
+        
         /* Stats Grid */
         .stats-grid {
             display: grid;
@@ -1013,6 +1116,27 @@
         <div class="last-update" id="last-update">Last update: loading...</div>
         <div class="warnings" id="warnings"></div>
         
+        <!-- V36 Version Signaling Status -->
+        <div id="version-signaling" class="version-signaling" style="display: none;">
+            <div class="signaling-header">
+                <span class="signaling-icon">🔄</span>
+                <span class="signaling-title">V36 Upgrade Status</span>
+                <span class="signaling-badge" id="signaling-status">-</span>
+            </div>
+            <div class="signaling-content">
+                <div class="signaling-bar-container">
+                    <div class="signaling-bar" id="signaling-bar" style="width: 0%"></div>
+                    <div class="signaling-threshold" style="left: 65%"><span>65%</span></div>
+                    <div class="signaling-threshold" style="left: 95%"><span>95%</span></div>
+                </div>
+                <div class="signaling-stats">
+                    <span id="signaling-percentage">0%</span> V36 shares
+                    <span class="signaling-message" id="signaling-message"></span>
+                </div>
+                <div class="signaling-versions" id="signaling-versions"></div>
+            </div>
+        </div>
+        
         <!-- New Layout: 4 columns grid -->
         <div class="main-layout">
             <!-- First Row: Pool Hash Rate, Local Hash Rate, Shares, Network -->
@@ -1794,6 +1918,41 @@
                     .attr('class', 'warning-item')
                     .text(function(w) { return w; });
                 warnings.exit().remove();
+                
+                // Version Signaling Status
+                d3.json('../version_signaling', function(vs) {
+                    if (!vs) {
+                        d3.select('#version-signaling').style('display', 'none');
+                        return;
+                    }
+                    
+                    d3.select('#version-signaling').style('display', 'block');
+                    
+                    // Update progress bar
+                    var pct = Math.min(100, vs.v36_percentage);
+                    d3.select('#signaling-bar').style('width', pct + '%');
+                    d3.select('#signaling-percentage').text(d3.format('.1f')(pct) + '%');
+                    
+                    // Update status badge
+                    var badge = d3.select('#signaling-status');
+                    badge.text(vs.status.replace('_', ' '));
+                    badge.attr('class', 'signaling-badge ' + vs.status);
+                    
+                    // Update message
+                    d3.select('#signaling-message').text(vs.message);
+                    
+                    // Update version breakdown
+                    var versionsDiv = d3.select('#signaling-versions');
+                    versionsDiv.selectAll('.version-tag').remove();
+                    if (vs.versions) {
+                        for (var ver in vs.versions) {
+                            var verData = vs.versions[ver];
+                            versionsDiv.append('span')
+                                .attr('class', 'version-tag' + (ver === '36' ? ' v36' : ''))
+                                .text('v' + ver + ': ' + d3.format('.1f')(verData.percentage) + '%');
+                        }
+                    }
+                });
                 
                 var time_to_share = local_stats.attempts_to_share / local;
                 d3.select('#time_to_share').text(isFinite(time_to_share) ? format_dt(time_to_share) : '∞');

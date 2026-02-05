@@ -53,6 +53,44 @@
                     .text(function(w){ return 'Warning: ' + w })
                     .attr('style', 'color:red;border:1px solid red;padding:5px');
                 
+                // Version Signaling Status
+                d3.json('../version_signaling', function(vs) {
+                    if (!vs) {
+                        d3.select('#version-signaling').style('display', 'none');
+                        return;
+                    }
+                    
+                    d3.select('#version-signaling').style('display', 'block');
+                    var pct = vs.v36_percentage;
+                    var statusText = 'V36: ' + d3.format('.1f')(pct) + '%';
+                    
+                    // Add status message based on thresholds
+                    if (pct >= 100) {
+                        statusText += ' ✅ COMPLETE - All shares V36';
+                    } else if (pct >= 95) {
+                        statusText += ' 🟢 ACTIVE - Dual donation + MWEB enabled';
+                    } else if (pct >= 65) {
+                        statusText += ' 🟡 IMMINENT - Approaching 95% threshold';
+                    } else if (pct > 0) {
+                        statusText += ' 🔵 Signaling in progress';
+                    }
+                    
+                    // Version breakdown
+                    var versionsText = '';
+                    if (vs.versions) {
+                        var verStrs = [];
+                        for (var ver in vs.versions) {
+                            verStrs.push('v' + ver + ': ' + d3.format('.1f')(vs.versions[ver].percentage) + '%');
+                        }
+                        versionsText = ' | ' + verStrs.join(', ');
+                    }
+                    
+                    d3.select('#version-signaling-text').text(statusText + versionsText);
+                    
+                    // Progress bar width
+                    d3.select('#version-signaling-bar').style('width', Math.min(100, pct) + '%');
+                });
+                
                 var time_to_share = local_stats.attempts_to_share/local;
                 d3.select('#time_to_share').text(local > 0 ? format_dt(time_to_share) : 'Infinity years');
                 
@@ -330,6 +368,18 @@
         <p id="merged_info" style="display:none; color:#6f42c1; font-weight:bold;">Merged mining block value: <span id="merged_block_value"></span> <span id="merged_symbol"></span>. Expected merged payout (24h): <span id="expected_merged_payout"></span> <span id="merged_symbol2"></span></p>
         <p>Current block value: <span id="block_value"></span> <span class="symbol"></span>. Expected time to block: <span id="time_to_block"></span></p>
         <div id="warnings"></div>
+        
+        <!-- Version Signaling Status -->
+        <div id="version-signaling" style="display:none; background:#f0e6ff; border:2px solid #6f42c1; border-radius:5px; padding:10px; margin:10px 0;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:1.2em;">🔄</span>
+                <strong>V36 Upgrade Status:</strong>
+                <span id="version-signaling-text">Loading...</span>
+            </div>
+            <div style="background:#ddd; height:12px; border-radius:6px; margin-top:8px; overflow:hidden;">
+                <div id="version-signaling-bar" style="height:100%; background:linear-gradient(90deg, #6f42c1, #28a745); width:0%; transition:width 0.5s;"></div>
+            </div>
+        </div>
         
         <h2>Share explorer</h2>
         <p>Best share: <span id="best_share"></span></p>

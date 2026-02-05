@@ -91,6 +91,83 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             if bitcoin_data.script2_to_address(script, node.net.PARENT) is not None
         ))
     
+    def get_version_signaling():
+        """
+        Get version signaling statistics for V36 upgrade tracking.
+        Returns breakdown of share versions and signaling thresholds.
+        """
+        if node.best_share_var.value is None:
+            return None
+        
+        chain_height = node.tracker.get_height(node.best_share_var.value)
+        if chain_height < 10:
+            return None
+        
+        # Use full chain length for signaling calculation (like is_v36_active)
+        lookbehind = min(chain_height, node.net.CHAIN_LENGTH // 10)
+        
+        try:
+            previous_share = node.tracker.items[node.best_share_var.value]
+            counts = p2pool_data.get_desired_version_counts(
+                node.tracker,
+                node.tracker.get_nth_parent_hash(previous_share.hash, node.net.CHAIN_LENGTH * 9 // 10) if chain_height >= node.net.CHAIN_LENGTH else node.best_share_var.value,
+                lookbehind
+            )
+        except:
+            counts = {}
+        
+        total_weight = sum(counts.itervalues())
+        if total_weight == 0:
+            return None
+        
+        # Calculate percentages for each version
+        version_percentages = {}
+        for version, weight in counts.iteritems():
+            version_percentages[str(version)] = {
+                'weight': weight,
+                'percentage': (weight / total_weight) * 100
+            }
+        
+        # V36 specific signaling
+        v36_weight = counts.get(36, 0)
+        v36_percentage = (v36_weight / total_weight) * 100
+        
+        # Determine status message
+        status = 'pre_signaling'
+        message = 'V36 upgrade in progress'
+        if v36_percentage >= 100:
+            status = 'complete'
+            message = 'V36 upgrade complete - all shares are V36'
+        elif v36_percentage >= 95:
+            status = 'active'
+            message = 'V36 ACTIVE - Dual donation scripts in coinbase, MWEB enabled'
+        elif v36_percentage >= 65:
+            status = 'imminent'
+            message = 'V36 switchover imminent - 95%% threshold approaching (%.1f%%)' % v36_percentage
+        elif v36_percentage > 0:
+            status = 'signaling'
+            message = 'V36 signaling in progress - %.1f%% of shares' % v36_percentage
+        else:
+            message = 'No V36 signaling detected yet'
+        
+        return dict(
+            chain_height=chain_height,
+            chain_length_required=node.net.CHAIN_LENGTH,
+            chain_ready=chain_height >= node.net.CHAIN_LENGTH,
+            lookbehind=lookbehind,
+            total_weight=total_weight,
+            versions=version_percentages,
+            v36_percentage=v36_percentage,
+            v36_active=v36_percentage >= 95,
+            thresholds=dict(
+                warning=65,
+                active=95,
+                complete=100
+            ),
+            status=status,
+            message=message
+        )
+    
     def get_global_stats():
         # averaged over last hour
         if node.tracker.get_height(node.best_share_var.value) < 10:
@@ -386,6 +463,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root.putChild('patron_sendmany', WebInterface(get_patron_sendmany, 'text/plain'))
     web_root.putChild('global_stats', WebInterface(get_global_stats))
     web_root.putChild('local_stats', WebInterface(get_local_stats))
+    web_root.putChild('version_signaling', WebInterface(get_version_signaling))
     web_root.putChild('peer_addresses', WebInterface(lambda: ' '.join('%s%s' % (peer.transport.getPeer().host, ':'+str(peer.transport.getPeer().port) if peer.transport.getPeer().port != node.net.P2P_PORT else '') for peer in node.p2p_node.peers.itervalues())))
     web_root.putChild('peer_txpool_sizes', WebInterface(lambda: dict(('%s:%i' % (peer.transport.getPeer().host, peer.transport.getPeer().port), peer.remembered_txs_size) for peer in node.p2p_node.peers.itervalues())))
     web_root.putChild('pings', WebInterface(defer.inlineCallbacks(lambda: defer.returnValue(
