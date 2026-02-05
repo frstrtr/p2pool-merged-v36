@@ -268,7 +268,7 @@
             background: rgba(255,255,255,0.1);
         }
         
-        .version-tag.v36 {
+        .version-tag.target {
             background: rgba(111, 66, 193, 0.3);
             color: #b794f6;
         }
@@ -1118,7 +1118,7 @@
         <div class="last-update" id="last-update">Last update: loading...</div>
         <div class="warnings" id="warnings"></div>
         
-        <!-- V36 Version Signaling Status -->
+        <!-- Version Signaling Status -->
         <div id="version-signaling" class="version-signaling" style="display: none;">
             <div class="signaling-header">
                 <span class="signaling-icon">🔄</span>
@@ -1135,7 +1135,7 @@
                         <div class="signaling-bar" id="chain-maturity-bar" style="width: 0%; background: linear-gradient(90deg, #FFC107, #FF9800);"></div>
                     </div>
                 </div>
-                <!-- Propagation bar (V35 shares aging toward sampling window) -->
+                <!-- Propagation bar (shares aging toward sampling window) -->
                 <div id="propagation-section" style="display: none; margin-bottom: 8px;">
                     <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
                         Vote Propagation: <span id="propagation-text" style="color: #2196F3;">-</span>
@@ -2025,7 +2025,7 @@
                             var verData = vs.versions[ver];
                             var isTarget = (parseInt(ver) === vs.target_version);
                             versionsDiv.append('span')
-                                .attr('class', 'version-tag' + (isTarget ? ' v36' : ''))
+                                .attr('class', 'version-tag' + (isTarget ? ' target' : ''))
                                 .text('Signaling V' + ver + ': ' + d3.format('.1f')(verData.percentage) + '%');
                         }
                     }

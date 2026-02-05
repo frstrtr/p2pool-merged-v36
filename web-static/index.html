@@ -395,25 +395,17 @@
         
         <!-- Version Signaling Status -->
         <div id="version-signaling" style="display:none; background:#f0e6ff; border:2px solid #6f42c1; border-radius:5px; padding:10px; margin:10px 0;">
-            <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                 <span style="font-size:1.2em;">🔄</span>
-                <strong>V36 Upgrade Status:</strong>
-                <span id="version-signaling-text">Loading...</span>
+                <strong id="version-transition-title">Version Transition</strong>
+                <span id="version-signaling-status" style="padding:2px 8px; border-radius:3px; font-size:0.8em; font-weight:bold;">-</span>
             </div>
-            <div id="index-propagation" style="display:none; margin-top:8px;">
-                <div style="font-size:0.85em; color:#555;"><span id="index-propagation-text">-</span></div>
+            <div id="index-chain-maturity" style="display:none; margin-top:8px;">
+                <div style="font-size:0.85em; color:#555;">Chain Maturity: <span id="index-chain-progress-text">-</span></div>
                 <div style="background:#ddd; height:12px; border-radius:6px; margin-top:4px; overflow:hidden;">
-                    <div id="index-propagation-bar" style="height:100%; background:linear-gradient(90deg, #2196F3, #03A9F4); width:0%; transition:width 0.5s;"></div>
+                    <div id="index-chain-bar" style="height:100%; background:linear-gradient(90deg, #FFC107, #FF9800); width:0%; transition:width 0.5s;"></div>
                 </div>
             </div>
-            <div style="margin-top:8px; font-size:0.85em; color:#555;">Sampling Window: <span id="index-sampling-text">-</span></div>
-            <div id="index-propagation" style="display:none; margin-top:8px;">
-                <div style="font-size:0.85em; color:#555;"><span id="index-propagation-text">-</span></div>
-                <div style="background:#ddd; height:12px; border-radius:6px; margin-top:4px; overflow:hidden;">
-                    <div id="index-propagation-bar" style="height:100%; background:linear-gradient(90deg, #2196F3, #03A9F4); width:0%; transition:width 0.5s;"></div>
-                </div>
-            </div>
-            <div style="margin-top:8px; font-size:0.85em; color:#555;">Sampling Window: <span id="index-sampling-text">-</span></div>
             <div id="index-propagation" style="display:none; margin-top:8px;">
                 <div style="font-size:0.85em; color:#555;"><span id="index-propagation-text">-</span></div>
                 <div style="background:#ddd; height:12px; border-radius:6px; margin-top:4px; overflow:hidden;">
@@ -424,11 +416,16 @@
             <div style="background:#ddd; height:12px; border-radius:6px; margin-top:4px; overflow:hidden;">
                 <div id="version-signaling-bar" style="height:100%; background:linear-gradient(90deg, #6f42c1, #28a745); width:0%; transition:width 0.5s;"></div>
             </div>
-        </div>
-        </div>
+            <div style="margin-top:8px;">
+                <div style="font-size:0.85em; color:#555;" id="index-status-message"></div>
+                <div style="font-size:0.8em; color:#888; margin-top:4px;">
+                    Current: <span id="index-current-type">-</span>
+                    &nbsp;|&nbsp; Chain: <span id="index-chain-types">-</span>
+                </div>
+            </div>
         </div>
         
-        <h2>Share explorer</h2>
+<h2>Share explorer</h2>
         <p>Best share: <span id="best_share"></span></p>
         <p>Verified heads: <span id="verified_heads"></span></p>
         <p>Heads: <span id="heads"></span></p>

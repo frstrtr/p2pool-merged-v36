@@ -96,7 +96,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         Get version signaling statistics for version upgrade tracking.
         
         Three key metrics:
-        - share_types: Actual share class VERSION in chain (V17=Share, V35=PaddingBugfixShare, V36=MergedMiningShare)
+        - share_types: Actual share class VERSION in chain (e.g. V17=Share, V35=PaddingBugfixShare, V36=MergedMiningShare)
         - versions (desired_version): What each share votes FOR (signals next upgrade)
         - successor signaling: Tracks the SUCCESSOR transition even during propagation phase
         
@@ -195,9 +195,6 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 target_percentage = pct
         target_version_name = share_type_names.get(target_version, 'V%d' % target_version) if target_version else 'Unknown'
         
-        # V36 specific signaling
-        v36_weight = counts.get(36, 0)
-        v36_percentage = (v36_weight / total_weight) * 100
         
         # Determine transition state
         # A transition is happening if:
@@ -308,8 +305,6 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             show_transition=show_transition,
             is_transitioning=is_transitioning,
             transition_progress=round(transition_progress, 2),
-            v36_percentage=v36_percentage,
-            v36_active=v36_percentage >= 95,
             thresholds=dict(accept=60, activate=95),
             status=status,
             message=message
