@@ -1179,7 +1179,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         tx_hashes = [bitcoin_data.get_txid(tx) for tx in transactions]
         tx_map = dict(zip(tx_hashes, transactions))
         if previous_share is None:
-            share_type = p2pool_data.Share
+            # Bootstrap with most recent share type (PaddingBugfixShare V35)
+            # Not Share (V17) which is ancient
+            share_type = p2pool_data.PaddingBugfixShare
         else:
             previous_share_type = type(previous_share)
 
