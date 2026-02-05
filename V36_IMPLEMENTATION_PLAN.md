@@ -132,6 +132,66 @@ See: https://github.com/jtoomim/p2pool/pull/XXX (pending)
 
 ---
 
+## CRITICAL: Share Bootstrap Bug - V17 Default (2026-02-05)
+
+### Bug Description
+
+When bootstrapping a **new sharechain** (isolated network, fresh start, or after complete network death), the code defaults to ancient `Share` class (VERSION 17) instead of current `PaddingBugfixShare` (VERSION 35).
+
+#### The Bug in work.py
+
+```python
+# In work.py get_work() - BUGGY CODE:
+if previous_share is None:
+    share_type = p2pool_data.Share  # <-- BUG! Defaults to V17!
+```
+
+When `previous_share is None` (first share in chain), it uses `Share` (VERSION 17) which:
+- Has `SUCCESSOR = PaddingBugfixShare` (V35)
+- Signals `desired_version = 35`
+- But creates V17 shares, not V35!
+
+#### Why It Doesn't Affect Global Network
+
+On the **live global p2pool network**, this bug is latent because:
+1. Sharechain has been continuously running for years
+2. New nodes sync existing V35 shares from peers
+3. `previous_share` is never `None` - always inherits from existing chain
+4. So shares correctly use `type(previous_share)` = PaddingBugfixShare
+
+#### When It Manifests
+
+The bug triggers when:
+- Starting a completely **fresh/isolated sharechain** (e.g., test network)
+- Using `PERSIST=False` to bootstrap a new chain
+- If the global network ever died completely and restarted
+- Any scenario where `previous_share is None`
+
+#### Impact
+
+All shares become VERSION 17, signaling for V35 upgrade forever, but never actually upgrading because:
+1. Upgrade check looks for 95% of shares with `desired_version = successor.VERSION`
+2. V17 shares signal `desired_version = 35` (PaddingBugfixShare.VOTING_VERSION)
+3. Upgrade check passes, but `share_type` is still `Share` (V17)
+4. New shares still V17 because `type(previous_share)` = Share
+5. V36 signaling can never begin (requires V35 shares first)
+
+#### Our Fix
+
+```python
+# In work.py get_work() - FIXED:
+if previous_share is None:
+    # Bootstrap with most recent share type (PaddingBugfixShare V35)
+    # Not Share (V17) which is ancient
+    share_type = p2pool_data.PaddingBugfixShare
+```
+
+#### Pull Request for jtoomim/p2pool
+
+See: https://github.com/jtoomim/p2pool/pull/XXX (pending)
+
+---
+
 ## Part 1: Current State Analysis
 
 ### 1.1 Existing Share Structure (V35 - PaddingBugfixShare)
