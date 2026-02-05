@@ -93,12 +93,19 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     
     def get_version_signaling():
         """
-        Get version signaling statistics for V36 upgrade tracking.
-        Returns breakdown of share versions and signaling thresholds.
+        Get version signaling statistics for version upgrade tracking.
         
-        Two key metrics:
-        - share_types: Actual share class VERSION (V17=Share, V35=PaddingBugfixShare, V36=MergedMiningShare)
-        - versions (desired_version): What each share is voting FOR (signals next upgrade)
+        Three key metrics:
+        - share_types: Actual share class VERSION in chain (V17=Share, V35=PaddingBugfixShare, V36=MergedMiningShare)
+        - versions (desired_version): What each share votes FOR (signals next upgrade)
+        - successor signaling: Tracks the SUCCESSOR transition even during propagation phase
+        
+        The transition has multiple phases:
+        1. BUILDING_CHAIN: Chain hasn't reached CHAIN_LENGTH yet
+        2. PROPAGATING: Current type's shares are voting for SUCCESSOR but haven't reached sampling window
+        3. SIGNALING: SUCCESSOR votes appearing in sampling window (0-60%)
+        4. SIGNALING_STRONG: Strong signaling (60-95%)
+        5. ACTIVATING: Threshold reached (95%+), switchover imminent
         """
         if node.best_share_var.value is None:
             return None
@@ -107,14 +114,16 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         if chain_height < 10:
             return None
         
-        # Use full chain length for signaling calculation (like is_v36_active)
-        lookbehind = min(chain_height, node.net.CHAIN_LENGTH // 10)
+        chain_length = node.net.CHAIN_LENGTH
+        sampling_window_size = chain_length // 10  # 864 for litecoin
         
+        # Get desired_version counts from the sampling window (or full chain if immature)
+        lookbehind = min(chain_height, chain_length // 10)
         try:
             previous_share = node.tracker.items[node.best_share_var.value]
             counts = p2pool_data.get_desired_version_counts(
                 node.tracker,
-                node.tracker.get_nth_parent_hash(previous_share.hash, node.net.CHAIN_LENGTH * 9 // 10) if chain_height >= node.net.CHAIN_LENGTH else node.best_share_var.value,
+                node.tracker.get_nth_parent_hash(previous_share.hash, chain_length * 9 // 10) if chain_height >= chain_length else node.best_share_var.value,
                 lookbehind
             )
         except:
@@ -124,7 +133,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         if total_weight == 0:
             return None
         
-        # Calculate percentages for desired_version (what shares vote FOR)
+        # Calculate percentages for desired_version voting
         version_percentages = {}
         for version, weight in counts.iteritems():
             version_percentages[str(version)] = {
@@ -132,53 +141,51 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'percentage': (weight / total_weight) * 100
             }
         
-        # Count actual share types (the VERSION of the share class itself)
-        # This shows V17 -> V35 -> V36 transition of the actual share format
+        # Count actual share types in chain (the VERSION of each share class)
         share_type_counts = {}
         share_type_names = {
-            17: 'Share',
-            32: 'PreSegwitShare',
-            33: 'NewShare',
-            34: 'SegwitMiningShare',
-            35: 'PaddingBugfixShare',
-            36: 'MergedMiningShare'
+            17: 'Share', 32: 'PreSegwitShare', 33: 'NewShare',
+            34: 'SegwitMiningShare', 35: 'PaddingBugfixShare', 36: 'MergedMiningShare'
         }
         try:
             share_hash = node.best_share_var.value
             count = 0
-            max_count = min(chain_height, node.net.CHAIN_LENGTH)  # Count up to full chain
+            max_count = min(chain_height, chain_length)
             while share_hash is not None and count < max_count:
                 share = node.tracker.items.get(share_hash)
                 if share is None:
                     break
-                share_version = share.VERSION
-                share_type_counts[share_version] = share_type_counts.get(share_version, 0) + 1
+                share_type_counts[share.VERSION] = share_type_counts.get(share.VERSION, 0) + 1
                 share_hash = share.previous_hash
                 count += 1
         except:
             pass
         
-        # Convert to percentages - show ALL versions found, not just known ones
         total_shares = sum(share_type_counts.values()) if share_type_counts else 0
         share_types = {}
-        for version, count in sorted(share_type_counts.items()):
-            name = share_type_names.get(version, 'V%d' % version)  # Unknown versions just show "V{num}"
+        for version, cnt in sorted(share_type_counts.items()):
+            name = share_type_names.get(version, 'V%d' % version)
             share_types[str(version)] = {
                 'name': name,
-                'count': count,
-                'percentage': (count / total_shares * 100) if total_shares > 0 else 0
+                'count': cnt,
+                'percentage': (cnt / total_shares * 100) if total_shares > 0 else 0
             }
         
-        # V36 specific signaling
-        v36_weight = counts.get(36, 0)
-        v36_percentage = (v36_weight / total_weight) * 100
-        
-        # Current share type being produced
+        # Current share type being produced (tip of chain)
         current_share = node.tracker.items.get(node.best_share_var.value)
         current_share_type = current_share.VERSION if current_share else None
         current_share_name = share_type_names.get(current_share_type, 'V%d' % current_share_type) if current_share_type else 'Unknown'
         
-        # Find the dominant desired version (what most shares are voting for)
+        # Determine the SUCCESSOR version from the share class hierarchy
+        # This is the key: even when dominant vote == current type, if current type
+        # has a SUCCESSOR, we're in a transition toward that successor
+        successor_version = None
+        successor_name = None
+        if current_share is not None and hasattr(type(current_share), 'SUCCESSOR') and type(current_share).SUCCESSOR is not None:
+            successor_version = type(current_share).SUCCESSOR.VERSION
+            successor_name = share_type_names.get(successor_version, 'V%d' % successor_version)
+        
+        # Find the dominant desired version
         target_version = None
         target_percentage = 0
         for ver, weight in counts.iteritems():
@@ -188,67 +195,86 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 target_percentage = pct
         target_version_name = share_type_names.get(target_version, 'V%d' % target_version) if target_version else 'Unknown'
         
-        # Determine if there's an active transition
-        # Transition is active when current share type differs from what shares are voting for
-        is_transitioning = current_share_type is not None and target_version is not None and current_share_type != target_version
+        # V36 specific signaling
+        v36_weight = counts.get(36, 0)
+        v36_percentage = (v36_weight / total_weight) * 100
+        
+        # Determine transition state
+        # A transition is happening if:
+        # 1. Current type differs from dominant vote (classic detection), OR
+        # 2. Current type has a SUCCESSOR (we're producing shares that vote for successor)
+        classic_transition = current_share_type is not None and target_version is not None and current_share_type != target_version
+        successor_transition = successor_version is not None
+        is_transitioning = classic_transition or successor_transition
         show_transition = is_transitioning
         
-        # Calculate ACTUAL transition progress
-        # The upgrade check in work.py uses a specific sampling window:
-        #   - Start: CHAIN_LENGTH*9//10 shares back from tip  
-        #   - Length: CHAIN_LENGTH//10 shares (864 for litecoin)
-        # This window only exists once chain_height >= CHAIN_LENGTH
-        chain_length = node.net.CHAIN_LENGTH
-        chain_maturity = min(chain_height / float(chain_length), 1.0) if chain_length > 0 else 0
-        sampling_window_size = chain_length // 10  # 864
+        # The effective target is the SUCCESSOR version when we're in successor transition
+        effective_target = successor_version if successor_transition else target_version
+        effective_target_name = share_type_names.get(effective_target, 'V%d' % effective_target) if effective_target else 'Unknown'
         
-        # Calculate signaling % in the actual sampling window (same as work.py)
+        # Chain maturity
+        chain_maturity = min(chain_height / float(chain_length), 1.0) if chain_length > 0 else 0
+        
+        # Calculate signaling for the EFFECTIVE TARGET in the sampling window
         sampling_signaling = 0
+        sampling_counts = {}
         if chain_height >= chain_length:
-            # Chain is mature - sample from the exact same window work.py uses
             try:
                 sampling_start = node.tracker.get_nth_parent_hash(
                     node.best_share_var.value, chain_length * 9 // 10)
                 sampling_counts = p2pool_data.get_desired_version_counts(
                     node.tracker, sampling_start, sampling_window_size)
                 sampling_total = sum(sampling_counts.itervalues())
-                if sampling_total > 0 and target_version is not None:
-                    sampling_signaling = (sampling_counts.get(target_version, 0) / float(sampling_total)) * 100
+                if sampling_total > 0 and effective_target is not None:
+                    sampling_signaling = (sampling_counts.get(effective_target, 0) / float(sampling_total)) * 100
             except:
-                sampling_signaling = target_percentage  # fallback
-        else:
-            # Chain not mature yet - version check hasn't activated
-            # Show what we know from the available shares
-            sampling_signaling = target_percentage
+                pass
         
-        # Determine precise transition status and message
+        # Calculate propagation progress for successor transition
+        # How far have current-type shares (voting for successor) traveled toward sampling window?
+        # Sampling window is at positions [CHAIN_LENGTH*9//10, CHAIN_LENGTH] from tip
+        # Current-type shares start at tip and grow outward
+        propagation_target = chain_length * 9 // 10  # 7776 - where sampling window starts
+        current_type_count = share_type_counts.get(current_share_type, 0) if current_share_type else 0
+        propagation_pct = min(current_type_count / float(propagation_target) * 100, 100) if propagation_target > 0 else 0
+        # Shares remaining until current-type votes enter sampling window
+        shares_to_window = max(0, propagation_target - current_type_count)
+        time_to_window_seconds = shares_to_window * node.net.SHARE_PERIOD  # 10 sec per share
+        
+        # Determine status and message
         if not is_transitioning:
             status = 'no_transition'
             message = 'No version transition in progress'
             transition_progress = 100
-        elif not chain_height >= chain_length:
+        elif chain_height < chain_length:
             status = 'building_chain'
             shares_remaining = chain_length - chain_height
-            message = 'Building chain: %d/%d shares (need %d more before upgrade check activates)' % (
+            message = 'Building chain: %d/%d shares (need %d more before upgrade checks activate)' % (
                 chain_height, chain_length, shares_remaining)
             transition_progress = (chain_height / float(chain_length)) * 100
         elif sampling_signaling >= 95:
             status = 'activating'
-            message = 'V%d activation threshold reached! (%.1f%% in sampling window) - switchover imminent' % (
-                target_version, sampling_signaling)
+            message = 'V%d activation threshold reached! %.1f%% in sampling window — switchover imminent' % (
+                effective_target, sampling_signaling)
             transition_progress = 100
         elif sampling_signaling >= 60:
             status = 'signaling_strong'
-            message = 'Strong signaling for V%d: %.1f%% in sampling window (need 95%% for activation)' % (
-                target_version, sampling_signaling)
+            message = 'Strong V%d signaling: %.1f%% in sampling window (need 95%% to activate)' % (
+                effective_target, sampling_signaling)
             transition_progress = sampling_signaling
         elif sampling_signaling > 0:
             status = 'signaling'
-            message = 'Signaling for V%d: %.1f%% in sampling window' % (target_version, sampling_signaling)
+            message = 'V%d signaling: %.1f%% in sampling window' % (effective_target, sampling_signaling)
             transition_progress = sampling_signaling
+        elif successor_transition and current_type_count < propagation_target:
+            status = 'propagating'
+            message = 'V%d shares propagating toward sampling window: %d/%d (%.1f%%). V%d votes reach window in ~%s' % (
+                current_share_type, current_type_count, propagation_target, propagation_pct,
+                effective_target, format_eta(time_to_window_seconds))
+            transition_progress = propagation_pct
         else:
             status = 'waiting'
-            message = 'Waiting for V%d signaling in sampling window' % target_version
+            message = 'Waiting for V%d signaling in sampling window' % effective_target
             transition_progress = 0
         
         return dict(
@@ -260,30 +286,44 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             total_weight=total_weight,
             sampling_window_size=sampling_window_size,
             sampling_signaling=round(sampling_signaling, 2),
-            # Actual share format versions (V17 -> V35 -> V36 transition)
             share_types=share_types,
             current_share_type=current_share_type,
             current_share_name=current_share_name,
-            # Target version (what most shares are signaling FOR)
-            target_version=target_version,
-            target_version_name=target_version_name,
+            # The effective target (SUCCESSOR version or dominant vote)
+            target_version=effective_target,
+            target_version_name=effective_target_name,
             target_percentage=round(target_percentage, 2),
+            # Successor info
+            successor_version=successor_version,
+            successor_name=successor_name,
             # Desired version voting breakdown
             versions=version_percentages,
+            # Propagation tracking
+            propagation_pct=round(propagation_pct, 2),
+            propagation_target=propagation_target,
+            current_type_count=current_type_count,
+            shares_to_window=shares_to_window,
+            time_to_window_seconds=round(time_to_window_seconds, 0),
             # Transition state
             show_transition=show_transition,
             is_transitioning=is_transitioning,
             transition_progress=round(transition_progress, 2),
-            # V36 specific (backward compat)
             v36_percentage=v36_percentage,
             v36_active=v36_percentage >= 95,
-            thresholds=dict(
-                accept=60,
-                activate=95,
-            ),
+            thresholds=dict(accept=60, activate=95),
             status=status,
             message=message
         )
+    
+    def format_eta(seconds):
+        """Format seconds into human-readable ETA."""
+        if seconds <= 0:
+            return 'now'
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        if hours > 0:
+            return '%dh %dm' % (hours, minutes)
+        return '%dm' % minutes
     
     def get_global_stats():
         # averaged over last hour
