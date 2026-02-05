@@ -27,6 +27,111 @@ The original P2Pool donation address has a **LOST PRIVATE KEY** - all funds sent
 
 ---
 
+## CRITICAL: Litecoin MWEB Compatibility (2026-02-05)
+
+### Breaking Change in jtoomim/p2pool
+
+**P2Pool for Litecoin has been COMPLETELY NON-FUNCTIONAL since MWEB activation (May 2022).**
+
+MWEB transactions now appear in **nearly 100% of Litecoin blocks**. P2Pool has completely lost the ability to find Litecoin blocks.
+
+#### The Subtle Bug: Configuration is Correct, Parsing Fails
+
+jtoomim's p2pool **DOES correctly include** 'mweb' in SOFTFORKS_REQUIRED:
+
+```python
+# In p2pool/networks/litecoin.py - THIS IS ALREADY PRESENT
+SOFTFORKS_REQUIRED = set(['segwit', 'mweb'])
+```
+
+This means `getblocktemplate` **IS called correctly** with:
+```json
+{"rules": ["mweb", "segwit"]}
+```
+
+**The problem is NOT the RPC call - it's PARSING the response.**
+
+Every block template includes a special **HogEx transaction** (MWEB integration transaction) as the last transaction. This has a non-standard format the parser cannot decode:
+
+```
+TX 1099 failed: unpack str size too short for format
+  Data: 020000000008... (8 MWEB inputs, special MWEB structure)
+```
+
+#### Why SOFTFORKS_REQUIRED Is Not Enough
+
+```
+SOFTFORKS_REQUIRED = ['mweb']      ← Already present in litecoin.py
+         ↓
+getblocktemplate({"rules": ["mweb", "segwit"]})   ← RPC call is CORRECT
+         ↓
+Response includes HogEx transaction   ← Template is CORRECT
+         ↓
+bitcoin_data.tx_type.unpack(hogex_bytes)   ← PARSING FAILS!
+         ↓
+No try/except → getwork() throws → known_txs stale → ALL shares rejected
+```
+
+The `SOFTFORKS_REQUIRED` configuration only affects the RPC call parameters.
+It does NOT add error handling for unparseable MWEB transaction formats.
+
+#### Cascade Failure in jtoomim Code
+
+1. `helper.py` line ~102: `unpacked = bitcoin_data.tx_type.unpack(packed)` - **NO TRY/EXCEPT**
+2. HogEx parsing fails → entire `getwork()` throws exception
+3. Exception caught silently in `node.py`: `except: log.err()` (invisible to operator!)
+4. `known_txs` cache **never updates** - remains stale indefinitely
+5. ALL transactions become "unknown" to jtoomim nodes (even regular P2PKH!)
+6. Shares referencing ANY transaction get rejected: `"Peer referenced unknown transaction X, disconnecting"`
+
+#### Test Evidence
+
+3-node isolated test network (2 patched, 1 unpatched jtoomim):
+
+```
+$ grep "unknown transaction" p2pool.log | wc -l
+1083
+```
+
+**Over 1,000 disconnects in 24 hours!**
+
+Critical finding: The "unknown" transactions were **regular P2PKH transactions**, NOT MWEB transactions. This proves the `known_txs` cache is completely stale - the node never learned about ANY new transactions because `getwork()` fails silently on every call.
+
+#### Our Fix (Required for V35/V36)
+
+```python
+# In helper.py - wrap transaction parsing
+try:
+    unpacked = bitcoin_data.tx_type.unpack(packed)
+except Exception as e:
+    # MWEB/HogEx transaction - store as raw bytes
+    if p2pool.DEBUG:
+        print >>sys.stderr, '[MWEB] Transaction parsing failed: %s' % str(e)[:50]
+    unpacked = {'_raw_tx': packed, '_raw_size': len(packed), '_mweb': True}
+```
+
+The raw bytes are sufficient for:
+- Including the transaction in `known_txs` cache (prevents stale cache)
+- Propagating shares via P2P protocol
+- Serializing the transaction for block submission to Litecoin Core
+
+#### Migration Implications
+
+| Scenario | Compatibility |
+|----------|--------------|
+| V36 ↔ V36 | ✅ Both have MWEB fix |
+| V36 → jtoomim | ❌ jtoomim has stale cache, rejects all shares |
+| jtoomim → V36 | ✅ V36 is tolerant |
+| Existing jtoomim network | ❌ All nodes broken since MWEB activation (May 2022) |
+
+**Conclusion**: The current jtoomim Litecoin network has been effectively dead for years. V36 migration will actually RESTORE functionality for the first time since MWEB activation.
+
+#### Pull Request for jtoomim/p2pool
+
+See: https://github.com/jtoomim/p2pool/pull/XXX (pending)
+
+---
+
 ## Part 1: Current State Analysis
 
 ### 1.1 Existing Share Structure (V35 - PaddingBugfixShare)
