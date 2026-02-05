@@ -839,10 +839,122 @@ class BaseShare(object):
             return None # not all txs present
         return dict(header=self.header, txs=[self.check(tracker, other_txs)] + other_txs)
 
+
+class MergedMiningShare(BaseShare):
+    """
+    V36 share with merged mining address support.
+    
+    Allows miners to specify explicit addresses for merged chains (DOGE, etc.)
+    instead of relying on automatic P2PKH conversion.
+    
+    New Features:
+    - merged_addresses: List of (chain_id, script) pairs for merged chain payments
+    - MWEB transaction handling: Can process Litecoin HogEx transactions
+    
+    Migration:
+    - Activated when 95% of hash power signals VERSION=36
+    - V35 nodes can still validate V36 shares (backward compatible structure)
+    - MWEB fix only applies when V36 is the active share type
+    """
+    VERSION = 36
+    VOTING_VERSION = 36
+    SUCCESSOR = None  # Current head (until V37)
+    MINIMUM_PROTOCOL_VERSION = 3600
+    
+    # For now, V36 uses same gentx format as V35
+    # Donation migration happens at flag day (95%+ V36 adoption)
+    # gentx_before_refhash = same as BaseShare (uses DONATION_SCRIPT)
+    
+    cached_types = None
+    
+    @classmethod
+    def get_dynamic_types(cls, net):
+        """
+        V36 adds merged_addresses after segwit_data in share_info_type.
+        
+        merged_addresses is optional (PossiblyNoneType with default []):
+        - If None/empty: auto-convert from parent chain address (P2PKH only)
+        - If present: explicit merged chain payment scripts
+        """
+        if cls.cached_types is not None:
+            return cls.cached_types
+        
+        # Start with V35 base types
+        t = dict(share_info_type=None, share_type=None, ref_type=None)
+        
+        segwit_data = ('segwit_data', pack.PossiblyNoneType(
+            dict(txid_merkle_link=dict(branch=[], index=0), wtxid_merkle_root=2**256-1),
+            pack.ComposedType([
+                ('txid_merkle_link', pack.ComposedType([
+                    ('branch', pack.ListType(pack.IntType(256))),
+                    ('index', pack.IntType(0)),  # always 0
+                ])),
+                ('wtxid_merkle_root', pack.IntType(256))
+            ])
+        ))
+        
+        # NEW in V36: merged_addresses field
+        # Each entry: (chain_id: u32, script: bytes)
+        # chain_id: AuxPoW chain ID (e.g., 0x62 for DOGE)
+        # script: Payment script for that chain (P2PKH format)
+        merged_address_entry = pack.ComposedType([
+            ('chain_id', pack.IntType(32)),
+            ('script', pack.VarStrType()),
+        ])
+        merged_addresses = ('merged_addresses', pack.PossiblyNoneType(
+            [],  # Default: empty list (use auto-conversion)
+            pack.ListType(merged_address_entry, max_count=8)  # Max 8 merged chains
+        ))
+        
+        t['share_info_type'] = pack.ComposedType([
+            ('share_data', pack.ComposedType([
+                ('previous_share_hash', pack.PossiblyNoneType(0, pack.IntType(256))),
+                ('coinbase', pack.VarStrType()),
+                ('nonce', pack.IntType(32)),
+                ('address', pack.VarStrType()),  # V34+ uses string address
+                ('subsidy', pack.IntType(64)),
+                ('donation', pack.IntType(16)),
+                ('stale_info', pack.EnumType(pack.IntType(8), dict((k, {0: None, 253: 'orphan', 254: 'doa'}.get(k, 'unk%i' % (k,))) for k in xrange(256)))),
+                ('desired_version', pack.VarIntType()),
+            ])),
+            segwit_data,
+            merged_addresses,  # NEW in V36
+            ('far_share_hash', pack.PossiblyNoneType(0, pack.IntType(256))),
+            ('max_bits', bitcoin_data.FloatingIntegerType()),
+            ('bits', bitcoin_data.FloatingIntegerType()),
+            ('timestamp', pack.IntType(32)),
+            ('absheight', pack.IntType(32)),
+            ('abswork', pack.IntType(128)),
+        ])
+        
+        t['share_type'] = pack.ComposedType([
+            ('min_header', cls.small_block_header_type),
+            ('share_info', t['share_info_type']),
+            ('ref_merkle_link', pack.ComposedType([
+                ('branch', pack.ListType(pack.IntType(256))),
+                ('index', pack.IntType(0)),
+            ])),
+            ('last_txout_nonce', pack.IntType(64)),
+            ('hash_link', hash_link_type),
+            ('merkle_link', pack.ComposedType([
+                ('branch', pack.ListType(pack.IntType(256))),
+                ('index', pack.IntType(0)),  # always 0
+            ])),
+        ])
+        
+        t['ref_type'] = pack.ComposedType([
+            ('identifier', pack.FixedStrType(64//8)),
+            ('share_info', t['share_info_type']),
+        ])
+        
+        cls.cached_types = t
+        return t
+
+
 class PaddingBugfixShare(BaseShare):
     VERSION=35
     VOTING_VERSION = 35
-    SUCCESSOR = None
+    SUCCESSOR = MergedMiningShare  # V36 is the successor
     MINIMUM_PROTOCOL_VERSION = 3500
 
 class SegwitMiningShare(BaseShare):
@@ -868,7 +980,7 @@ class Share(BaseShare):
     SUCCESSOR = PaddingBugfixShare
 
 
-share_versions = {s.VERSION:s for s in [PaddingBugfixShare, SegwitMiningShare, NewShare, PreSegwitShare, Share]}
+share_versions = {s.VERSION:s for s in [MergedMiningShare, PaddingBugfixShare, SegwitMiningShare, NewShare, PreSegwitShare, Share]}
 
 class WeightsSkipList(forest.TrackerSkipList):
     # share_count, weights, total_weight

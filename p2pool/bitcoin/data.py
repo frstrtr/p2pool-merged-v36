@@ -495,6 +495,9 @@ def get_witness_commitment_hash(witness_root_hash, witness_reserved_value):
     return hash256(merkle_record_type.pack(dict(left=witness_root_hash, right=witness_reserved_value)))
 
 def get_wtxid(tx, txid=None, txhash=None):
+    # Handle MWEB raw transactions - wtxid is hash of full raw transaction
+    if isinstance(tx, dict) and tx.get('_mweb'):
+        return hash256(tx['_raw_tx'])
     has_witness = False
     if is_segwit_tx(tx):
         assert len(tx['tx_ins']) == len(tx['witness'])

@@ -1072,6 +1072,17 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # CRITICAL: Use txid (stripped hash without SegWit witness) for merkle root calculation!
         # For SegWit transactions, the merkle root uses txid (not wtxid).
         # get_txid() uses tx_id_type which strips the witness data before hashing.
+        #
+        # NOTE ON MWEB (MimbleWimble Extension Blocks) COMPATIBILITY:
+        # MWEB transactions (marked with '_mweb': True) are stored as raw bytes because they
+        # cannot be parsed by standard p2pool transaction parsing code. We MUST include them
+        # in shares because:
+        # 1. They contribute to the txid merkle root (block header)
+        # 2. They contribute to the wtxid merkle root (witness commitment in coinbase)
+        # 
+        # If unpatched jtoomim nodes don't have MWEB transactions in their known_txs cache,
+        # they will disconnect with "unknown transaction" when receiving our shares. This is
+        # unavoidable without patching jtoomim's code - see patches/jtoomim_mweb_fix.patch.
         tx_hashes = [bitcoin_data.get_txid(tx) for tx in self.current_work.value['transactions']]
         tx_map = dict(zip(tx_hashes, self.current_work.value['transactions']))
 
@@ -1364,7 +1375,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     # Debug: Check witness merkle root before block submission
                     if bitcoin_data.is_segwit_tx(new_gentx):
                         # Calculate witness merkle root from transactions being submitted
-                        all_txs = [new_gentx] + other_transactions
                         wtxids = [0]  # coinbase wtxid is always 0
                         for tx in other_transactions:
                             txid = bitcoin_data.get_txid(tx)
