@@ -1120,7 +1120,7 @@
         <div id="version-signaling" class="version-signaling" style="display: none;">
             <div class="signaling-header">
                 <span class="signaling-icon">🔄</span>
-                <span class="signaling-title">V36 Upgrade Status</span>
+                <span class="signaling-title">Version Transition Status</span>
                 <span class="signaling-badge" id="signaling-status">-</span>
             </div>
             <div class="signaling-content">
@@ -1130,7 +1130,7 @@
                     <div class="signaling-threshold" style="left: 95%"><span>95%</span></div>
                 </div>
                 <div class="signaling-stats">
-                    <span id="signaling-percentage">0%</span> V36 shares
+                    <span id="signaling-percentage">0%</span> signaling for target
                     <span class="signaling-message" id="signaling-message"></span>
                 </div>
                 <div class="signaling-versions" id="signaling-versions"></div>
@@ -1925,23 +1925,32 @@
                     .text(function(w) { return w; });
                 warnings.exit().remove();
                 
-                // Version Signaling Status
+                // Version Signaling Status - Universal transition display
                 d3.json('../version_signaling', function(vs) {
                     if (!vs) {
                         d3.select('#version-signaling').style('display', 'none');
                         return;
                     }
                     
+                    // Only show panel if there's an active transition
+                    if (!vs.show_transition) {
+                        d3.select('#version-signaling').style('display', 'none');
+                        return;
+                    }
+                    
                     d3.select('#version-signaling').style('display', 'block');
                     
-                    // Update progress bar
-                    var pct = Math.min(100, vs.v36_percentage);
+                    // Update title to show current transition
+                    d3.select('.signaling-title').text('V' + vs.current_share_type + ' → V' + vs.target_version + ' Transition');
+                    
+                    // Update progress bar with target percentage
+                    var pct = Math.min(100, vs.target_percentage);
                     d3.select('#signaling-bar').style('width', pct + '%');
                     d3.select('#signaling-percentage').text(d3.format('.1f')(pct) + '%');
                     
                     // Update status badge
                     var badge = d3.select('#signaling-status');
-                    badge.text(vs.status.replace('_', ' '));
+                    badge.text(vs.status.toUpperCase().replace('_', ' '));
                     badge.attr('class', 'signaling-badge ' + vs.status);
                     
                     // Update message
@@ -1953,9 +1962,10 @@
                     if (vs.versions) {
                         for (var ver in vs.versions) {
                             var verData = vs.versions[ver];
+                            var isTarget = (parseInt(ver) === vs.target_version);
                             versionsDiv.append('span')
-                                .attr('class', 'version-tag' + (ver === '36' ? ' v36' : ''))
-                                .text('Signaling v' + ver + ': ' + d3.format('.1f')(verData.percentage) + '%');
+                                .attr('class', 'version-tag' + (isTarget ? ' v36' : ''))
+                                .text('Signaling V' + ver + ': ' + d3.format('.1f')(verData.percentage) + '%');
                         }
                     }
                     

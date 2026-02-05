@@ -206,8 +206,16 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             share_types=share_types,
             current_share_type=current_share_type,
             current_share_name=current_share_name,
-            # Desired version voting (what shares signal FOR)
+            # Target version (what most shares are signaling FOR)
+            target_version=target_version,
+            target_version_name=target_version_name,
+            target_percentage=target_percentage,
+            # Desired version voting breakdown
             versions=version_percentages,
+            # Transition state
+            show_transition=show_transition,
+            is_transitioning=is_transitioning,
+            # V36 specific (backward compat)
             v36_percentage=v36_percentage,
             v36_active=v36_percentage >= 95,
             thresholds=dict(

@@ -53,36 +53,28 @@
                     .text(function(w){ return 'Warning: ' + w })
                     .attr('style', 'color:red;border:1px solid red;padding:5px');
                 
-                // Version Signaling Status
+                // Version Signaling Status - Universal transition display
                 d3.json('../version_signaling', function(vs) {
-                    if (!vs) {
+                    if (!vs || !vs.show_transition) {
                         d3.select('#version-signaling').style('display', 'none');
                         return;
                     }
                     
                     d3.select('#version-signaling').style('display', 'block');
-                    var pct = vs.v36_percentage;
-                    var statusText = 'V36: ' + d3.format('.1f')(pct) + '%';
+                    var pct = vs.target_percentage;
                     
-                    // Add status message based on thresholds
+                    // Universal transition display
+                    var statusText = 'V' + vs.current_share_type + ' → V' + vs.target_version + ': ' + d3.format('.1f')(pct) + '%';
+                    
+                    // Add status emoji based on thresholds
                     if (pct >= 100) {
-                        statusText += ' ✅ COMPLETE - All shares V36';
+                        statusText += ' ✅ COMPLETE';
                     } else if (pct >= 95) {
-                        statusText += ' 🟢 ACTIVE - Dual donation + MWEB enabled';
+                        statusText += ' 🟢 ACTIVE';
                     } else if (pct >= 60) {
-                        statusText += ' 🟡 IMMINENT - Approaching 95% threshold';
-                    } else if (pct > 0) {
-                        statusText += ' 🔵 Signaling in progress';
-                    }
-                    
-                    // Version breakdown (desired_version signaling)
-                    var versionsText = '';
-                    if (vs.versions) {
-                        var verStrs = [];
-                        for (var ver in vs.versions) {
-                            verStrs.push('Signaling v' + ver + ': ' + d3.format('.1f')(vs.versions[ver].percentage) + '%');
-                        }
-                        versionsText = ' | ' + verStrs.join(', ');
+                        statusText += ' 🟡 IMMINENT';
+                    } else {
+                        statusText += ' 🔵 SIGNALING';
                     }
                     
                     // Share types breakdown (actual share class versions in chain)
@@ -96,7 +88,7 @@
                         shareTypesText = ' | Chain: ' + typeStrs.join(', ');
                     }
                     
-                    d3.select('#version-signaling-text').text(statusText + versionsText + shareTypesText);
+                    d3.select('#version-signaling-text').text(statusText + shareTypesText);
                     
                     // Progress bar width
                     d3.select('#version-signaling-bar').style('width', Math.min(100, pct) + '%');
