@@ -32,7 +32,9 @@ def hash256d(data):
 
 def hash160(data):
     if data == '04ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664b'.decode('hex'):
-        return 0x384f570ccc88ac2e7e00b026d1690a3fca63dd0 # hack for people who don't have openssl - this is the only value that p2pool ever hashes
+        return 0x384f570ccc88ac2e7e00b026d1690a3fca63dd0 # forrestv uncompressed pubkey (LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd)
+    if data == '03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1'.decode('hex'):
+        return 0x7dec8dc4d5c39f0acbf3d34120432cb1f667aa74 # forrestv compressed pubkey (LVrpnVLEf3vU5rZahS7QF5UW8u6G1VgLUR)
     return pack.IntType(160).unpack(hashlib.new('ripemd160', hashlib.sha256(data).digest()).digest())
 
 class ChecksummedType(pack.Type):

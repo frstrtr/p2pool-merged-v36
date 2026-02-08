@@ -117,8 +117,9 @@ DONATION_PUBKEY_HASH = 0x384f570ccc88ac2e7e00b026d1690a3fca63dd0
 SECONDARY_DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'.decode('hex')
 
 # Precomputed pubkey_hash for SECONDARY_DONATION_SCRIPT (performance optimization)
-# Extracted from P2PKH script bytes [3:23], avoids parsing on every share
-SECONDARY_DONATION_PUBKEY_HASH = 0x20cb5c22b1e4d5947e5c112c7696b51ad9af3c61
+# hash160 as little-endian int (matching bitcoin/data.py hash160() return format)
+# hash160(02fe6578...) BE hex = 20cb5c22b1e4d5947e5c112c7696b51ad9af3c61
+SECONDARY_DONATION_PUBKEY_HASH = 0x613cafd91ab596762c115c7e94d5e4b1225ccb20
 
 # Enable/disable secondary donation during transition period
 SECONDARY_DONATION_ENABLED = True
@@ -132,10 +133,13 @@ SECONDARY_DONATION_ENABLED = True
 COMBINED_DONATION_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d12102fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a52ae'.decode('hex')
 
 # Precomputed pubkey_hash for COMBINED_DONATION_SCRIPT (hash160 of first pubkey = forrestv compressed)
-# This is used for share weight attribution - the 1-of-2 P2MS donation weight
-# maps to forrestv's compressed pubkey hash for cumulative weight tracking.
-# hash160(03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1) = 74aa67f6b12c432041d3f3cb0a9fc3d5c48dec7d
-COMBINED_DONATION_PUBKEY_HASH = 0x74aa67f6b12c432041d3f3cb0a9fc3d5c48dec7d
+# hash160 as little-endian int (matching bitcoin/data.py hash160() return format)
+# hash160(03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1)
+#   BE hex = 74aa67f6b12c432041d3f3cb0a9fc3d5c48dec7d
+#   LE int  = 0x7dec8dc4d5c39f0acbf3d34120432cb1f667aa74
+# Litecoin address: LVrpnVLEf3vU5rZahS7QF5UW8u6G1VgLUR
+# Bitcoin address:  1BdsXH2QaPgQq3sRXJ86y4QjvgiystJhru
+COMBINED_DONATION_PUBKEY_HASH = 0x7dec8dc4d5c39f0acbf3d34120432cb1f667aa74
 
 def script_to_pubkey_hash(script):
     """
