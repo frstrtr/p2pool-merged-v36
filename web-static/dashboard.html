@@ -1103,10 +1103,10 @@
                     <a href="javascript:toggleAutoRefresh()" id="auto-refresh-btn" class="refresh-btn" title="Toggle auto-refresh">⏸ Auto-Refresh: OFF</a>
                 </nav>
             </div>
-            <div class="miner-info" id="miner-info" style="display: none;">
+            <div class="miner-info" id="miner-info">
                 <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 5px;">⛏️ Miner Configuration</div>
                 <div style="font-size: 0.85rem; font-family: monospace; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;">
-                    <div><strong>Stratum URL:</strong> <span id="miner-url">-</span></div>
+                    <div><strong>Stratum URL:</strong> <span id="miner-url">detecting...</span></div>
                     <div style="margin-top: 3px;"><strong>Username:</strong> <span style="color: #ffc107;">YOUR_<span id="miner-coin-symbol">LTC</span>_ADDRESS</span></div>
                     <div style="margin-top: 3px;"><strong>Password:</strong> <span style="color: #888;">anything</span></div>
                 </div>
@@ -1903,15 +1903,16 @@
             }
         });
         
-        // Load node info for miner configuration
+        // Load node info for miner configuration (non-blocking, server responds instantly)
         d3.json('../node_info', function(nodeInfo) {
             if (nodeInfo && nodeInfo.external_ip) {
                 var minerUrl = 'stratum+tcp://' + nodeInfo.external_ip + ':' + nodeInfo.worker_port;
                 document.getElementById('miner-url').textContent = minerUrl;
-                document.getElementById('miner-info').style.display = 'block';
                 if (nodeInfo.symbol) {
                     document.getElementById('miner-coin-symbol').textContent = nodeInfo.symbol;
                 }
+            } else {
+                document.getElementById('miner-url').textContent = 'unavailable';
             }
         });
         

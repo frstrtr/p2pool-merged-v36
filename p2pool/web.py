@@ -1478,39 +1478,50 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root.putChild('network_difficulty', NetworkDifficultyResource())
     
     # Node info endpoint for miner configuration display
-    def get_node_info():
-        """Get node connection info for miners"""
+    # Cache external IP to avoid blocking the reactor with synchronous HTTP requests
+    _cached_external_ip = [None]  # mutable container for closure
+    
+    def _detect_local_ip():
+        """Get local network IP (non-blocking, no DNS)"""
         try:
-            # Use configured external IP if available, otherwise try to detect
-            external_ip = getattr(node, 'external_ip', None)
-            
-            if not external_ip:
-                # Try to get external IP from external service
-                try:
-                    import urllib2
-                    for url in ['https://api.ipify.org', 'https://icanhazip.com', 'https://ifconfig.me/ip']:
-                        try:
-                            req = urllib2.Request(url)
-                            req.add_header('User-Agent', 'p2pool')
-                            response = urllib2.urlopen(req, timeout=3)
-                            external_ip = response.read().strip()
-                            if external_ip and len(external_ip) < 50:
-                                break
-                        except:
-                            continue
-                except:
-                    pass
-            
-            # Fallback to local network IP
-            if not external_ip:
-                try:
-                    import socket
-                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    s.connect(("8.8.8.8", 80))
-                    external_ip = s.getsockname()[0]
-                    s.close()
-                except:
-                    external_ip = "127.0.0.1"
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return "127.0.0.1"
+    
+    @defer.inlineCallbacks
+    def _resolve_external_ip():
+        """Resolve external IP asynchronously using Twisted, cache the result"""
+        if _cached_external_ip[0] is not None:
+            return
+        
+        # Start with local IP immediately so dashboard never blocks
+        _cached_external_ip[0] = _detect_local_ip()
+        
+        # Try external services asynchronously (non-blocking)
+        for url in ['https://api.ipify.org', 'https://icanhazip.com', 'https://ifconfig.me/ip']:
+            try:
+                from twisted.web.client import getPage
+                body = yield getPage(url.encode('ascii'), timeout=3, headers={b'User-Agent': b'p2pool'})
+                ip = body.strip()
+                if ip and len(ip) < 50:
+                    _cached_external_ip[0] = ip
+                    print 'Detected external IP: %s' % ip
+                    break
+            except:
+                continue
+    
+    # Fire and forget — resolve in background, don't block startup
+    reactor.callLater(1, _resolve_external_ip)
+    
+    def get_node_info():
+        """Get node connection info for miners (non-blocking, uses cached IP)"""
+        try:
+            external_ip = getattr(node, 'external_ip', None) or _cached_external_ip[0] or _detect_local_ip()
             
             return {
                 'external_ip': external_ip,
