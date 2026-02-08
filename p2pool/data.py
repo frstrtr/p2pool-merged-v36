@@ -604,12 +604,25 @@ class BaseShare(object):
         
         def get_share(header, last_txout_nonce=last_txout_nonce):
             min_header = dict(header); del min_header['merkle_root']
+            packed_for_link = bitcoin_data.tx_id_type.pack(gentx)
+            prefix_for_link = packed_for_link[:-32-8-4]
+            import sys
+            print >>sys.stderr, '[GET_SHARE DEBUG] cls=%s V=%d' % (cls.__name__, cls.VERSION)
+            print >>sys.stderr, '[GET_SHARE DEBUG] packed_gentx len=%d, prefix len=%d' % (len(packed_for_link), len(prefix_for_link))
+            print >>sys.stderr, '[GET_SHARE DEBUG] gentx_before_refhash len=%d hex=%s' % (len(cls.gentx_before_refhash), cls.gentx_before_refhash.encode('hex'))
+            print >>sys.stderr, '[GET_SHARE DEBUG] prefix ends with gentx_before_refhash: %s' % prefix_for_link.endswith(cls.gentx_before_refhash)
+            print >>sys.stderr, '[GET_SHARE DEBUG] last 80 bytes of prefix: %s' % prefix_for_link[-80:].encode('hex')
+            print >>sys.stderr, '[GET_SHARE DEBUG] header merkle_root: %064x' % header['merkle_root']
+            print >>sys.stderr, '[GET_SHARE DEBUG] last_txout_nonce: %d' % last_txout_nonce
+            # Also compute what the stratum path computes
+            stratum_gentx_hash = bitcoin_data.hash256(packed_for_link[:-(8+4)] + pack.IntType(64).pack(last_txout_nonce) + packed_for_link[-4:])
+            print >>sys.stderr, '[GET_SHARE DEBUG] stratum_gentx_hash: %064x' % stratum_gentx_hash
             share = cls(net, None, dict(
                 min_header=min_header,
                 share_info=share_info,
                 ref_merkle_link=dict(branch=[], index=0),
                 last_txout_nonce=last_txout_nonce,
-                hash_link=prefix_to_hash_link(bitcoin_data.tx_id_type.pack(gentx)[:-32-8-4], cls.gentx_before_refhash),
+                hash_link=prefix_to_hash_link(prefix_for_link, cls.gentx_before_refhash),
                 merkle_link=bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0),
             ))
             assert share.header == header # checks merkle_root
@@ -717,14 +730,18 @@ class BaseShare(object):
         self.pow_hash = net.PARENT.POW_FUNC(bitcoin_data.block_header_type.pack(self.header))
         self.hash = self.header_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(self.header))
         
-        # Debug: Uncomment to trace share validation (prints on every share)
-        # import sys
-        # print >>sys.stderr, '[SHARE VALIDATION DEBUG]'
-        # print >>sys.stderr, '  gentx_hash:  %064x' % self.gentx_hash
-        # print >>sys.stderr, '  merkle_root: %064x' % merkle_root
-        # print >>sys.stderr, '  pow_hash:    %064x' % self.pow_hash
-        # print >>sys.stderr, '  target:      %064x' % self.target
-        # print >>sys.stderr, '  passes:      %s' % (self.pow_hash <= self.target)
+        # Debug: trace share validation
+        import sys
+        if self.pow_hash > self.target:
+            print >>sys.stderr, '[SHARE VALIDATION DEBUG] PoW FAILED!'
+            print >>sys.stderr, '  gentx_hash:  %064x' % self.gentx_hash
+            print >>sys.stderr, '  merkle_root: %064x' % merkle_root
+            print >>sys.stderr, '  header_mr:   %064x' % self.header['merkle_root']
+            print >>sys.stderr, '  min_header:  %s' % self.min_header
+            print >>sys.stderr, '  pow_hash:    %064x' % self.pow_hash
+            print >>sys.stderr, '  target:      %064x' % self.target
+            print >>sys.stderr, '  VERSION:     %d' % self.VERSION
+            print >>sys.stderr, '  gentx_before_refhash hex: %s' % self.gentx_before_refhash.encode('hex')
         
         if self.target > net.MAX_TARGET:
             from p2pool import p2p

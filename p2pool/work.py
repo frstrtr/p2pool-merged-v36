@@ -2003,12 +2003,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # CRITICAL: Only attempt share creation if merkle_root matches current work template!
             # If work_merkle_root != header['merkle_root'], the submitted work is stale (from old template)
             if pow_hash <= share_info['bits'].target and header_hash not in received_header_hashes and work_merkle_root == header['merkle_root']:
-                # Debug: Uncomment to trace P2Pool share creation (prints on every share)
-                # print >>sys.stderr, '[DEBUG] Attempting to create P2Pool share:'
-                # print >>sys.stderr, '  pow_hash: %064x' % pow_hash
-                # print >>sys.stderr, '  target:   %064x' % share_info['bits'].target
-                # print >>sys.stderr, '  passes:   %s' % (pow_hash <= share_info['bits'].target)
-                # print >>sys.stderr, '  header: %s' % header
+                print >>sys.stderr, '[DEBUG] Attempting P2Pool share:'
+                print >>sys.stderr, '  pow_hash:          %064x' % pow_hash
+                print >>sys.stderr, '  target:            %064x' % share_info['bits'].target
+                print >>sys.stderr, '  work_merkle_root:  %064x' % work_merkle_root
+                print >>sys.stderr, '  header_merkle:     %064x' % header['merkle_root']
+                print >>sys.stderr, '  share_type:        %s (V%d)' % (share_type.__name__, share_type.VERSION)
+                print >>sys.stderr, '  user:              %s' % user
                 last_txout_nonce = pack.IntType(8*self.COINBASE_NONCE_LENGTH).unpack(coinbase_nonce)
                 try:
                     share = get_share(header, last_txout_nonce)
