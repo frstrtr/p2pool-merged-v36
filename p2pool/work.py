@@ -2031,12 +2031,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 
                 # Check if this share was assigned to secondary donation
                 # Track both first share and last share time for safety net
-                share_pubkey_hash = share.share_data.get('pubkey_hash') if hasattr(share.share_data, 'get') else getattr(share.share_data, 'pubkey_hash', None)
-                if share_pubkey_hash == p2pool_data.SECONDARY_DONATION_PUBKEY_HASH:
+                # V35+ shares use 'address' (string), V<34 use 'pubkey_hash' (int)
+                secondary_addr = p2pool_data.secondary_donation_script_to_address(self.node.net)
+                is_secondary = (share.address == secondary_addr) if secondary_addr else False
+                if is_secondary:
                     self.last_secondary_donation_share_time = time.time()
                     if not self.first_secondary_donation_share_found:
                         self.first_secondary_donation_share_found = True
-                        print '[SECONDARY DONATION] First share with secondary donation FOUND! hash=%s' % p2pool_data.format_hash(share.hash)
+                        print '[SECONDARY DONATION] First share with secondary donation FOUND! hash=%s addr=%s' % (p2pool_data.format_hash(share.hash), share.address)
                 
                 self.my_share_hashes.add(share.hash)
                 if not on_time:
