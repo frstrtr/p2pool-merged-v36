@@ -15,10 +15,11 @@ ltc_scrypt.so
 .DS_Store
 .github/
 enable_opnsense_ssh.sh
-# Sensitive configuration files with passwords
+# Sensitive configuration files with passwords/credentials
 SETUP_GUIDE.md
 monitor_sync.sh
 claude.md
+.ai-memory.md
 
 # Local node startup scripts with credentials
 start_p2pool_ltc_doge_mainnet.sh
