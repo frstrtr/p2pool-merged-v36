@@ -1271,13 +1271,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
         getwork_time = time.time()
         lp_count = self.new_work_event.times
         
-        # CRITICAL: merkle_link must use other_transaction_hashes (the transactions actually in the share)
-        # NOT tx_hashes (all available transactions). The share's coinbase + other_transaction_hashes
-        # defines the block that will be submitted. The merkle_link must match this.
-        # This is true for BOTH regular P2Pool AND merged mining.
-        merkle_link = bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0)
-        # if mm_later:
-        #     print >>sys.stderr, '[DEBUG] Merged mining: merkle_link uses other_transaction_hashes (%d txs)' % len(other_transaction_hashes)
+        # CRITICAL: When segwit is activated, Share.__init__ validates using segwit_data['txid_merkle_link']
+        # (merkle tree of txids, NOT wtxids). The stratum merkle_link sent to miners MUST match this,
+        # otherwise the reconstructed merkle_root in __init__ will differ from the miner's header
+        # and ALL shares will fail with "share PoW invalid".
+        # When segwit is NOT activated, use other_transaction_hashes directly (which are wtxids from GBT).
+        merkle_link = bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0) if share_info.get('segwit_data', None) is None else share_info['segwit_data']['txid_merkle_link']
 
 
         if print_throttle is 0.0:
@@ -1449,16 +1448,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         # Format: OP_RETURN + aa21a9ed + 32-byte commitment
                         if new_gentx['tx_outs'] and len(new_gentx['tx_outs'][0]['script']) == 38:
                             committed_hash = pack.IntType(256).unpack(new_gentx['tx_outs'][0]['script'][6:])
-                            # Witness commitment = hash256(witness_merkle_root || witness_reserved_value)
                             witness_reserved_value_str = '[P2Pool]'*4
                             witness_reserved_value = pack.IntType(256).unpack(witness_reserved_value_str)
                             expected_commitment = bitcoin_data.get_witness_commitment_hash(calculated_wtxid_merkle_root, witness_reserved_value)
-                            print >>sys.stderr, '[WITNESS DEBUG] calculated wtxid_merkle_root: %064x' % calculated_wtxid_merkle_root
-                            print >>sys.stderr, '[WITNESS DEBUG] committed hash in coinbase: %064x' % committed_hash
-                            print >>sys.stderr, '[WITNESS DEBUG] expected commitment: %064x' % expected_commitment
-                            print >>sys.stderr, '[WITNESS DEBUG] MATCH: %s' % (committed_hash == expected_commitment)
-                            if 'segwit_data' in share_info:
-                                print >>sys.stderr, '[WITNESS DEBUG] share_info wtxid_merkle_root: %064x' % share_info['segwit_data']['wtxid_merkle_root']
+                            if committed_hash != expected_commitment:
+                                print >>sys.stderr, 'Witness commitment mismatch! calculated=%064x committed=%064x' % (expected_commitment, committed_hash)
                     
                     # Submit block and add error callback to catch any failures
                     # Use broadcaster for parallel propagation if available
@@ -2003,13 +1997,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # CRITICAL: Only attempt share creation if merkle_root matches current work template!
             # If work_merkle_root != header['merkle_root'], the submitted work is stale (from old template)
             if pow_hash <= share_info['bits'].target and header_hash not in received_header_hashes and work_merkle_root == header['merkle_root']:
-                print >>sys.stderr, '[DEBUG] Attempting P2Pool share:'
-                print >>sys.stderr, '  pow_hash:          %064x' % pow_hash
-                print >>sys.stderr, '  target:            %064x' % share_info['bits'].target
-                print >>sys.stderr, '  work_merkle_root:  %064x' % work_merkle_root
-                print >>sys.stderr, '  header_merkle:     %064x' % header['merkle_root']
-                print >>sys.stderr, '  share_type:        %s (V%d)' % (share_type.__name__, share_type.VERSION)
-                print >>sys.stderr, '  user:              %s' % user
                 last_txout_nonce = pack.IntType(8*self.COINBASE_NONCE_LENGTH).unpack(coinbase_nonce)
                 try:
                     share = get_share(header, last_txout_nonce)
