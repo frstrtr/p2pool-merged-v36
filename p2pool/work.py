@@ -155,6 +155,7 @@ def is_pubkey_hash_address(address, net):
         return (False, None, 'Failed to parse address: %s' % str(e))
 
 class WorkerBridge(worker_interface.WorkerBridge):
+    COINBASE_XNONCE1_LENGTH = 1
     COINBASE_NONCE_LENGTH = 8
 
     def __init__(self, node, my_pubkey_hash, donation_percentage, merged_urls, worker_fee, args, pubkeys, bitcoind, share_rate):
@@ -1130,53 +1131,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # For SegWit transactions, the merkle root uses txid (not wtxid).
         # get_txid() uses tx_id_type which strips the witness data before hashing.
         #
-        # NOTE ON MWEB (MimbleWimble Extension Blocks) COMPATIBILITY:
-        # MWEB transactions (marked with '_mweb': True) are stored as raw bytes because they
-        # cannot be parsed by standard p2pool transaction parsing code. We MUST include them
-        # in shares because:
-        # 1. They contribute to the txid merkle root (block header)
-        # 2. They contribute to the wtxid merkle root (witness commitment in coinbase)
-        # 
-        # If unpatched jtoomim nodes don't have MWEB transactions in their known_txs cache,
-        # they will disconnect with "unknown transaction" when receiving our shares. This is
-        # unavoidable without patching jtoomim's code - see patches/jtoomim_mweb_fix.patch.
-        #
-        # MWEB EXCLUSION FLAG (V36 Migration):
-        # Until V36 shares are active (95% signaling), we EXCLUDE MWEB transactions from
-        # block templates to maintain compatibility with unpatched jtoomim nodes.
-        # Once V36 is active, we include MWEB transactions (all V36 nodes have the patch).
-        #
-        # This allows graceful migration:
-        # - Pre-V36: Skip MWEB txs (lose fees, but shares are compatible)
-        # - Post-V36: Include MWEB txs (full fee capture, all nodes patched)
+        # RAWTX APPROACH (ported from jtoomim rawtx branch):
+        # Transactions are kept as raw GBT dicts with 'data', 'fee', 'hash', 'txid', 'weight' keys.
+        # No parsing/unpacking needed — all transactions including MWEB/HogEx are handled natively.
+        # get_txid(), get_wtxid(), get_size(), get_stripped_size(), is_segwit_tx() all handle GBT dicts.
         
         # Check V36 signaling status using helper method
         v36_active, v36_signaling = self.is_v36_active()
         previous_share = self.node.tracker.items[self.node.best_share_var.value] if self.node.best_share_var.value is not None else None
         
-        # Filter transactions based on V36 status
-        all_transactions = self.current_work.value['transactions']
-        if v36_active:
-            # V36 active: Include all transactions including MWEB
-            transactions = all_transactions
-            mweb_in_template = sum(1 for tx in all_transactions if isinstance(tx, dict) and tx.get('_mweb'))
-            if mweb_in_template > 0:
-                print >>sys.stderr, '[MWEB] V36 ACTIVE (%.1f%%) - Including %d MWEB tx(s) in block template' % (
-                    v36_signaling * 100, mweb_in_template)
-        else:
-            # Pre-V36: Exclude MWEB transactions for compatibility
-            mweb_count = 0
-            transactions = []
-            for tx in all_transactions:
-                if isinstance(tx, dict) and tx.get('_mweb'):
-                    mweb_count += 1
-                else:
-                    transactions.append(tx)
-            if mweb_count > 0:
-                print >>sys.stderr, '[MWEB] Pre-V36 mode: Excluding %d MWEB tx(s) for jtoomim compatibility (V36 signaling: %.1f%%)' % (
-                    mweb_count, v36_signaling * 100 if 'v36_signaling' in dir() else 0)
+        # All transactions from GBT are included (MWEB transactions are just raw hex like any other)
+        transactions = self.current_work.value['transactions']
         
-        tx_hashes = [bitcoin_data.get_txid(tx) for tx in transactions]
+        tx_hashes = self.current_work.value['transaction_hashes']
         tx_map = dict(zip(tx_hashes, transactions))
         if previous_share is None:
             # Bootstrap with most recent share type (PaddingBugfixShare V35)
@@ -1394,11 +1361,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 new_gentx['marker'] = gentx['marker']
                 new_gentx['flag'] = gentx['flag']
                 new_gentx['witness'] = gentx['witness']
-                print >>sys.stderr, '[SEGWIT] Restored witness data to new_gentx: marker=%s, flag=%s, witness_len=%d' % (
-                    new_gentx.get('marker'), new_gentx.get('flag'), len(new_gentx.get('witness', [])))
-            else:
-                print >>sys.stderr, '[SEGWIT] Original gentx has no SegWit data: marker=%s, flag=%s' % (
-                    gentx.get('marker'), gentx.get('flag'))
+            new_hexed_gentx = bitcoin_data.tx_type.pack(new_gentx).encode('hex')
 
             # Debug: Print work.py's calculation for comparison with stratum
             # Show what we're actually using to construct new_packed_gentx
@@ -1502,7 +1465,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     # Submit block and add error callback to catch any failures
                     # Use broadcaster for parallel propagation if available
                     block_submission = helper.submit_block(
-                        dict(header=header, txs=[new_gentx] + other_transactions),
+                        dict(header=header, txs=[new_hexed_gentx] + [tx["data"] for tx in other_transactions]),
                         False,
                         self.node,
                         broadcaster=self.node.broadcaster

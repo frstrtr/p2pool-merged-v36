@@ -382,12 +382,15 @@ class StratumRPCMiningProvider(object):
 
     
     def rpc_subscribe(self, miner_version=None, session_id=None, *args):
+        self.xnonce1 = "%x" % random.randrange(2**(8 * self.wb.COINBASE_XNONCE1_LENGTH))
+        if len(self.xnonce1) < 2 * self.wb.COINBASE_XNONCE1_LENGTH:
+            self.xnonce1 = ("0" * (2 * self.wb.COINBASE_XNONCE1_LENGTH - len(self.xnonce1))) + self.xnonce1
         reactor.callLater(0, self._send_work)
-        
-        return [
-            ["mining.notify", "ae6812eb4cd7735a302a8a9dd95cf71f"], # subscription details
-            "", # extranonce1
-            self.wb.COINBASE_NONCE_LENGTH, # extranonce2_size
+        return [[
+            ["mining.notify", self.xnonce1 + "1"], # subscription details
+            ["mining.set_difficulty", self.xnonce1 + "2"]],
+            self.xnonce1, # extranonce1
+            self.wb.COINBASE_NONCE_LENGTH - self.wb.COINBASE_XNONCE1_LENGTH, # extranonce2_size
         ]
     
     def rpc_authorize(self, username, password):
@@ -442,7 +445,7 @@ class StratumRPCMiningProvider(object):
             # But preserve harder targets that vardiff has set
             if self.target > x['min_share_target']:
                 self.target = x['min_share_target']
-        jobid = str(random.randrange(2**128))
+        jobid = str(random.randrange(2**32))
         self.other.svc_mining.rpc_set_difficulty(bitcoin_data.target_to_difficulty(self.target)*self.wb.net.DUMB_SCRYPT_DIFF).addErrback(lambda err: None)
         self.other.svc_mining.rpc_notify(
             jobid, # jobid
@@ -458,6 +461,11 @@ class StratumRPCMiningProvider(object):
         self.handler_map[jobid] = x, got_response
     
     def rpc_submit(self, worker_name, job_id, extranonce2, ntime, nonce, version_bits = None, *args):
+        # JSON/Stratum does not require 0-padding of hex numbers, but Python does
+        xnonce2_length = self.wb.COINBASE_NONCE_LENGTH - self.wb.COINBASE_XNONCE1_LENGTH
+        if len(extranonce2) < 2 * xnonce2_length:
+            extranonce2 = ("0" * (2 * xnonce2_length - len(extranonce2))) + extranonce2
+
         #asicboost: version_bits is the version mask that the miner used
         worker_name = worker_name.strip()
         if job_id not in self.handler_map:
@@ -465,17 +473,7 @@ class StratumRPCMiningProvider(object):
             #self.other.svc_client.rpc_reconnect().addErrback(lambda err: None)
             return False
         x, got_response = self.handler_map[job_id]
-        coinb_nonce = extranonce2.decode('hex')
-        # Debug: Uncomment to trace stratum share submission (prints on every share)
-        # print >>sys.stderr, '[STRATUM DEBUG] extranonce2 raw: %s (len=%d)' % (extranonce2, len(extranonce2))
-        # print >>sys.stderr, '[STRATUM DEBUG] coinb_nonce len: %d, expected: %d' % (len(coinb_nonce), self.wb.COINBASE_NONCE_LENGTH)
-        # Pad or truncate to match expected length
-        if len(coinb_nonce) < self.wb.COINBASE_NONCE_LENGTH:
-            # print >>sys.stderr, '[STRATUM DEBUG] Padding coinb_nonce from %d to %d bytes' % (len(coinb_nonce), self.wb.COINBASE_NONCE_LENGTH)
-            coinb_nonce = coinb_nonce + '\x00' * (self.wb.COINBASE_NONCE_LENGTH - len(coinb_nonce))
-        elif len(coinb_nonce) > self.wb.COINBASE_NONCE_LENGTH:
-            # print >>sys.stderr, '[STRATUM DEBUG] Truncating coinb_nonce from %d to %d bytes' % (len(coinb_nonce), self.wb.COINBASE_NONCE_LENGTH)
-            coinb_nonce = coinb_nonce[:self.wb.COINBASE_NONCE_LENGTH]
+        coinb_nonce = self.xnonce1.decode('hex') + extranonce2.decode('hex')
         assert len(coinb_nonce) == self.wb.COINBASE_NONCE_LENGTH
         new_packed_gentx = x['coinb1'] + coinb_nonce + x['coinb2']
 

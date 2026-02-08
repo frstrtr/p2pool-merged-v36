@@ -748,7 +748,7 @@ class BaseShare(object):
         except KeyError:
             return zip()
 
-    def check(self, tracker, known_txs=None, block_abs_height_func=None, feecache=None):
+    def check(self, tracker, known_txs=None, block_abs_height_func=None):
         from p2pool import p2p
         if self.timestamp > int(time.time()) + 600:
             raise ValueError("Share timestamp is %i seconds in the future! Check your system clock." % \
@@ -793,22 +793,7 @@ class BaseShare(object):
         if self.VERSION < 34:
             # check for excessive fees
             if self.share_data['previous_share_hash'] is not None and block_abs_height_func is not None:
-                height = (block_abs_height_func(self.header['previous_block'])+1)
-                base_subsidy = self.net.PARENT.SUBSIDY_FUNC(height)
-                fees = [feecache[x] for x in other_tx_hashes if x in feecache]
-                missing = sum([1 for x in other_tx_hashes if not x in feecache])
-                if missing == 0:
-                    max_subsidy = sum(fees) + base_subsidy
-                    details = "Max allowed = %i, requested subsidy = %i, share hash = %064x, miner = %s" % (
-                            max_subsidy, self.share_data['subsidy'], self.hash,
-                            self.address)
-                    if self.share_data['subsidy'] > max_subsidy:
-                        self.naughty = 1
-                        print "Excessive block reward in share! Naughty. " + details
-                    elif self.share_data['subsidy'] < max_subsidy:
-                        print "Strange, we received a share that did not include as many coins in the block reward as was allowed. "
-                        print "While permitted by the protocol, this causes coins to be lost forever if mined as a block, and costs us money."
-                        print details
+                pass # dead code for V35+ network
 
         if self.share_data['previous_share_hash'] and tracker.items[self.share_data['previous_share_hash']].naughty:
             print "naughty ancestor found %i generations ago" % tracker.items[self.share_data['previous_share_hash']].naughty
@@ -1092,14 +1077,14 @@ class OkayTracker(forest.Tracker):
         )), subset_of=self)
         self.get_cumulative_weights = WeightsSkipList(self)
 
-    def attempt_verify(self, share, block_abs_height_func, known_txs, feecache):
+    def attempt_verify(self, share, block_abs_height_func, known_txs):
         if share.hash in self.verified.items:
             return True
         height, last = self.get_height_and_last(share.hash)
         if height < self.net.CHAIN_LENGTH + 1 and last is not None:
             raise AssertionError()
         try:
-            share.gentx = share.check(self, known_txs, block_abs_height_func=block_abs_height_func, feecache=feecache)
+            share.gentx = share.check(self, known_txs, block_abs_height_func=block_abs_height_func)
         except:
             log.err(None, 'Share check failed: %064x -> %064x' % (share.hash, share.previous_hash if share.previous_hash is not None else 0))
             return False
@@ -1107,7 +1092,7 @@ class OkayTracker(forest.Tracker):
             self.verified.add(share)
             return True
     
-    def think(self, block_rel_height_func, block_abs_height_func, previous_block, bits, known_txs, feecache):
+    def think(self, block_rel_height_func, block_abs_height_func, previous_block, bits, known_txs):
         desired = set()
         bad_peer_addresses = set()
         
@@ -1121,7 +1106,7 @@ class OkayTracker(forest.Tracker):
             head_height, last = self.get_height_and_last(head)
             
             for share in self.get_chain(head, head_height if last is None else min(5, max(0, head_height - self.net.CHAIN_LENGTH))):
-                if self.attempt_verify(share, block_abs_height_func, known_txs, feecache):
+                if self.attempt_verify(share, block_abs_height_func, known_txs):
                     break
                 bads.append(share.hash)
             else:
@@ -1155,7 +1140,7 @@ class OkayTracker(forest.Tracker):
             get = min(want, can)
             #print 'Z', head_height, last_hash is None, last_height, last_last_hash is None, want, can, get
             for share in self.get_chain(last_hash, get):
-                if not self.attempt_verify(share, block_abs_height_func, known_txs, feecache):
+                if not self.attempt_verify(share, block_abs_height_func, known_txs):
                     break
             if head_height < self.net.CHAIN_LENGTH and last_last_hash is not None:
                 desired.add((

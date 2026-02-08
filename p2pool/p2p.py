@@ -19,10 +19,10 @@ class PeerMisbehavingError(Exception):
 
 
 def get_tx_packed_size(tx):
-    """Get the packed size of a transaction, handling both normal and MWEB raw transactions."""
-    if isinstance(tx, dict) and tx.get('_mweb'):
-        # MWEB transaction stored as raw bytes
-        return tx['_raw_size']
+    """Get the packed size of a transaction, handling both normal and GBT raw hex transactions."""
+    if isinstance(tx, dict) and 'data' in tx:
+        # GBT transaction stored as hex dict
+        return len(tx['data']) // 2
     return bitcoin_data.tx_type.packed_size(tx)
 
 

@@ -24,6 +24,9 @@ def unpack256(data):
     raw = struct.unpack("<QQQQ", data)
     return (raw[3]<<192) + (raw[2]<<128) + (raw[1]<<64) + raw[0]
 
+def hex_to_hash(data):
+    return unpack256(data.decode('hex')[::-1])
+
 def hash256d(data):
     return hashlib.sha256(hashlib.sha256(data).digest()).digest()
 
@@ -114,6 +117,9 @@ address_type = pack.ComposedType([
 ])
 
 def is_segwit_tx(tx):
+    # GBT dict transactions: segwit if hash != txid
+    if isinstance(tx, dict) and 'hash' in tx and 'txid' in tx and 'data' in tx:
+        return tx['hash'] != tx['txid']
     return tx.get('marker', -1) == 0 and tx.get('flag', -1) >= 1
 
 tx_in_type = pack.ComposedType([
@@ -138,18 +144,18 @@ tx_id_type = pack.ComposedType([
 ])
 
 def get_stripped_size(tx):
-    # TODO: For MWEB transactions, we store the raw size directly
-    # since we can't parse them to calculate size
-    if isinstance(tx, dict) and tx.get('_mweb'):
-        return tx['_raw_size']
+    # GBT dict transactions: use weight field to derive stripped size
+    # weight = real_size + 3 * stripped_size, so stripped_size = (4 * real_size - weight) / 3
+    if isinstance(tx, dict) and 'data' in tx and 'weight' in tx:
+        real_size = len(tx['data']) // 2
+        return (4 * real_size - tx['weight']) // 3
     if not 'stripped_size' in tx:
         tx['stripped_size'] = tx_id_type.packed_size(tx)
     return tx['stripped_size']
 def get_size(tx):
-    # TODO: For MWEB transactions, we store the raw size directly
-    # since we can't parse them to calculate size
-    if isinstance(tx, dict) and tx.get('_mweb'):
-        return tx['_raw_size']
+    # GBT dict transactions: size is len(hex_data) / 2
+    if isinstance(tx, dict) and 'data' in tx:
+        return len(tx['data']) // 2
     if not 'size' in tx:
         tx['size'] = tx_id_type.packed_size(tx)
     return tx['size']
@@ -193,12 +199,9 @@ class TransactionType(pack.Type):
             return dict(version=version, tx_ins=tx_ins, tx_outs=next['tx_outs'], lock_time=next['lock_time'])
     
     def write(self, file, item):
-        # TODO: Implement proper MWEB transaction serialization
-        # MWEB raw transactions are stored as dicts with '_mweb': True
-        # For now, write the raw bytes directly. This is used when sending
-        # transactions over P2P that we couldn't parse (MWEB format).
-        if isinstance(item, dict) and item.get('_mweb'):
-            file.write(item['_raw_tx'])
+        # GBT dict transactions: write raw hex data directly
+        if isinstance(item, dict) and 'data' in item and 'txid' in item:
+            file.write(item['data'].decode('hex'))
             return
         if is_segwit_tx(item):
             assert len(item['tx_ins']) == len(item['witness'])
@@ -495,9 +498,9 @@ def get_witness_commitment_hash(witness_root_hash, witness_reserved_value):
     return hash256(merkle_record_type.pack(dict(left=witness_root_hash, right=witness_reserved_value)))
 
 def get_wtxid(tx, txid=None, txhash=None):
-    # Handle MWEB raw transactions - wtxid is hash of full raw transaction
-    if isinstance(tx, dict) and tx.get('_mweb'):
-        return hash256(tx['_raw_tx'])
+    # GBT dict transactions: 'hash' field is the wtxid
+    if isinstance(tx, dict) and 'hash' in tx and 'data' in tx:
+        return hex_to_hash(tx['hash'])
     has_witness = False
     if is_segwit_tx(tx):
         assert len(tx['tx_ins']) == len(tx['witness'])
@@ -508,9 +511,9 @@ def get_wtxid(tx, txid=None, txhash=None):
         return hash256(tx_id_type.pack(tx)) if txid is None else txid
 
 def get_txid(tx):
-    # Handle MWEB raw transactions stored as dict with _raw_tx key
-    if isinstance(tx, dict) and tx.get('_mweb'):
-        return hash256(tx['_raw_tx'])
+    # GBT dict transactions: 'txid' field is the txid
+    if isinstance(tx, dict) and 'txid' in tx and 'data' in tx:
+        return hex_to_hash(tx['txid'])
     return hash256(tx_id_type.pack(tx))
 
 def pubkey_to_script2(pubkey):
