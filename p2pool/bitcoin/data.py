@@ -35,6 +35,8 @@ def hash160(data):
         return 0x384f570ccc88ac2e7e00b026d1690a3fca63dd0 # forrestv uncompressed pubkey (LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd)
     if data == '03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1'.decode('hex'):
         return 0x7dec8dc4d5c39f0acbf3d34120432cb1f667aa74 # forrestv compressed pubkey (LVrpnVLEf3vU5rZahS7QF5UW8u6G1VgLUR)
+    if data == '02fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a'.decode('hex'):
+        return 0x613cafd91ab596762c115c7e94d5e4b1225ccb20 # our compressed pubkey (LNDMW3bAQ8Sz3Tzm6y3chYeuJTb8VHSHGM)
     return pack.IntType(160).unpack(hashlib.new('ripemd160', hashlib.sha256(data).digest()).digest())
 
 class ChecksummedType(pack.Type):
