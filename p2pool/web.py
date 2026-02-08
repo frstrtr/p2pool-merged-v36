@@ -1493,27 +1493,36 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except:
             return "127.0.0.1"
     
+    _external_ip_resolved = [False]  # True once we have a real external IP
+    
     @defer.inlineCallbacks
     def _resolve_external_ip():
         """Resolve external IP asynchronously using Twisted, cache the result"""
-        if _cached_external_ip[0] is not None:
+        if _external_ip_resolved[0]:
             return
         
-        # Start with local IP immediately so dashboard never blocks
-        _cached_external_ip[0] = _detect_local_ip()
+        # Set local IP as immediate fallback so dashboard never blocks
+        if _cached_external_ip[0] is None:
+            _cached_external_ip[0] = _detect_local_ip()
         
         # Try external services asynchronously (non-blocking)
         for url in ['https://api.ipify.org', 'https://icanhazip.com', 'https://ifconfig.me/ip']:
             try:
                 from twisted.web.client import getPage
-                body = yield getPage(url.encode('ascii'), timeout=3, headers={b'User-Agent': b'p2pool'})
+                body = yield getPage(url.encode('ascii'), timeout=5, headers={b'User-Agent': b'p2pool'})
                 ip = body.strip()
-                if ip and len(ip) < 50:
+                if ip and len(ip) < 50 and ip != _detect_local_ip():
                     _cached_external_ip[0] = ip
+                    _external_ip_resolved[0] = True
                     print 'Detected external IP: %s' % ip
                     break
             except:
                 continue
+        
+        # If we still don't have external IP, retry in 30 seconds
+        if not _external_ip_resolved[0]:
+            print 'External IP detection failed, will retry in 30s (using %s for now)' % _cached_external_ip[0]
+            reactor.callLater(30, _resolve_external_ip)
     
     # Fire and forget — resolve in background, don't block startup
     reactor.callLater(1, _resolve_external_ip)
@@ -1522,6 +1531,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         """Get node connection info for miners (non-blocking, uses cached IP)"""
         try:
             external_ip = getattr(node, 'external_ip', None) or _cached_external_ip[0] or _detect_local_ip()
+            # --external-ip accepts ADDR[:PORT], strip port if present
+            if external_ip and ':' in str(external_ip):
+                external_ip = str(external_ip).rsplit(':', 1)[0]
             
             return {
                 'external_ip': external_ip,
