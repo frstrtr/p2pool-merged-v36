@@ -698,7 +698,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         coinbasevalue=auxblock.get('coinbasevalue', 0),  # Block reward + fees
                         height=auxblock.get('height', 0),
                         last_update=time.time(),
-                    )))
+                    )}))
                     
                     # Log when hash changes (new block template)
                     if new_hash != old_hash:
