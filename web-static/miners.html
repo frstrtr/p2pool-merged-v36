@@ -454,6 +454,9 @@
     </header>
     
     <div class="container">
+        <!-- Warnings -->
+        <div id="warnings"></div>
+
         <!-- Overview Stats -->
         <div class="stats-grid">
             <div class="stat-card">
@@ -564,6 +567,14 @@
         function loadMiners() {
             d3.json('../local_stats', function(local_stats) {
                 if (!local_stats) return;
+                
+                // Display warnings
+                d3.select('#warnings').selectAll('p').remove();
+                if (local_stats.warnings && local_stats.warnings.length > 0) {
+                    d3.select('#warnings').selectAll().data(local_stats.warnings).enter().append('p')
+                        .text(function(w){ return '⚠️ Warning: ' + w })
+                        .attr('style', 'color:#dc3545;border:1px solid #dc3545;background:rgba(220,53,69,0.1);padding:10px;border-radius:5px;margin-bottom:8px;font-weight:bold;');
+                }
                 
                 var attempts_to_share = local_stats.attempts_to_share || 0;
                 

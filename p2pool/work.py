@@ -567,6 +567,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 doge_tx_hashes=all_doge_tx_hashes,
                                 merged_net_name=merged_net_name,  # Store network name for block found message
                                 merged_net_symbol=merged_net_symbol,  # Store network symbol for block found message
+                                last_update=time.time(),
                             )}))
                             pass  # Suppressed: print '[MERGED-REFRESH] Template height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
                         else:
@@ -694,7 +695,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         use_submitauxblock=use_submitauxblock,
                         coinbasevalue=auxblock.get('coinbasevalue', 0),  # Block reward + fees
                         height=auxblock.get('height', 0),
-                    )}))
+                        last_update=time.time(),
+                    )))
                     
                     # Log when hash changes (new block template)
                     if new_hash != old_hash:
