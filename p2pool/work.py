@@ -291,11 +291,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             p2p_port = 22556 if dogecoin_net else None
                                         
                                         # Get local Dogecoin node's P2P address from args
+                                        # --merged-coind-p2p-address overrides --merged-coind-address for P2P
+                                        # This allows RPC to go to mm-adapter (e.g. 127.0.0.1) while P2P goes to the actual node (e.g. 192.168.86.27)
                                         merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
-                                        merged_address = getattr(self.args, 'merged_coind_address', None)
-                                        if merged_p2p_port and merged_address:
-                                            local_p2p_addr = (merged_address, merged_p2p_port)
-                                            print 'MergedBroadcaster will connect to our Dogecoin node at %s:%d' % (merged_address, merged_p2p_port)
+                                        merged_p2p_address = getattr(self.args, 'merged_coind_p2p_address', None) or getattr(self.args, 'merged_coind_address', None)
+                                        if merged_p2p_port and merged_p2p_address:
+                                            local_p2p_addr = (merged_p2p_address, merged_p2p_port)
+                                            print 'MergedBroadcaster will connect to our Dogecoin node at %s:%d' % (merged_p2p_address, merged_p2p_port)
                                     
                                     # Compute datadir_path for peer database storage
                                     # Use same logic as main.py: default to data/<net_name> or args.datadir/<net_name>
