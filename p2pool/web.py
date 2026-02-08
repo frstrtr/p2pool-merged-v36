@@ -439,9 +439,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     mw.get('merged_net_name', 'chainid %d' % chainid),
                     math.format_dt(time.time() - mw['last_update']),
                 )
-                for chainid, mw in node.merged_work.value.iteritems()
+                for chainid, mw in wb.merged_work.value.iteritems()
                 if 'last_update' in mw and time.time() > mw['last_update'] + 60
-            ],
+            ] if hasattr(wb, 'merged_work') and wb.merged_work and hasattr(wb.merged_work, 'value') and wb.merged_work.value else p2pool_data.get_warnings(node.tracker, node.best_share_var.value, node.net, bitcoind_getinfo_var.value, node.bitcoind_work.value),
             donation_proportion=wb.donation_percentage/100,
             version=p2pool.__version__,
             protocol_version=p2p.Protocol.VERSION,
