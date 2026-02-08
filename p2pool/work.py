@@ -903,10 +903,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         #   First share guarantee ensures secondary donation appears in PPLNS window.
         #   Safety net re-credits if too long since last secondary share.
         #
-        # POST-V36 (>=95% signaling) - BOTH SCRIPTS IN COINBASE:
-        #   Fair approach: BOTH donation scripts are in every coinbase:
-        #   - DONATION_SCRIPT receives donation % (original author forrestv - FAIR!)
-        #   - SECONDARY_DONATION_SCRIPT receives dust marker (our project - VISIBILITY!)
+        # POST-V36 (>=95% signaling) - 1-of-2 P2MS IN COINBASE:
+        #   COMBINED_DONATION_SCRIPT replaces both donation outputs.
+        #   Single output, either party can spend independently.
         #   No fake miner needed - normal user address resolution.
         #
         # PPLNS window = 8640 shares. At ~1 share/min = 8640 minutes = 144 hours = 6 days
@@ -916,8 +915,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
             v36_active, v36_signaling = self.is_v36_active()
             
             if v36_active:
-                # V36 ACTIVE: BOTH scripts in coinbase - no fake miner needed!
-                # Original author gets donation %, our project gets marker.
+                # V36 ACTIVE: 1-of-2 P2MS combined donation in coinbase - no fake miner needed!
+                # COMBINED_DONATION_SCRIPT receives full donation, either party can spend.
                 # Just resolve normal user address.
                 try:
                     if not user or not user.strip():
@@ -1197,10 +1196,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # Pre-V36 (<95%): Split donation - half to primary (DONATION_SCRIPT in coinbase),
             #                 half to secondary (via fake miner shares to SECONDARY_DONATION_PUBKEY_HASH)
             #
-            # Post-V36 (>=95%): BOTH scripts in coinbase - fair to original author + our marker:
-            #                   - DONATION_SCRIPT receives donation % (original author - forrestv)
-            #                   - SECONDARY_DONATION_SCRIPT receives dust marker (our project)
-            #                   No fake miner needed - both scripts always in coinbase!
+            # Post-V36 (>=95%): COMBINED_DONATION_SCRIPT (1-of-2 P2MS) in coinbase
+            #                   Single output, either party can spend independently
+            #                   No fake miner needed - full donation in coinbase!
             #
             # The donation field controls total donation %. Distribution between scripts is in data.py
             coinbase_donation_pct = self.donation_percentage
