@@ -1,6 +1,7 @@
 *.pyc
 *.pyo
 *~
+.venv/
 
 /data/
 /litecoin_scrypt/build/
