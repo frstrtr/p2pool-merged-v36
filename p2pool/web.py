@@ -320,6 +320,56 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             return '%dh %dm' % (hours, minutes)
         return '%dm' % minutes
     
+    def get_activation_window_debug():
+        """Debug endpoint: inspect individual shares in the activation window"""
+        chain_length = node.net.CHAIN_LENGTH  # 8640
+        chain_height = node.tracker.get_height(node.best_share_var.value)
+        if chain_height < chain_length:
+            return dict(error='chain not mature', chain_height=chain_height, chain_length=chain_length)
+        
+        # Activation window: start at CHAIN_LENGTH*9//10 back, sample CHAIN_LENGTH//10
+        window_start_pos = chain_length * 9 // 10  # 7776
+        window_size = chain_length // 10  # 864
+        
+        start_hash = node.tracker.get_nth_parent_hash(node.best_share_var.value, window_start_pos)
+        
+        # Sample shares in the activation window
+        by_version = {}
+        by_miner_version = {}
+        share_count = 0
+        for share in node.tracker.get_chain(start_hash, window_size):
+            dv = share.desired_version
+            weight = bitcoin_data.target_to_average_attempts(share.target)
+            by_version[dv] = by_version.get(dv, 0) + weight
+            
+            # Get miner address
+            addr = getattr(share, 'address', None)
+            if addr is None:
+                addr = 'unknown'
+            key = '%s_v%d' % (addr[:12] if isinstance(addr, str) else 'hash:%x' % (getattr(share, 'pubkey_hash', 0) & 0xFFFFFFFF), dv)
+            by_miner_version[key] = by_miner_version.get(key, 0) + weight
+            share_count += 1
+        
+        total_weight = sum(by_version.values())
+        version_pcts = {}
+        for v, w in sorted(by_version.items()):
+            version_pcts['v%d' % v] = dict(weight=w, pct=round(100.0 * w / total_weight, 2) if total_weight else 0)
+        
+        # Top miners by version
+        top_miners = sorted(by_miner_version.items(), key=lambda x: -x[1])[:20]
+        miner_breakdown = {}
+        for key, w in top_miners:
+            miner_breakdown[key] = dict(weight=w, pct=round(100.0 * w / total_weight, 2) if total_weight else 0)
+        
+        return dict(
+            window_start_pos=window_start_pos,
+            window_size=window_size,
+            shares_sampled=share_count,
+            total_weight=total_weight,
+            versions=version_pcts,
+            miner_breakdown=miner_breakdown,
+        )
+    
     def get_global_stats():
         # averaged over last hour
         if node.tracker.get_height(node.best_share_var.value) < 10:
@@ -623,6 +673,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root.putChild('global_stats', WebInterface(get_global_stats))
     web_root.putChild('local_stats', WebInterface(get_local_stats))
     web_root.putChild('version_signaling', WebInterface(get_version_signaling))
+    web_root.putChild('activation_debug', WebInterface(get_activation_window_debug))
     web_root.putChild('peer_addresses', WebInterface(lambda: ' '.join('%s%s' % (peer.transport.getPeer().host, ':'+str(peer.transport.getPeer().port) if peer.transport.getPeer().port != node.net.P2P_PORT else '') for peer in node.p2p_node.peers.itervalues())))
     web_root.putChild('peer_txpool_sizes', WebInterface(lambda: dict(('%s:%i' % (peer.transport.getPeer().host, peer.transport.getPeer().port), peer.remembered_txs_size) for peer in node.p2p_node.peers.itervalues())))
     web_root.putChild('pings', WebInterface(defer.inlineCallbacks(lambda: defer.returnValue(
