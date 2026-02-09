@@ -485,6 +485,9 @@ class MergedMiningBroadcaster(object):
                 self.chain_name, _safe_addr_str(addr)))
         
         factory = bitcoin_p2p.ClientFactory(self.p2p_net)
+        # CRITICAL: Disable auto-reconnect. ReconnectingClientFactory will
+        # spawn infinite TCP sockets if left enabled, exhausting fd ulimit.
+        factory.stopTrying()
         connector = reactor.connectTCP(host, port, factory, timeout=10)
         
         try:
@@ -631,6 +634,11 @@ class MergedMiningBroadcaster(object):
             return
         
         try:
+            if conn.get('factory'):
+                conn['factory'].stopTrying()
+        except:
+            pass
+        try:
             if conn.get('connector'):
                 conn['connector'].disconnect()
         except Exception as e:
@@ -718,6 +726,12 @@ class MergedMiningBroadcaster(object):
                     else:
                         print('MergedBroadcaster[%s]: Lost connection to %s' % (
                             self.chain_name, _safe_addr_str(addr)))
+                    # Stop factory from auto-reconnecting
+                    try:
+                        if conn.get('factory'):
+                            conn['factory'].stopTrying()
+                    except:
+                        pass
                     del self.connections[addr]
         
         # CRITICAL: Reconnect to our own node if disconnected (with backoff)

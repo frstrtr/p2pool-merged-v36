@@ -573,6 +573,7 @@ class NetworkBroadcaster(object):
         """Maintain connections to the best peers from our database
         
         Rate-limited and non-blocking connection management:
+        - Prunes dead/disconnected connections first
         - Limits concurrent pending connections
         - Uses exponential backoff for failed peers
         - Only attempts a few connections per cycle
@@ -582,6 +583,48 @@ class NetworkBroadcaster(object):
             return
         
         current_time = time.time()
+        
+        # CRITICAL: Prune dead connections FIRST, before capacity checks.
+        # Without this, self.connections accumulates zombies and thinks
+        # we're at capacity when we actually have zero live peers.
+        dead_addrs = []
+        for addr, conn in list(self.connections.items()):
+            if conn.get('protected'):
+                continue  # Never prune protected (local coind)
+            protocol = conn.get('protocol')
+            factory = conn.get('factory')
+            is_dead = False
+            # Check 1: protocol transport is gone or disconnected
+            if protocol and hasattr(protocol, 'transport'):
+                if not protocol.transport or not protocol.transport.connected:
+                    is_dead = True
+            # Check 2: factory reports no active connection
+            elif factory and hasattr(factory, 'conn') and factory.conn.value is None:
+                is_dead = True
+            # Check 3: no protocol stored (legacy entry)
+            elif protocol is None and factory:
+                if hasattr(factory, 'conn') and factory.conn.value is None:
+                    is_dead = True
+            if is_dead:
+                dead_addrs.append(addr)
+        
+        if dead_addrs:
+            for addr in dead_addrs:
+                conn = self.connections[addr]
+                # Stop factory from auto-reconnecting (ReconnectingClientFactory)
+                try:
+                    if conn.get('factory'):
+                        conn['factory'].stopTrying()
+                except:
+                    pass
+                try:
+                    if conn.get('connector'):
+                        conn['connector'].disconnect()
+                except:
+                    pass
+                del self.connections[addr]
+            print('Broadcaster[%s]: Pruned %d dead connections (%d remaining)' % (
+                self.chain_name, len(dead_addrs), len(self.connections)))
         
         # Verify local node connection and update its last_seen
         if self.local_addr not in self.connections:
@@ -714,6 +757,9 @@ class NetworkBroadcaster(object):
         print('Broadcaster[%s]: Connecting to %s...' % (self.chain_name, _safe_addr_str(addr)))
         
         factory = bitcoin_p2p.ClientFactory(self.net)
+        # CRITICAL: Disable auto-reconnect. ReconnectingClientFactory will
+        # spawn infinite TCP sockets if left enabled, exhausting fd ulimit.
+        factory.stopTrying()
         connector = reactor.connectTCP(host, port, factory, timeout=10)
         
         self.stats['connection_stats']['total_attempts'] += 1
@@ -725,6 +771,7 @@ class NetworkBroadcaster(object):
             self.connections[addr] = {
                 'factory': factory,
                 'connector': connector,
+                'protocol': protocol,
                 'connected_at': time.time(),
                 'protected': False
             }
@@ -761,6 +808,7 @@ class NetworkBroadcaster(object):
                 self.chain_name, _safe_addr_str(addr), e), file=sys.stderr)
             
             try:
+                factory.stopTrying()
                 connector.disconnect()
             except:
                 pass
@@ -817,6 +865,11 @@ class NetworkBroadcaster(object):
                 self.chain_name, _safe_addr_str(addr)), file=sys.stderr)
             return
         
+        try:
+            if conn.get('factory'):
+                conn['factory'].stopTrying()
+        except:
+            pass
         try:
             if conn.get('connector'):
                 conn['connector'].disconnect()
