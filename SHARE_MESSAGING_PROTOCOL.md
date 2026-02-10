@@ -148,7 +148,8 @@ Value  Name            Signed?     Persistent?  Description
 Bit 0 (0x01): FLAG_HAS_SIGNATURE  — Message is signed
 Bit 1 (0x02): FLAG_BROADCAST      — Relay to peers
 Bit 2 (0x04): FLAG_PERSISTENT     — Store in history
-Bits 3-7:     Reserved (must be 0)
+Bit 3 (0x08): FLAG_PRIVATE        — Payload is ECDH-encrypted for a specific recipient
+Bits 4-7:     Reserved (must be 0)
 ```
 
 ### Unsigned Messages
@@ -296,6 +297,108 @@ UTF-8 encoded text, max 220 bytes.
 ```
 CRITICAL: v36 activation bug found. Upgrade to commit abc1234 immediately.
 ```
+
+## Wire Obfuscation Layer
+
+All `message_data` bytes in shares are obfuscated before packing into
+`ref_type`. This prevents passive TCP traffic analysis by anyone not running
+a p2pool node. It is NOT cryptographic security — any p2pool node can
+deobfuscate.
+
+### Obfuscation Key Derivation
+
+```
+obfuscation_key = SHA256("p2pool-msg-obfuscate" || net.IDENTIFIER)   # 32 bytes
+```
+
+`net.IDENTIFIER` is the 8-byte network identifier already used by p2pool.
+The obfuscation key is deterministic and the same for all nodes on the
+same network.
+
+### Obfuscation Process
+
+```
+Encrypt (before packing into ref_type):
+  nonce      = share_hash[:12]                        # 12 bytes from the share hash
+  keystream  = SHA256(obfuscation_key || nonce)       # truncate/extend as needed
+  ciphertext = XOR(message_data, keystream)
+
+Decrypt (after unpacking from ref_type):
+  nonce      = share_hash[:12]
+  keystream  = SHA256(obfuscation_key || nonce)
+  plaintext  = XOR(ciphertext, keystream)
+```
+
+For messages longer than 32 bytes, extend the keystream by hashing
+successive counter values: `SHA256(obfuscation_key || nonce || counter)`.
+
+### Rationale
+
+- Prevents ISP/network-level inspection of p2pool message content
+- Zero performance overhead (single SHA256 per share)
+- Does not require key exchange or per-peer state
+- Any p2pool node can still read all messages (this is by design)
+
+## Private Message Encryption (ECDH)
+
+For private miner-to-miner messages (`MINER_MESSAGE` with `FLAG_PRIVATE`),
+end-to-end encryption ensures only the intended recipient can read the
+content.
+
+### Message Flag Extension
+
+```
+Bit 3 (0x08): FLAG_PRIVATE — Payload is ECDH-encrypted for a specific recipient
+```
+
+### Private Message Wire Format
+
+```
+Offset  Size  Field            Description
+------  ----  ---------------  ------------------------------------------
+0       20    recipient_id     signing_id of intended recipient
+20      N     ciphertext       AES-256-GCM encrypted payload
+
+The ciphertext replaces the normal plaintext payload.
+```
+
+### ECDH Key Agreement
+
+```
+Both parties have signing keys (secp256k1):
+  Sender:    (sender_privkey, sender_pubkey)     — from DerivedSigningKey
+  Recipient: (recipient_privkey, recipient_pubkey) — from DerivedSigningKey
+
+Shared secret:
+  shared_point = ECDH(sender_privkey, recipient_pubkey)
+               = ECDH(recipient_privkey, sender_pubkey)       # same result
+  shared_secret = SHA256(shared_point.x || shared_point.y)    # 32 bytes
+
+Encryption key derivation:
+  encryption_key = HMAC-SHA256(shared_secret, "p2pool-msg-encrypt")   # 32 bytes
+  nonce          = timestamp[4 bytes] || counter[4 bytes] || zero[4 bytes]  # 12 bytes
+
+Encrypt:
+  ciphertext, tag = AES-256-GCM(encryption_key, nonce, plaintext)
+
+Decrypt (recipient):
+  plaintext = AES-256-GCM_decrypt(encryption_key, nonce, ciphertext, tag)
+```
+
+### Private Message Behavior
+
+- All nodes relay private messages in shares (they're PoW-protected)
+- Non-recipient nodes see only: recipient_id + opaque ciphertext
+- Only the recipient can decrypt using ECDH shared secret
+- Sender identity is still visible (signing_id and signature are unencrypted)
+- To hide sender identity: use unsigned private messages (signing_id = zeros)
+  but this removes authentication
+
+### Forward Secrecy Limitation
+
+ECDH with static signing keys does NOT provide forward secrecy.
+If a signing key is compromised, past messages can be decrypted.
+Mitigation: Frequent key rotation (incrementing key_index).
 
 ## Deduplication
 
