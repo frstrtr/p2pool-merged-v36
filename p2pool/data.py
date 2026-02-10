@@ -949,7 +949,7 @@ class MergedMiningShare(BaseShare):
         ])
         merged_addresses = ('merged_addresses', pack.PossiblyNoneType(
             [],  # Default: empty list (use auto-conversion)
-            pack.ListType(merged_address_entry, max_count=8)  # Max 8 merged chains
+            pack.ListType(merged_address_entry)  # Merged chain address entries
         ))
         
         t['share_info_type'] = pack.ComposedType([
