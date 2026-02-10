@@ -521,6 +521,10 @@ class BaseShare(object):
         if segwit_activated:
             share_info['segwit_data'] = segwit_data
         
+        # V36+: include merged_addresses field (empty list = auto-convert from parent address)
+        if cls.VERSION >= 36:
+            share_info['merged_addresses'] = None  # None = use default (auto-conversion)
+        
         # Build payouts list - IMPORTANT: donation script must be LAST for gentx_before_refhash compatibility
         # Pre-V36: DONATION_SCRIPT (P2PK, 67 bytes) as last output
         # V36+:    COMBINED_DONATION_SCRIPT (1-of-2 P2MS, 71 bytes) as last output
