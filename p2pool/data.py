@@ -787,7 +787,8 @@ class BaseShare(object):
             self.share_info['timestamp'], self.share_info['bits'].target, 
             self.contents['ref_merkle_link'], [(h, None) for h in other_tx_hashes], self.net,
             known_txs=None, last_txout_nonce=self.contents['last_txout_nonce'], 
-            segwit_data=self.share_info.get('segwit_data', None))
+            segwit_data=self.share_info.get('segwit_data', None),
+            v36_active=(self.VERSION >= 36))
         
         assert other_tx_hashes2 == other_tx_hashes
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
