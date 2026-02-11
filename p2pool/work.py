@@ -1342,11 +1342,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 # print >>sys.stderr, '[SHARE DEBUG] MAX_TARGET = %x' % self.node.net.MAX_TARGET
                 # print >>sys.stderr, '[SHARE DEBUG] MIN_TARGET = %x' % self.node.net.MIN_TARGET
                 # print >>sys.stderr, '[SHARE DEBUG] SANE_TARGET_RANGE = (%x, %x)' % self.node.net.PARENT.SANE_TARGET_RANGE
-                print 'New work for worker %s! Difficulty: %.06f Share difficulty: %.06f (speed %.06f) Total block value: %.6f %s including %i transactions' % (
+                print 'New work for worker %s! Difficulty: %.06f Share difficulty: %.06f (%sH/s) Total block value: %.6f %s including %i transactions' % (
                     bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT),
                     bitcoin_data.target_to_difficulty(target),
                     bitcoin_data.target_to_difficulty(share_info['bits'].target),
-                    local_addr_rates.get(pubkey_hash, 0),
+                    math.format(int(local_addr_rates.get(pubkey_hash, 0))),
                     self.current_work.value['subsidy']*1e-8, self.node.net.PARENT.SYMBOL,
                     len(self.current_work.value['transactions']),
                 )

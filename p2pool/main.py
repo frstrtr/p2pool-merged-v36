@@ -312,6 +312,13 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
             if ':' in host:
                 host, port_str = host.split(':')
                 port = int(port_str)
+            # Validate hostname before resolving to avoid IDNA encoding errors
+            # (PyPy 2.7's IDNA codec crashes on empty labels or labels > 63 chars)
+            if not host or len(host) > 253:
+                raise ValueError('invalid hostname: %r' % (host,))
+            for label in host.split('.'):
+                if not label or len(label) > 63:
+                    raise ValueError('invalid hostname label in %r' % (host,))
             defer.returnValue(((yield reactor.resolve(host)), port))
         
         addrs = {}

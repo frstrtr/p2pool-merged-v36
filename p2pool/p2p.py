@@ -681,7 +681,9 @@ class ClientFactory(protocol.ClientFactory):
             if len(self.conns) < self.desired_conns and len(self.attempts) < self.max_attempts and self.node.addr_store:
                 (host, port), = self.node.get_good_peers(1)
                 
-                if self._host_to_ident(host) in self.attempts:
+                if ':' in host:
+                    pass # skip IPv6 - connectTCP triggers IDNA encoding errors
+                elif self._host_to_ident(host) in self.attempts:
                     pass
                 elif host in self.node.bans and self.node.bans[host] > time.time():
                     pass
