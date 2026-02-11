@@ -1103,12 +1103,21 @@
                     <a href="javascript:toggleAutoRefresh()" id="auto-refresh-btn" class="refresh-btn" title="Toggle auto-refresh">⏸ Auto-Refresh: OFF</a>
                 </nav>
             </div>
-            <div class="miner-info" id="miner-info">
-                <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 5px;">⛏️ Miner Configuration</div>
-                <div style="font-size: 0.85rem; font-family: monospace; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;">
-                    <div><strong>Stratum URL:</strong> <span id="miner-url">detecting...</span></div>
-                    <div style="margin-top: 3px;"><strong>Username:</strong> <span style="color: #ffc107;">YOUR_<span id="miner-coin-symbol">LTC</span>_ADDRESS</span></div>
-                    <div style="margin-top: 3px;"><strong>Password:</strong> <span style="color: #888;">anything</span></div>
+            <div style="display: flex; gap: 15px; margin-top: 15px; flex-wrap: wrap;">
+                <div class="miner-info" id="miner-info" style="flex: 1; min-width: 280px; margin-top: 0;">
+                    <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 5px;">⛏️ Miner Configuration</div>
+                    <div style="font-size: 0.85rem; font-family: monospace; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;">
+                        <div><strong>Stratum URL:</strong> <span id="miner-url">detecting...</span></div>
+                        <div style="margin-top: 3px;"><strong>Username:</strong> <span style="color: #ffc107;">YOUR_<span id="miner-coin-symbol">LTC</span>_ADDRESS</span></div>
+                        <div style="margin-top: 3px;"><strong>Password:</strong> <span style="color: #888;">anything</span></div>
+                    </div>
+                </div>
+                <div class="miner-info" id="network-info" style="flex: 0 0 auto; min-width: 220px; margin-top: 0;">
+                    <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 5px;">🔗 Network</div>
+                    <div style="font-size: 0.85rem; font-family: monospace; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;">
+                        <div><strong>Peers:</strong> <span id="peers_total">-</span> (Out: <span id="peers_out">-</span> | In: <span id="peers_in">-</span>)</div>
+                        <div style="margin-top: 3px;"><strong>Uptime:</strong> <span id="uptime">-</span></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1170,10 +1179,10 @@
         
         <!-- New Layout: 4 columns grid -->
         <div class="main-layout">
-            <!-- First Row: Pool Hash Rate, Local Hash Rate, Shares, Network -->
+            <!-- First Row: Pool Hash Rate, Local Hash Rate, Shares, Best Share -->
             <div class="left-column">
                 <div class="stat-card">
-                    <h3><span class="icon">🌐</span> Pool Hash Rate</h3>
+                    <h3><span class="icon">🌐</span> P2Pool Hash Rate</h3>
                     <div class="stat-value primary" id="pool_rate">-</div>
                     <div class="stat-sub">DOA+Orphan: <span id="pool_stale">-</span></div>
                     <div class="stat-detail">Share Difficulty: <span id="difficulty">-</span></div>
@@ -1199,17 +1208,10 @@
                     </div>
                     
                     <div class="stat-card">
-                        <h3><span class="icon">🔗</span> Network</h3>
-                        <div class="stat-value" id="peers_total">-</div>
-                        <div class="stat-sub">Out: <span id="peers_out">-</span> | In: <span id="peers_in">-</span></div>
-                        <div class="stat-detail">Uptime: <span id="uptime">-</span></div>
-                    </div>
-                    
-                    <div class="stat-card">
                         <h3><span class="icon">🎯</span> Best Share</h3>
-                        <div class="stat-value" id="best_share_round" style="font-size: 1.1rem;">-</div>
+                        <div class="stat-value" id="best_share_round" style="font-size: 1.3rem;">-</div>
                         <div class="stat-sub">Round: <span id="best_share_round_pct" style="color: var(--primary);">-</span> of block</div>
-                        <div class="stat-detail">Record: <span id="best_share_alltime">-</span> (<span id="best_share_alltime_pct">-</span>)</div>
+                        <div class="stat-detail">🏆 Record: <span id="best_share_alltime">-</span> (<span id="best_share_alltime_pct">-</span>)</div>
                     </div>
                 </div>
                 
