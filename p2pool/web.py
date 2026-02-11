@@ -1502,12 +1502,27 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         if _external_ip_resolved[0]:
             return
         
+        # If --external-ip was provided, use it directly and skip auto-detection
+        configured_ip = getattr(node, 'external_ip', None)
+        if configured_ip:
+            ip = str(configured_ip)
+            if ':' in ip:
+                ip = ip.rsplit(':', 1)[0]
+            _cached_external_ip[0] = ip
+            _external_ip_resolved[0] = True
+            print 'Using configured external IP: %s' % ip
+            return
+        
         # Set local IP as immediate fallback so dashboard never blocks
         if _cached_external_ip[0] is None:
             _cached_external_ip[0] = _detect_local_ip()
         
         # Try external services asynchronously (non-blocking)
-        for url in ['https://api.ipify.org', 'https://icanhazip.com', 'https://ifconfig.me/ip']:
+        # Use HTTP (not HTTPS) because PyPy 2.7's cryptography/OpenSSL binding
+        # is broken (undefined symbol: FIPS_mode) making TLS connections fail.
+        # For IP detection, HTTPS isn't security-critical — we're just reading
+        # our own public IP address, not transmitting secrets.
+        for url in ['http://api.ipify.org', 'http://icanhazip.com', 'http://ifconfig.me/ip', 'http://checkip.amazonaws.com']:
             try:
                 from twisted.web.client import getPage
                 body = yield getPage(url.encode('ascii'), timeout=5, headers={b'User-Agent': b'p2pool'})
