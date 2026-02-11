@@ -5,11 +5,25 @@ import gc
 import json
 import os
 import random
+import socket as _socket
 import sys
 import time
 import signal
 import traceback
 import urlparse
+
+# Monkey-patch socket.getaddrinfo to handle IDNA encoding errors.
+# PyPy 2.7's IDNA codec raises UnicodeError on hostnames with empty labels
+# (consecutive dots) or labels > 63 chars. Twisted's GAIResolver only catches
+# gaierror, so UnicodeError propagates as an unhandled error. Converting it
+# to gaierror lets Twisted's existing error handling work correctly.
+_orig_getaddrinfo = _socket.getaddrinfo
+def _safe_getaddrinfo(*args, **kwargs):
+    try:
+        return _orig_getaddrinfo(*args, **kwargs)
+    except UnicodeError as e:
+        raise _socket.gaierror(8, 'IDNA encoding failed: %s' % str(e))
+_socket.getaddrinfo = _safe_getaddrinfo
 
 if '--iocp' in sys.argv:
     from twisted.internet import iocpreactor
