@@ -1413,10 +1413,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
             self._attempt_counter += 1
             if pow_hash < self._best_pow_hash:
                 self._best_pow_hash = pow_hash
-                ratio = float(pow_hash) / float(header['bits'].target)
-                print >>sys.stderr, 'New best hash! pow=%064x target=%064x (%.2f%% of target)' % (pow_hash, header['bits'].target, ratio * 100)
+                ratio = float(header['bits'].target) / float(pow_hash) if pow_hash > 0 else 0.0
+                print >>sys.stderr, 'New best hash! pow=%064x target=%064x (%.8f%% of target)' % (pow_hash, header['bits'].target, ratio * 100)
             if self._attempt_counter % 1000 == 0:
-                print >>sys.stderr, 'Block mining: %d attempts, best=%.2f%% of target' % (self._attempt_counter, float(self._best_pow_hash) / float(header['bits'].target) * 100)
+                print >>sys.stderr, 'Block mining: %d attempts, best=%.8f%% of target' % (self._attempt_counter, (float(header['bits'].target) / float(self._best_pow_hash) * 100) if self._best_pow_hash > 0 else 0.0)
             
             try:
                 if pow_hash <= header['bits'].target or p2pool.DEBUG:
