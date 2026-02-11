@@ -871,12 +871,14 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         # Get best difficulty for all workers of this address
         best_diff_all_time = 0
         best_diff_session = 0
+        best_diff_round = 0
         session_start = wb.session_start_time
         for worker_name in miner_hash_rates:
             if extract_base_address(worker_name) == address:
                 worker_best = wb.get_miner_best_difficulty(worker_name)
                 best_diff_all_time = max(best_diff_all_time, worker_best['all_time'])
                 best_diff_session = max(best_diff_session, worker_best['session'])
+                best_diff_round = max(best_diff_round, worker_best['round'])
         
         # Get hashrate periods for all workers of this address
         hashrate_periods = {'1m': {'hashrate': 0, 'dead_hashrate': 0},
@@ -937,9 +939,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             # New fields for enhanced stats
             best_difficulty_all_time=best_diff_all_time,
             best_difficulty_session=best_diff_session,
+            best_difficulty_round=best_diff_round,
             best_diff_hashrate_all_time=best_diff_hashrate_all_time,
             best_diff_hashrate_session=best_diff_hashrate_session,
             session_start=session_start,
+            round_start=wb.node_best_difficulty['round_start'],
             hashrate_periods=hashrate_periods,
             network_difficulty=network_difficulty,
             chance_to_find_block=chance_to_find_block,
@@ -952,6 +956,40 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         )
     
     web_root.putChild('miner_stats', WebInterface(get_miner_stats))
+    
+    # ==== Node-wide best share stats (BitAxe style) ====
+    def get_best_share():
+        """Return node-wide best share stats: all-time, session, and current round"""
+        nb = wb.node_best_difficulty
+        network_difficulty = bitcoin_data.target_to_difficulty(node.bitcoind_work.value['bits'].target)
+        
+        def pct_of_block(diff):
+            return (diff / network_difficulty * 100) if network_difficulty > 0 and diff > 0 else 0
+        
+        return dict(
+            network_difficulty=network_difficulty,
+            all_time=dict(
+                difficulty=nb['all_time'],
+                pct_of_block=pct_of_block(nb['all_time']),
+                miner=nb['all_time_user'],
+                timestamp=nb['all_time_ts'],
+            ),
+            session=dict(
+                difficulty=nb['session'],
+                pct_of_block=pct_of_block(nb['session']),
+                miner=nb['session_user'],
+                timestamp=nb['session_ts'],
+                started=wb.session_start_time,
+            ),
+            round=dict(
+                difficulty=nb['round'],
+                pct_of_block=pct_of_block(nb['round']),
+                miner=nb['round_user'],
+                timestamp=nb['round_ts'],
+                started=nb['round_start'],
+            ),
+        )
+    web_root.putChild('best_share', WebInterface(get_best_share))
     
     # ==== Individual miner payouts endpoint ====
     def get_miner_payouts(address=None):

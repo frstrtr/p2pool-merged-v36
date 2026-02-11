@@ -190,10 +190,24 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.local_rate_monitor = math.RateMonitor(activity_window)
         self.local_addr_rate_monitor = math.RateMonitor(activity_window)
         
-        # Track best difficulty per miner (all-time and session)
-        # Format: {user: {'all_time': diff, 'session': diff, 'session_start': timestamp}}
+        # Track best difficulty per miner (all-time, session, and current round)
+        # Format: {user: {'all_time': diff, 'session': diff, 'round': diff, ...}}
         self.miner_best_difficulty = {}
         self.session_start_time = time.time()
+        
+        # Node-wide best difficulty tracking (across all miners)
+        self.node_best_difficulty = {
+            'all_time': 0,           # Never resets (absolute record)
+            'all_time_user': None,   # Who achieved it
+            'all_time_ts': 0,        # When
+            'session': 0,            # Resets on restart
+            'session_user': None,
+            'session_ts': 0,
+            'round': 0,              # Resets when pool finds a block
+            'round_user': None,
+            'round_ts': 0,
+            'round_start': time.time(),
+        }
 
         self.removed_unstales_var = variable.Variable((0, 0, 0))
         self.removed_doa_unstales_var = variable.Variable(0)
@@ -1044,23 +1058,56 @@ class WorkerBridge(worker_interface.WorkerBridge):
         return addr_hash_rates
 
     def update_best_difficulty(self, user, difficulty):
-        """Track best difficulty for a miner"""
+        """Track best difficulty for a miner and node-wide"""
+        now = time.time()
         if user not in self.miner_best_difficulty:
             self.miner_best_difficulty[user] = {
                 'all_time': 0,
                 'session': 0,
+                'round': 0,
                 'session_start': self.session_start_time
             }
         
-        if difficulty > self.miner_best_difficulty[user]['all_time']:
-            self.miner_best_difficulty[user]['all_time'] = difficulty
-        if difficulty > self.miner_best_difficulty[user]['session']:
-            self.miner_best_difficulty[user]['session'] = difficulty
+        rec = self.miner_best_difficulty[user]
+        if difficulty > rec['all_time']:
+            rec['all_time'] = difficulty
+        if difficulty > rec['session']:
+            rec['session'] = difficulty
+        if difficulty > rec['round']:
+            rec['round'] = difficulty
+        
+        # Node-wide tracking
+        nb = self.node_best_difficulty
+        if difficulty > nb['all_time']:
+            nb['all_time'] = difficulty
+            nb['all_time_user'] = user
+            nb['all_time_ts'] = now
+        if difficulty > nb['session']:
+            nb['session'] = difficulty
+            nb['session_user'] = user
+            nb['session_ts'] = now
+        if difficulty > nb['round']:
+            nb['round'] = difficulty
+            nb['round_user'] = user
+            nb['round_ts'] = now
+
+    def reset_round_best_difficulty(self):
+        """Reset round-level best difficulty (called when pool finds a block)"""
+        now = time.time()
+        # Reset per-miner round stats
+        for user in self.miner_best_difficulty:
+            self.miner_best_difficulty[user]['round'] = 0
+        # Reset node-wide round stats
+        self.node_best_difficulty['round'] = 0
+        self.node_best_difficulty['round_user'] = None
+        self.node_best_difficulty['round_ts'] = 0
+        self.node_best_difficulty['round_start'] = now
+        print >>sys.stderr, 'Best difficulty round stats reset (new round started)'
 
     def get_miner_best_difficulty(self, user):
         """Get best difficulty stats for a miner"""
         if user not in self.miner_best_difficulty:
-            return {'all_time': 0, 'session': 0, 'session_start': self.session_start_time}
+            return {'all_time': 0, 'session': 0, 'round': 0, 'session_start': self.session_start_time}
         return self.miner_best_difficulty[user]
 
     def get_miner_hashrate_periods(self, user):
@@ -1484,6 +1531,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             'target': header['bits'].target,
                         }
                         self.block_found.happened(block_info)
+                        # Reset round-level best difficulty stats
+                        self.reset_round_best_difficulty()
             except:
                 log.err(None, 'Error while processing potential block:')
 

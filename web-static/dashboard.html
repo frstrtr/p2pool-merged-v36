@@ -1204,6 +1204,13 @@
                         <div class="stat-sub">Out: <span id="peers_out">-</span> | In: <span id="peers_in">-</span></div>
                         <div class="stat-detail">Uptime: <span id="uptime">-</span></div>
                     </div>
+                    
+                    <div class="stat-card">
+                        <h3><span class="icon">🎯</span> Best Share</h3>
+                        <div class="stat-value" id="best_share_round" style="font-size: 1.1rem;">-</div>
+                        <div class="stat-sub">Round: <span id="best_share_round_pct" style="color: var(--primary);">-</span> of block</div>
+                        <div class="stat-detail">Record: <span id="best_share_alltime">-</span> (<span id="best_share_alltime_pct">-</span>)</div>
+                    </div>
                 </div>
                 
                 <!-- Second Row: Miners Block Value -->
@@ -1567,6 +1574,21 @@
             if (h >= 1e6) return d3.format('.2f')(h/1e6) + ' MH/s';
             if (h >= 1e3) return d3.format('.2f')(h/1e3) + ' KH/s';
             return d3.format('.0f')(h) + ' H/s';
+        }
+        
+        function format_difficulty(d) {
+            if (d == null || !isFinite(d) || d <= 0) return '0';
+            if (d < 1000) return d3.format('.2f')(d);
+            d = d / 1000;
+            if (d < 1000) return d3.format('.2f')(d) + ' K';
+            d = d / 1000;
+            if (d < 1000) return d3.format('.2f')(d) + ' M';
+            d = d / 1000;
+            if (d < 1000) return d3.format('.2f')(d) + ' G';
+            d = d / 1000;
+            if (d < 1000) return d3.format('.2f')(d) + ' T';
+            d = d / 1000;
+            return d3.format('.2f')(d) + ' P';
         }
         
         function format_time_short(timestamp) {
@@ -2084,6 +2106,17 @@
                             d3.select('#merged_block_value').text('N/A');
                             d3.select('#time_to_merged_block').text('N/A');
                         }
+                    });
+                    
+                    // Fetch best share stats (BitAxe style)
+                    d3.json('../best_share', function(bs) {
+                        if (!bs) return;
+                        // Current round
+                        d3.select('#best_share_round').text(format_difficulty(bs.round.difficulty));
+                        d3.select('#best_share_round_pct').text(d3.format('.8f')(bs.round.pct_of_block) + '%');
+                        // All-time record
+                        d3.select('#best_share_alltime').text(format_difficulty(bs.all_time.difficulty));
+                        d3.select('#best_share_alltime_pct').text(d3.format('.8f')(bs.all_time.pct_of_block) + '%');
                     });
                 });
             });

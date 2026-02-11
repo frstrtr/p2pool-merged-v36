@@ -490,13 +490,20 @@
                 <div class="stat-card">
                     <h3>Best Difficulty</h3>
                     <div class="stat-value" id="best_diff_all_time">0</div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted);">all-time best</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">all-time record</div>
                     <div style="margin-top: 8px; font-size: 0.8rem;">
                         <span style="color: var(--primary);">(<span id="chance_to_find">0%</span>)</span>
-                        <span class="tooltip" title="Chance to find a Block" style="cursor: help; margin-left: 4px;">ⓘ</span>
+                        <span class="tooltip" title="Best share as % of block difficulty" style="cursor: help; margin-left: 4px;">ⓘ</span>
                     </div>
-                    <div style="margin-top: 5px; font-size: 0.75rem; color: var(--text-muted);">
-                        <span id="best_diff_session">0</span> since session start
+                    <div style="margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem;">
+                            <span style="color: var(--text-muted);">Round</span>
+                            <span id="best_diff_round" style="color: var(--warning);">0</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; margin-top: 4px;">
+                            <span style="color: var(--text-muted);">Session</span>
+                            <span id="best_diff_session" style="color: var(--primary);">0</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -734,6 +741,7 @@
                 if (stats.best_difficulty_all_time !== undefined) {
                     document.getElementById('best_diff_all_time').textContent = format_difficulty(stats.best_difficulty_all_time);
                     document.getElementById('best_diff_session').textContent = format_difficulty(stats.best_difficulty_session || 0);
+                    document.getElementById('best_diff_round').textContent = format_difficulty(stats.best_difficulty_round || 0);
                     
                     // Chance to find block
                     var chance = stats.chance_to_find_block || 0;
