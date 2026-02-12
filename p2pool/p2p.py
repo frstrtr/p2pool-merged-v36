@@ -34,7 +34,10 @@ def fragment(f, **kwargs):
         fragment(f, **dict((k, v[len(v)//2:]) for k, v in kwargs.iteritems()))
 
 class Protocol(p2protocol.Protocol):
-    VERSION = 3600  # Must be >= Share V36's MINIMUM_PROTOCOL_VERSION (3600)
+    # Testing phase: 3503 = compatible with jtoomim peers (3502) while signaling
+    # our fork.  When V36 testing is complete, set this to 3600 (or auto-derive
+    # from max(share.MINIMUM_PROTOCOL_VERSION)).
+    VERSION = 3503
     
     max_remembered_txs_size = 25000000
     

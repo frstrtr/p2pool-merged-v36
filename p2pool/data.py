@@ -908,7 +908,9 @@ class MergedMiningShare(BaseShare):
     VERSION = 36
     VOTING_VERSION = 36
     SUCCESSOR = None  # Current head (until V37)
-    MINIMUM_PROTOCOL_VERSION = 3600
+    # Testing phase: 3503 allows peers running 3502+ (jtoomim network).
+    # Set to 3600 when V36 is finalized and ready for production.
+    MINIMUM_PROTOCOL_VERSION = 3503
     
     # V36 uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS) instead of DONATION_SCRIPT (P2PK)
     # This replaces two separate donation outputs with one combined output.
@@ -1248,11 +1250,15 @@ class OkayTracker(forest.Tracker):
         return self.net.CHAIN_LENGTH, self.verified.get_delta(share_hash, end_point).work/((0 - block_height + 1)*self.net.PARENT.BLOCK_PERIOD)
 
 def update_min_protocol_version(counts, share):
+    """One-way ratchet: when >=95% of shares are a newer version, bump
+    the network's MINIMUM_PROTOCOL_VERSION so peers running older protocol
+    versions are rejected.  Protocol.VERSION in p2p.py is auto-derived from
+    max(share.MINIMUM_PROTOCOL_VERSION) so it always satisfies this check."""
     minpver = getattr(share.net, 'MINIMUM_PROTOCOL_VERSION', 1400)
     newminpver = share.MINIMUM_PROTOCOL_VERSION
     if (counts is not None) and (minpver < newminpver):
             if counts.get(share.VERSION, 0) >= sum(counts.itervalues())*95//100:
-                share.net.MINIMUM_PROTOCOL_VERSION = newminpver # Reject peers running obsolete nodes
+                share.net.MINIMUM_PROTOCOL_VERSION = newminpver
                 print 'Setting MINIMUM_PROTOCOL_VERSION = %d' % (newminpver)
 
 def get_pool_attempts_per_second(tracker, previous_share_hash, dist, min_work=False, integer=False):
