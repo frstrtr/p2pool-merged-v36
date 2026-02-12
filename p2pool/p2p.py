@@ -34,7 +34,7 @@ def fragment(f, **kwargs):
         fragment(f, **dict((k, v[len(v)//2:]) for k, v in kwargs.iteritems()))
 
 class Protocol(p2protocol.Protocol):
-    VERSION = 3502  # Updated to match active Litecoin p2pool network (ml.toom.im)
+    VERSION = 3600  # Must be >= Share V36's MINIMUM_PROTOCOL_VERSION (3600)
     
     max_remembered_txs_size = 25000000
     
@@ -166,7 +166,8 @@ class Protocol(p2protocol.Protocol):
             print 'Peer %s:%i sent duplicate version message, disconnecting (will not ban)' % self.addr
             self.disconnect()
             return
-        if version < getattr(self.node.net, 'MINIMUM_PROTOCOL_VERSION', 1400):
+        min_ver = getattr(self.node.net, 'MINIMUM_PROTOCOL_VERSION', 1400)
+        if version < min_ver:
             raise PeerMisbehavingError('peer too old')
         
         self.other_version = version
