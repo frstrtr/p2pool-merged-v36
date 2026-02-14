@@ -1032,7 +1032,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         COINBASE_MATURITY = 100
         
         for b in block_history:
-            if b.get('miner') == address:
+            # Strip worker suffix from miner field for matching
+            block_miner = b.get('miner', '')
+            if block_miner:
+                block_miner = block_miner.split('.')[0].split('+')[0].split('/')[0].split('_')[0]
+            if block_miner == address:
                 block_hash = b.get('hash', '')
                 block_height = b.get('number', 0)
                 
