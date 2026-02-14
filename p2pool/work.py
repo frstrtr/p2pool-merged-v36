@@ -1981,6 +1981,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         print
                                         
                                         # Record merged block find
+                                        merged_template = aux_work.get('template', {})
                                         block_record = dict(
                                             ts=time.time(),
                                             hash='%064x' % aux_work['hash'],
@@ -1990,6 +1991,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             symbol=merged_net_symbol,
                                             miner=user,
                                             chainid=aux_work.get('chainid', 0),
+                                            height=merged_template.get('height', aux_work.get('height', 0)),
+                                            coinbasevalue=merged_template.get('coinbasevalue', aux_work.get('coinbasevalue', 0)),
                                             txs=len(merged_block['txs']),
                                             size=len(complete_block),
                                             verified=None,  # None=pending, True=confirmed, False=orphaned
@@ -2090,6 +2093,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             miner=miner_merged_address,
                                             miner_parent=user,  # Also store original parent chain address
                                             chainid=chainid,
+                                            height=aux_work.get('height', 0),
+                                            coinbasevalue=aux_work.get('coinbasevalue', 0),
                                             is_testnet=is_testnet,
                                             verified=None,  # None=pending, True=confirmed, False=orphaned
                                         )

@@ -642,8 +642,9 @@
                             <tr>
                                 <th>Time</th>
                                 <th>Network</th>
-                                <th>Chain ID</th>
+                                <th>Block Height</th>
                                 <th>Block Hash</th>
+                                <th>Block Reward</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
@@ -894,11 +895,15 @@
                     98: { testnet: 'https://blockexplorer.one/dogecoin/testnet/blockHash/', mainnet: 'https://blockexplorer.one/dogecoin/mainnet/blockHash/' }
                 };
                 
+                // Merged chain symbols for reward display
+                var merged_symbols = { 98: 'DOGE' };
+                
                 var tbody = document.getElementById('merged_blocks_tbody');
                 tbody.innerHTML = '';
                 
                 minerBlocks.forEach(function(block) {
                     var tr = document.createElement('tr');
+                    var sym = block.symbol || merged_symbols[block.chainid] || 'COIN';
                     
                     // Time
                     var tdTime = document.createElement('td');
@@ -909,13 +914,13 @@
                     var tdNet = document.createElement('td');
                     tdNet.style.fontWeight = 'bold';
                     tdNet.style.color = '#6f42c1';
-                    tdNet.textContent = block.symbol || block.network || 'AUX';
+                    tdNet.textContent = sym;
                     tr.appendChild(tdNet);
                     
-                    // Chain ID
-                    var tdChain = document.createElement('td');
-                    tdChain.textContent = block.chainid || '-';
-                    tr.appendChild(tdChain);
+                    // Block Height
+                    var tdHeight = document.createElement('td');
+                    tdHeight.textContent = block.height || 'N/A';
+                    tr.appendChild(tdHeight);
                     
                     // Block Hash
                     var tdHash = document.createElement('td');
@@ -934,19 +939,29 @@
                     tdHash.appendChild(hashLink);
                     tr.appendChild(tdHash);
                     
+                    // Block Reward
+                    var tdReward = document.createElement('td');
+                    if (block.coinbasevalue && block.coinbasevalue > 0) {
+                        // coinbasevalue is in satoshis
+                        tdReward.textContent = d3.format('.4f')(block.coinbasevalue / 1e8) + ' ' + sym;
+                    } else {
+                        tdReward.textContent = '\u2014';
+                    }
+                    tr.appendChild(tdReward);
+                    
                     // Status
                     var tdStatus = document.createElement('td');
                     var badge = document.createElement('span');
                     badge.className = 'status-badge';
                     if (block.verified === true) {
                         badge.className += ' status-confirmed';
-                        badge.textContent = '✓ Verified';
+                        badge.textContent = '\u2713 Verified';
                     } else if (block.verified === false) {
                         badge.className += ' status-orphaned';
-                        badge.textContent = '✗ Orphaned';
+                        badge.textContent = '\u2717 Orphaned';
                     } else {
                         badge.className += ' status-pending';
-                        badge.textContent = '⏳ Pending';
+                        badge.textContent = '\u23f3 Pending';
                     }
                     tdStatus.appendChild(badge);
                     tr.appendChild(tdStatus);

@@ -571,7 +571,7 @@
                         <tr>
                             <th>Time</th>
                             <th>Network</th>
-                            <th>Chain ID</th>
+                            <th>Block Height</th>
                             <th>Block Hash</th>
                             <th>Miner</th>
                             <th>Status</th>
@@ -1112,10 +1112,10 @@
                     tdNet.textContent = block.symbol || block.network || 'AUX';
                     tr.appendChild(tdNet);
                     
-                    // Chain ID
-                    var tdChain = document.createElement('td');
-                    tdChain.textContent = block.chainid || '-';
-                    tr.appendChild(tdChain);
+                    // Block Height
+                    var tdHeight = document.createElement('td');
+                    tdHeight.textContent = block.height || 'N/A';
+                    tr.appendChild(tdHeight);
                     
                     // Block Hash
                     var tdHash = document.createElement('td');
