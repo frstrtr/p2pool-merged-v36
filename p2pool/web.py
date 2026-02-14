@@ -1283,6 +1283,41 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 except:
                     pass  # Ignore if not yet defined during startup
             
+            # RPC fallback verification for blocks still pending after tracker scan.
+            # When p2pool restarts, shares may be evicted from the tracker but the
+            # blocks they produced are still valid on the parent chain.
+            # Fire-and-forget async verification for any stale pending blocks.
+            now = time.time()
+            for b in block_history:
+                if b.get('status') == 'pending' and (now - b.get('ts', 0)) > 30:
+                    def verify_via_rpc(block_rec):
+                        def on_result(block_data):
+                            if block_data and isinstance(block_data, dict):
+                                confs = block_data.get('confirmations', 0)
+                                block_height = block_data.get('height', 0)
+                                changed = False
+                                if confs > 0:
+                                    block_rec['verified'] = True
+                                    block_rec['status'] = 'confirmed'
+                                    if block_height > 0 and (not block_rec.get('number') or block_rec['number'] == 0):
+                                        block_rec['number'] = block_height
+                                    changed = True
+                                elif confs < 0:
+                                    block_rec['verified'] = False
+                                    block_rec['status'] = 'orphaned'
+                                    changed = True
+                                if changed:
+                                    save_block_history()
+                        def on_error(err):
+                            pass  # Block not found or RPC error - leave as pending
+                        try:
+                            d = node.bitcoind.rpc_getblock(block_rec['hash'])
+                            d.addCallback(on_result)
+                            d.addErrback(on_error)
+                        except:
+                            pass
+                    verify_via_rpc(b)
+            
             # Calculate pool average luck from all blocks with luck data
             total_luck = 0
             luck_count = 0
