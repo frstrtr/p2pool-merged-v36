@@ -25,6 +25,22 @@ try:
 except ImportError as e:
     print >>sys.stderr, '[IMPORT] Failed to import dogecoin_testnet: %s' % e
     dogecoin_testnet_net = None
+# Dogecoin testnet4alpha: quickfix for unreliable official Dogecoin testnet.
+# The official DOGE testnet suffers from block storms (extreme difficulty drops causing
+# thousands of blocks per minute), making it unusable for merged mining development.
+# testnet4alpha (Dogecoin PR #3967) adds fEnforceStrictMinDifficulty=true to prevent this.
+# Key differences from regular testnet:
+#   - P2P magic: d4a1f4a1 (vs fcc1b7dc for regular testnet)
+#   - P2P port: 44557 (vs 44556)
+#   - chain id in getblockchaininfo: 'testnet4alpha' (vs 'test')
+# Detection: when --merged-coind-p2p-port is 44557, we use testnet4alpha network params.
+# For mainnet: uses dogecoin_net (magic c0c0c0c0, port 22556) — no change needed.
+try:
+    from p2pool.bitcoin.networks import dogecoin_testnet4alpha as dogecoin_testnet4alpha_net
+    print >>sys.stderr, '[IMPORT] Successfully imported dogecoin_testnet4alpha: %s' % dogecoin_testnet4alpha_net
+except ImportError as e:
+    print >>sys.stderr, '[IMPORT] Failed to import dogecoin_testnet4alpha: %s' % e
+    dogecoin_testnet4alpha_net = None
 try:
     from p2pool.bitcoin.networks import dogecoin as dogecoin_net
     print >>sys.stderr, '[IMPORT] Successfully imported dogecoin: %s' % dogecoin_net
@@ -296,19 +312,30 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     local_p2p_addr = None
                                     
                                     if chainid == 98:  # Dogecoin
-                                        if parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower():
-                                            chain_name = 'dogecoin_testnet'
-                                            p2p_net = dogecoin_testnet_net
-                                            p2p_port = 44556 if dogecoin_testnet_net else None
-                                        else:
-                                            p2p_net = dogecoin_net
-                                            p2p_port = 22556 if dogecoin_net else None
-                                        
                                         # Get local Dogecoin node's P2P address from args
                                         # --merged-coind-p2p-address overrides --merged-coind-address for P2P
                                         # This allows RPC to go to mm-adapter (e.g. 127.0.0.1) while P2P goes to the actual node (e.g. 192.168.86.27)
                                         merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
                                         merged_p2p_address = getattr(self.args, 'merged_coind_p2p_address', None) or getattr(self.args, 'merged_coind_address', None)
+                                        
+                                        if parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower():
+                                            # Network selection for DOGE testnet broadcaster P2P:
+                                            #   port 44557 → testnet4alpha (magic d4a1f4a1) — quickfix for block storm bug
+                                            #   port 44556 → regular testnet (magic fcc1b7dc)
+                                            # Wrong magic = daemon drops connection silently (handshake never completes)
+                                            if merged_p2p_port == 44557 and dogecoin_testnet4alpha_net:
+                                                chain_name = 'dogecoin_testnet4alpha'
+                                                p2p_net = dogecoin_testnet4alpha_net
+                                                p2p_port = 44557
+                                                print 'MergedBroadcaster: Using dogecoin_testnet4alpha network (P2P magic d4a1f4a1, port 44557)'
+                                            else:
+                                                chain_name = 'dogecoin_testnet'
+                                                p2p_net = dogecoin_testnet_net
+                                                p2p_port = 44556 if dogecoin_testnet_net else None
+                                        else:
+                                            p2p_net = dogecoin_net
+                                            p2p_port = 22556 if dogecoin_net else None
+                                        
                                         if merged_p2p_port and merged_p2p_address:
                                             local_p2p_addr = (merged_p2p_address, merged_p2p_port)
                                             print 'MergedBroadcaster will connect to our Dogecoin node at %s:%d' % (merged_p2p_address, merged_p2p_port)
@@ -663,19 +690,30 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             local_p2p_addr = None
                             
                             if chainid == 98:  # Dogecoin
+                                # Get local Dogecoin node's P2P address from args
+                                merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
+                                merged_p2p_address = getattr(self.args, 'merged_coind_p2p_address', None) or getattr(self.args, 'merged_coind_address', None)
+                                
                                 if parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower():
-                                    chain_name = 'dogecoin_testnet'
-                                    p2p_net = dogecoin_testnet_net
-                                    p2p_port = 44556 if dogecoin_testnet_net else None
+                                    # Network selection for DOGE testnet broadcaster P2P:
+                                    #   port 44557 → testnet4alpha (magic d4a1f4a1) — quickfix for block storm bug
+                                    #   port 44556 → regular testnet (magic fcc1b7dc)
+                                    # Wrong magic = daemon drops connection silently (handshake never completes)
+                                    if merged_p2p_port == 44557 and dogecoin_testnet4alpha_net:
+                                        chain_name = 'dogecoin_testnet4alpha'
+                                        p2p_net = dogecoin_testnet4alpha_net
+                                        p2p_port = 44557
+                                        print 'MergedBroadcaster: Using dogecoin_testnet4alpha network (P2P magic d4a1f4a1, port 44557)'
+                                    else:
+                                        chain_name = 'dogecoin_testnet'
+                                        p2p_net = dogecoin_testnet_net
+                                        p2p_port = 44556 if dogecoin_testnet_net else None
                                 else:
                                     p2p_net = dogecoin_net
                                     p2p_port = 22556 if dogecoin_net else None
                                 
-                                # Get local Dogecoin node's P2P address from args
-                                merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
-                                merged_address = getattr(self.args, 'merged_coind_address', None)
-                                if merged_p2p_port and merged_address:
-                                    local_p2p_addr = (merged_address, merged_p2p_port)
+                                if merged_p2p_port and merged_p2p_address:
+                                    local_p2p_addr = (merged_p2p_address, merged_p2p_port)
                             
                             # Compute datadir_path for peer database storage
                             net_name = self.node.net.NAME
