@@ -88,13 +88,28 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     
     # Calculate fees from total reward
     # Order: donation first, then worker fee, then miners split the rest
+    #
+    # Donation/marker output: Same approach as parent chain (data.py).
+    # The donation output serves as a P2Pool blockchain marker — it MUST always
+    # carry a nonzero value (at least dust threshold) so the output is standard
+    # and identifiable on-chain. When donation_percentage=0, we still allocate
+    # a minimum dust amount (DUST_THRESHOLD from the merged chain network).
+    # On the parent chain, this happens naturally via integer division rounding
+    # remainder. Here we enforce it explicitly.
     donation_amount = int(total_reward * donation_percentage / 100)
+    
+    # Ensure minimum dust for marker output (like parent chain rounding remainder)
+    # Use the merged chain's DUST_THRESHOLD if available, else 1e8 (1 coin)
+    dust_threshold = getattr(net, 'DUST_THRESHOLD', int(1e8))
+    if donation_amount < dust_threshold and total_reward > dust_threshold:
+        donation_amount = dust_threshold
+    
     worker_fee_amount = int(total_reward * worker_fee / 100) if worker_fee > 0 and node_operator_address else 0
     miners_reward = total_reward - donation_amount - worker_fee_amount
     
     if DEBUG_COINBASE:
         print >>sys.stderr, '[MERGED COINBASE] Total reward: %d satoshis' % total_reward
-        print >>sys.stderr, '[MERGED COINBASE] - Donation (%.1f%%): %d' % (donation_percentage, donation_amount)
+        print >>sys.stderr, '[MERGED COINBASE] - Donation/marker (%.1f%%): %d (dust_threshold=%d)' % (donation_percentage, donation_amount, dust_threshold)
         print >>sys.stderr, '[MERGED COINBASE] - Node fee (%.1f%%): %d' % (worker_fee, worker_fee_amount)
         print >>sys.stderr, '[MERGED COINBASE] - Miners (%.1f%%): %d' % (
             100 - donation_percentage - worker_fee, miners_reward)
@@ -213,14 +228,21 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     # Add P2Pool author donation output (ALWAYS included as blockchain marker)
     # Even if donation_percentage=0, this output marks every block as P2Pool-mined
     # This is equivalent to gentx_before_refhash on parent chain
+    #
+    # Collect rounding remainder from miner distribution (like parent chain).
+    # Integer truncation in amount = int(miners_reward * fraction) means
+    # total_distributed < miners_reward. That remainder goes to the marker.
+    rounding_remainder = miners_reward - total_distributed
+    final_donation = donation_amount + rounding_remainder
+    
     tx_outs.append({
-        'value': donation_amount,
+        'value': final_donation,
         'script': DONATION_SCRIPT,
     })
     
     if DEBUG_COINBASE:
-        print >>sys.stderr, '[DONATION] Added P2Pool marker/donation to merged block: %d satoshis (%.1f%%)' % (
-            donation_amount, donation_percentage)
+        print >>sys.stderr, '[DONATION] P2Pool marker/donation: %d satoshis (%.1f%% + %d rounding)' % (
+            final_donation, donation_percentage, rounding_remainder)
         print >>sys.stderr, '[MERGED COINBASE] Total outputs: %d (miners) + 1 (OP_RETURN) + 1 (donation marker) = %d' % (
             len(tx_outs) - 2, len(tx_outs))
     
