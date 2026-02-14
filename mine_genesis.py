@@ -14,7 +14,6 @@ import sys
 # Try ltc_scrypt first (P2Pool module), then fallback to scrypt
 import os
 script_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.expanduser('~/litecoin_scrypt'))
 sys.path.insert(0, script_dir)
 
 USE_LTC_SCRYPT = False

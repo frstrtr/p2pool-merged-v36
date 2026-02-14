@@ -26,7 +26,12 @@ MAX_TARGET = 2**256//2**10 - 1  # ~10x easier than mainnet, allows mining with ~
 PERSIST = False
 
 WORKER_PORT = 19327  # Stratum port for miners to connect (stratum+tcp://IP:19327)
-BOOTSTRAP_ADDRS = 'forre.st'.split(' ')  # Initial peers to try connecting to
+BOOTSTRAP_ADDRS = [
+    '192.168.86.30',  # node30 - canonical v35 test node
+    '192.168.86.33',  # node33 - canonical v35 test node
+    '192.168.86.29',  # node29 - v36 experimental node
+    'forre.st',       # legacy bootstrap
+]
 ANNOUNCE_CHANNEL = '#p2pool-alt'
 VERSION_CHECK = lambda v: True  # Accept any version (testnet is permissive)
 SOFTFORKS_REQUIRED = set(['bip65', 'csv', 'segwit', 'taproot', 'mweb'])

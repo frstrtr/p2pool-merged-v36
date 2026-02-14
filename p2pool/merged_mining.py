@@ -195,6 +195,13 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     # This marks the block as pool-mined on the DOGECOIN blockchain
     # Use custom coinbase_text if provided, otherwise fall back to default P2POOL_TAG
     op_return_text = coinbase_text if coinbase_text else P2POOL_TAG
+    # CRITICAL: Ensure op_return_text is bytes (str), not unicode.
+    # When coinbase_text comes from JSON (mm-adapter), it's unicode in Python 2.
+    # Concatenating unicode with byte literals like '\x6a' produces unicode,
+    # which later causes StringIO unicode/bytes mixing when packing transactions
+    # (e.g., previous_output index 0xffffffff bytes can't be ASCII-decoded).
+    if isinstance(op_return_text, unicode):
+        op_return_text = op_return_text.encode('utf-8')
     op_return_script = '\x6a' + chr(len(op_return_text)) + op_return_text  # OP_RETURN + length + data
     tx_outs.append({
         'value': 0,

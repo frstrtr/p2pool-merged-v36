@@ -74,6 +74,35 @@ MAX_TOTAL_MESSAGE_BYTES = 512   # total bytes for all messages in one share
 MAX_MESSAGE_AGE = 86400         # 24 hours -- messages older than this are pruned
 MAX_MESSAGE_HISTORY = 1000      # max messages to keep in memory
 
+# Message Weight Units (MWU) -- share-cost economics
+MWU_HEADER = 8                    # fixed cost per message header
+MWU_PER_PAYLOAD_BYTE = 1          # 1 MWU per payload byte
+MWU_PER_SIGNATURE_BYTE = 2        # signatures are expensive to verify
+MWU_ANNOUNCEMENT = 171            # 57 bytes * 3 MWU/byte for key announcement
+
+MAX_MWU_PER_SHARE = 1024          # hard cap per share
+FREE_MWU_ALLOWANCE = 64           # small status messages are free (no sacrifice)
+MWU_PER_SACRIFICE = 256           # MWU capacity bought per sacrifice unit
+# Sacrifice shares -- miner mines shares for node operator & dev fund to pay for messaging
+# Split follows --give-author parameter (not hardcoded):
+#   node_operator_fraction = 1.0 - (give_author_percentage / 100)
+#   donation_fraction      = give_author_percentage / 100
+SACRIFICE_TAG_SIZE = 20           # signing_id embedded in sacrifice share ref_data
+
+# Messaging eligibility -- require donation marker in recent shares
+MIN_SHARES_FOR_MESSAGING = 10    # check this many recent shares from miner
+REQUIRED_DONATION_SHARES = 10    # all must include donation script marker
+
+# Message fragmentation
+MAX_MESSAGE_FRAGMENTS = 8         # max fragments per split message
+FRAGMENT_TIMEOUT = 300            # 5 minutes to receive all fragments
+MAX_REASSEMBLED_SIZE = 1600       # max bytes after reassembly (8 * 200)
+FRAGMENT_HEADER_SIZE = 6          # msg_id(4) + frag_index(1) + frag_total(1)
+
+# MWU rate limiting
+ROLLING_MWU_WINDOW = 3600         # 1 hour rate limit window (seconds)
+MAX_MWU_PER_HOUR = 4096           # per signing_id
+
 # Signing key derivation
 SIGNING_KEY_DOMAIN = b'p2pool-msg-v1'  # Domain separator for HMAC derivation
 SIGNING_KEY_ANNOUNCEMENT_SIZE = 57     # signing_id(20) + key_index(4) + pubkey(33)

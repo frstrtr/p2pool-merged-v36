@@ -13,7 +13,6 @@ import sys
 import time
 import threading
 
-sys.path.insert(0, '/home/user0/litecoin_scrypt')
 try:
     import ltc_scrypt
     print("Using ltc_scrypt for hash verification")

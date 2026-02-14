@@ -127,9 +127,28 @@ cd p2pool-dash
 git checkout feature/scrypt-litecoin-dogecoin
 ```
 
-## Step 5: Build ltc_scrypt Module
+## Step 5: Install Scrypt Module
 
-The Scrypt algorithm requires a C extension for performance:
+The Scrypt algorithm requires a C implementation for performance. There are two options:
+
+### Option A: py-scrypt Package (Recommended)
+
+The maintained [py-scrypt](https://pypi.org/project/scrypt/) package wraps Colin Percival's C scrypt
+implementation and provides pre-built wheels:
+
+```bash
+# For non-snap PyPy (tarball installation):
+pypy -m pip install --user scrypt==0.8.20
+
+# For snap PyPy (may hit GLIBC issues - use Option B instead):
+# pypy -m pip install --user scrypt==0.8.20
+```
+
+The `ltc_scrypt.py` wrapper in the project root will automatically use py-scrypt when available.
+
+### Option B: Build Legacy C Extension (Fallback)
+
+If py-scrypt can't be installed (e.g., snap-confined PyPy with GLIBC mismatch):
 
 ```bash
 cd ~/p2pool-dash/litecoin_scrypt
@@ -143,10 +162,12 @@ Expected output:
 ✓ Python 2 build complete
 ```
 
+The `ltc_scrypt.py` wrapper will automatically fall back to the C extension if py-scrypt is unavailable.
+
 ### Verify installation
 
 ```bash
-pypy -c 'import ltc_scrypt; print("✓ ltc_scrypt module loaded successfully")'
+pypy -c 'import ltc_scrypt; print("ltc_scrypt module loaded successfully")'
 ```
 
 ## Step 6: Configure Blockchain Nodes

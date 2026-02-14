@@ -587,7 +587,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             # PHASE B: Store for embedding in Litecoin coinbase
                             # This hash will be embedded in the Litecoin coinbase via mm_data
                             # NOW with actual block hash for merged mining commitment
-                            parsed_target = pack.IntType(256).unpack(target_hex.decode('hex'))
+                            # CRITICAL: getblocktemplate returns target as big-endian hex string.
+                            # IntType(256) defaults to little-endian and would reverse the bytes,
+                            # producing an astronomically wrong target (e.g., ~2^48 instead of ~2^229).
+                            # Use int(hex, 16) for correct big-endian parsing.
+                            parsed_target = int(target_hex, 16)
                             pass  # Suppressed: print '[DEBUG] Dogecoin target from template: %064x' % parsed_target
                             
                             # Determine network name from chainid
@@ -1624,6 +1628,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # print >>sys.stderr, '[DEBUG] mm_later has %d items, pow_hash=%064x' % (len(mm_later), pow_hash)
             # for aux_work, index, hashes in mm_later:
             #     print >>sys.stderr, '[DEBUG] Checking aux_work target=%064x, meets=%s' % (aux_work['target'], pow_hash <= aux_work['target'])
+            
+            if mm_later and pow_hash <= mm_later[0][0]['target']:
+                print >>sys.stderr, '[MERGED SUBMIT] Share meets merged target! pow_hash=%064x target=%064x' % (pow_hash, mm_later[0][0]['target'])
 
             for aux_work, index, hashes in mm_later:
                 try:
@@ -1672,6 +1679,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     
                     if pow_hash <= aux_work['target']:
                         # Hash meets Dogecoin difficulty - submit auxpow block
+                        print >>sys.stderr, '[MERGED] Hash meets merged target! multiaddress=%s pow_hash=%064x target=%064x' % (aux_work.get('multiaddress', False), pow_hash, aux_work['target'])
                         # Check if this is multiaddress merged mining (getblocktemplate with auxpow)
                         if aux_work.get('multiaddress'):
                             # Build complete Dogecoin block with auxpow proof
@@ -1880,11 +1888,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 #     print >>sys.stderr, '[DEBUG] tx_id_type.pack(new_gentx)[:100]: %s' % packed_coinbase_in_auxpow[:100].encode('hex')
                                 #     print >>sys.stderr, '[DEBUG] new_packed_gentx[:100]: %s' % new_packed_gentx[:100].encode('hex')
                                 
-                                # Pack transactions
-                                import StringIO
-                                txs_stream = StringIO.StringIO()
-                                pack.ListType(bitcoin_data.tx_type).write(txs_stream, merged_block['txs'])
-                                txs_packed = txs_stream.getvalue()
+                                # Pack transactions individually then concatenate.
+                                # Avoids StringIO unicode/bytes mixing in Python 2:
+                                # StringIO.getvalue() calls ''.join(buflist) which fails when
+                                # buffers contain mixed unicode (from JSON text) and bytes
+                                # with non-ASCII values (e.g., coinbase previous_output 0xffffffff).
+                                # Individual tx_type.pack() calls each use a fresh StringIO
+                                # which avoids cross-transaction contamination.
+                                txs_varint = pack.VarIntType().pack(len(merged_block['txs']))
+                                txs_parts = [txs_varint]
+                                for tx in merged_block['txs']:
+                                    packed_tx = bitcoin_data.tx_type.pack(tx)
+                                    # Defensive: ensure bytes (str), not unicode
+                                    if isinstance(packed_tx, unicode):
+                                        packed_tx = packed_tx.encode('latin-1')
+                                    txs_parts.append(packed_tx)
+                                txs_packed = ''.join(txs_parts)
                                 
                                 # Correct Dogecoin auxpow block format: header + auxpow + transactions
                                 complete_block = header_packed + auxpow_packed + txs_packed
@@ -1921,24 +1940,28 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 # print '[DEBUG] About to call rpc_submitblock with %d byte hex string' % (len(complete_block_hex),)
                                 # print '[DEBUG] Block hex (first 200 chars): %s...' % (complete_block_hex[:200],)
                                 
-                                # Fire parallel broadcast via merged broadcaster (non-blocking)
-                                chainid = aux_work.get('chainid', 98)
-                                if chainid in self.node.merged_broadcasters:
-                                    try:
-                                        bc = self.node.merged_broadcasters[chainid]
-                                        bc_d = bc.broadcast_block(complete_block_hex, aux_work['hash'])
-                                        bc_d.addErrback(lambda f: None)  # Ignore broadcaster errors
-                                    except Exception as e:
-                                        print >>sys.stderr, 'Merged broadcaster error: %s' % e
-                                
+                                # Submit via primary RPC first, then broadcast to peers
                                 df = deferral.retry('Error submitting multiaddress merged block: (will retry)', 10, 10)(
                                     aux_work['merged_proxy'].rpc_submitblock
                                 )(complete_block_hex)
                                 
                                 @df.addCallback
-                                def _(result, aux_work=aux_work):
-                                    # Debug: Uncomment to trace RPC result - print '[DEBUG] rpc_submitblock returned: %r (type: %s)' % (result, type(result))
-                                    if result is None or result == True:
+                                def _(result, aux_work=aux_work, complete_block_hex=complete_block_hex):
+                                    # submitblock returns: None=accepted, 'duplicate'=already in chain (also success),
+                                    # 'inconclusive'=may have been accepted, other string=rejection reason
+                                    if result is None or result == True or result == 'duplicate' or result == 'duplicate-invalid' or result == 'inconclusive':
+                                        if result == 'duplicate':
+                                            print '  (Note: block already accepted via parallel submission)'
+                                        
+                                        # Fire broadcast to P2P peers AFTER successful primary RPC submission
+                                        chainid = aux_work.get('chainid', 98)
+                                        if chainid in self.node.merged_broadcasters:
+                                            try:
+                                                bc = self.node.merged_broadcasters[chainid]
+                                                bc_d = bc.broadcast_block(complete_block_hex, aux_work['hash'])
+                                                bc_d.addErrback(lambda f: None)  # Ignore broadcaster errors
+                                            except Exception as e:
+                                                print >>sys.stderr, 'Merged broadcaster error: %s' % e
                                         print
                                         print '#' * 70
                                         print '### MERGED NETWORK BLOCK FOUND! ###'
