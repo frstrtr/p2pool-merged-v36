@@ -12,6 +12,7 @@ Makefile.local
 .coverage
 build/
 ltc_scrypt.so
+*.so
 
 .DS_Store
 .github/
