@@ -1559,9 +1559,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         # New block found - notify subscribers
                         self.node.factory.new_block.happened(header_hash)
                         # Fire block_found event with block info for immediate persistence
+                        # For scrypt coins, header_hash (from BLOCKHASH_FUNC) is the scrypt/PoW hash,
+                        # but the tracker uses SHA256d for s.header_hash. We need the SHA256d hash
+                        # so the immediate record can be matched with the tracker record later.
+                        sha256d_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(header))
                         block_info = {
                             'ts': time.time(),
-                            'hash': '%064x' % header_hash,
+                            'hash': '%064x' % sha256d_hash,
+                            'pow_hash_hex': '%064x' % pow_hash,
                             'number': share_info.get('height', 0),
                             'miner': user,
                             'network_difficulty': bitcoin_data.target_to_difficulty(header['bits'].target),

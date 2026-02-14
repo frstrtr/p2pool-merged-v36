@@ -1005,11 +1005,32 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except (ValueError, KeyError, IndexError):
             pass
         
+        # Find blocks found by this miner from block_history
+        miner_blocks = []
+        total_estimated_rewards = 0.0
+        confirmed_rewards = 0.0
+        maturing_rewards = 0.0
+        
+        for b in block_history:
+            if b.get('miner') == address:
+                block_entry = {
+                    'timestamp': b.get('ts', 0),
+                    'height': b.get('number', 0),
+                    'hash': b.get('hash', ''),
+                    'reward': 0,
+                    'status': b.get('status', 'pending'),
+                    'estimated_payout': 0,
+                }
+                miner_blocks.append(block_entry)
+                
         return {
             'address': address,
             'current_payout': current_payout,
-            'blocks_found': 0,  # TODO: Track per-miner block history
-            'blocks': [],
+            'blocks_found': len(miner_blocks),
+            'total_estimated_rewards': total_estimated_rewards,
+            'confirmed_rewards': confirmed_rewards,
+            'maturing_rewards': maturing_rewards,
+            'blocks': miner_blocks,
         }
     
     web_root.putChild('miner_payouts', WebInterface(get_miner_payouts))
@@ -1083,21 +1104,54 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 
                 # Skip if already in history
                 if block_hash in known_block_hashes:
-                    # Update verification status
+                    # Update verification status and fill in missing fields
+                    # (immediate-path blocks start with pending status and no share/miner data)
                     for b in block_history:
                         if b['hash'] == block_hash:
                             is_verified = s.hash in node.tracker.verified.items
                             b['verified'] = is_verified
                             b['status'] = 'confirmed' if is_verified else 'pending'
+                            # Fill in data that wasn't available at immediate-recording time
+                            if not b.get('share') or b['share'] == '':
+                                b['share'] = '%064x' % s.hash
+                            if not b.get('number') or b['number'] == 0:
+                                try:
+                                    b['number'] = p2pool_data.parse_bip0034(s.share_data['coinbase'])[0]
+                                except:
+                                    pass
+                            if not b.get('share_difficulty') or b['share_difficulty'] == 0:
+                                b['share_difficulty'] = bitcoin_data.target_to_difficulty(s.target)
+                            if not b.get('miner') or b['miner'] == '':
+                                try:
+                                    b['miner'] = bitcoin_data.script2_to_address(
+                                        s.new_script, node.net.PARENT.ADDRESS_VERSION, -1, node.net.PARENT)
+                                except Exception as e:
+                                    try:
+                                        b['miner'] = bitcoin_data.script2_to_address(
+                                            s.new_script, node.net.ADDRESS_VERSION, -1, node.net.PARENT)
+                                    except Exception as e2:
+                                        print('Failed to extract miner address: %s / %s' % (e, e2))
                             break
                     continue
                 
                 is_verified = s.hash in node.tracker.verified.items
+                # Extract miner address from share's payout script
+                miner_addr = ''
+                try:
+                    miner_addr = bitcoin_data.script2_to_address(
+                        s.new_script, node.net.PARENT.ADDRESS_VERSION, -1, node.net.PARENT)
+                except Exception:
+                    try:
+                        miner_addr = bitcoin_data.script2_to_address(
+                            s.new_script, node.net.ADDRESS_VERSION, -1, node.net.PARENT)
+                    except Exception as e:
+                        print('Failed to extract miner from share %s: %s' % ('%064x' % s.hash, e))
                 block_info = {
                     'ts': s.timestamp,
                     'hash': block_hash,
                     'number': p2pool_data.parse_bip0034(s.share_data['coinbase'])[0],
                     'share': '%064x' % s.hash,
+                    'miner': miner_addr,
                     'network_difficulty': bitcoin_data.target_to_difficulty(s.header['bits'].target),
                     'share_difficulty': bitcoin_data.target_to_difficulty(s.target),
                     'actual_hash_difficulty': bitcoin_data.target_to_difficulty(s.pow_hash),
@@ -1186,8 +1240,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             # Build full block info with luck data
             full_block_info = {
                 'ts': block_info['ts'],
-                'hash': block_info['hash'],
+                'hash': block_info['hash'],  # SHA256d hash (matches tracker's s.header_hash)
+                'pow_hash_hex': block_info.get('pow_hash_hex', ''),  # Scrypt/PoW hash for display
                 'number': block_info['number'],
+                'miner': block_info.get('miner', ''),  # Miner address who found the block
                 'share': '',  # Will be filled in when tracker catches up
                 'network_difficulty': block_info['network_difficulty'],
                 'share_difficulty': 0,  # Will be filled in when tracker catches up  
