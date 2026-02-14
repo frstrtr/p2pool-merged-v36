@@ -626,6 +626,35 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Merged Mining Blocks Table -->
+            <div class="section-header" id="merged_blocks_header">
+                <h2>🔗 Merged Mining Blocks Found</h2>
+            </div>
+            <div class="chart-container">
+                <div id="merged_blocks_loading" class="loading" style="padding: 20px;">
+                    <div class="loading-spinner"></div>
+                    <div>Loading merged blocks data...</div>
+                </div>
+                <div id="merged_blocks_container" style="display: none;">
+                    <table id="merged_blocks_table" style="width: 100%; margin-top: 15px;">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Network</th>
+                                <th>Chain ID</th>
+                                <th>Block Hash</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="merged_blocks_tbody">
+                        </tbody>
+                    </table>
+                    <div id="no_merged_blocks" style="display: none; text-align: center; padding: 20px; color: #8888a0;">
+                        No merged mining blocks found by this miner yet
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -826,6 +855,104 @@
                 
                 // Load payouts data
                 loadPayouts();
+                
+                // Load merged blocks
+                loadMergedBlocks();
+            });
+        }
+        
+        function loadMergedBlocks() {
+            d3.json('../recent_merged_blocks', function(blocks) {
+                document.getElementById('merged_blocks_loading').style.display = 'none';
+                document.getElementById('merged_blocks_container').style.display = 'block';
+                
+                if (!blocks || blocks.length === 0) {
+                    document.getElementById('no_merged_blocks').style.display = 'block';
+                    return;
+                }
+                
+                // Helper to extract base address from worker name
+                function extractBaseAddress(workerName) {
+                    if (!workerName) return '';
+                    return workerName.split('+')[0].split('/')[0].split('.')[0].split('_')[0];
+                }
+                
+                // Filter blocks by this miner (check miner, miner_parent fields)
+                var minerBlocks = blocks.filter(function(b) {
+                    var blockMiner = extractBaseAddress(b.miner || '');
+                    var blockMinerParent = extractBaseAddress(b.miner_parent || '');
+                    return blockMiner === minerAddress || blockMinerParent === minerAddress;
+                });
+                
+                if (minerBlocks.length === 0) {
+                    document.getElementById('no_merged_blocks').style.display = 'block';
+                    return;
+                }
+                
+                // Block explorer URLs
+                var merged_explorers = {
+                    98: { testnet: 'https://blockexplorer.one/dogecoin/testnet/blockHash/', mainnet: 'https://blockexplorer.one/dogecoin/mainnet/blockHash/' }
+                };
+                
+                var tbody = document.getElementById('merged_blocks_tbody');
+                tbody.innerHTML = '';
+                
+                minerBlocks.forEach(function(block) {
+                    var tr = document.createElement('tr');
+                    
+                    // Time
+                    var tdTime = document.createElement('td');
+                    tdTime.textContent = new Date(block.ts * 1000).toLocaleString();
+                    tr.appendChild(tdTime);
+                    
+                    // Network
+                    var tdNet = document.createElement('td');
+                    tdNet.style.fontWeight = 'bold';
+                    tdNet.style.color = '#6f42c1';
+                    tdNet.textContent = block.symbol || block.network || 'AUX';
+                    tr.appendChild(tdNet);
+                    
+                    // Chain ID
+                    var tdChain = document.createElement('td');
+                    tdChain.textContent = block.chainid || '-';
+                    tr.appendChild(tdChain);
+                    
+                    // Block Hash
+                    var tdHash = document.createElement('td');
+                    var hashLink = document.createElement('a');
+                    hashLink.className = 'hash-link';
+                    var explorer = merged_explorers[block.chainid];
+                    if (explorer && block.pow_hash) {
+                        hashLink.href = (block.is_testnet ? explorer.testnet : explorer.mainnet) + block.pow_hash;
+                    } else {
+                        hashLink.href = '#';
+                    }
+                    hashLink.target = '_blank';
+                    hashLink.title = 'POW Hash: ' + (block.pow_hash || 'N/A');
+                    var hash = block.pow_hash || block.hash || '-';
+                    hashLink.textContent = hash.substring(0, 16) + '...';
+                    tdHash.appendChild(hashLink);
+                    tr.appendChild(tdHash);
+                    
+                    // Status
+                    var tdStatus = document.createElement('td');
+                    var badge = document.createElement('span');
+                    badge.className = 'status-badge';
+                    if (block.verified === true) {
+                        badge.className += ' status-confirmed';
+                        badge.textContent = '✓ Verified';
+                    } else if (block.verified === false) {
+                        badge.className += ' status-orphaned';
+                        badge.textContent = '✗ Orphaned';
+                    } else {
+                        badge.className += ' status-pending';
+                        badge.textContent = '⏳ Pending';
+                    }
+                    tdStatus.appendChild(badge);
+                    tr.appendChild(tdStatus);
+                    
+                    tbody.appendChild(tr);
+                });
             });
         }
         
