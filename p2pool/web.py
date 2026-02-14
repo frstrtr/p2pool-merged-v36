@@ -1100,6 +1100,156 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     
     web_root.putChild('miner_payouts', WebInterface(get_miner_payouts))
     
+    def get_merged_miner_payouts(address=None):
+        """Get merged mining payout history for a specific miner address"""
+        if not address:
+            return {'error': 'No address provided'}
+        
+        # Current merged payout from PPLNS distribution
+        current_merged_payout = 0
+        merged_payout_symbol = ''
+        try:
+            if hasattr(wb, 'merged_work') and wb.merged_work and hasattr(wb.merged_work, 'value') and wb.merged_work.value:
+                for chain_id, chain in wb.merged_work.value.iteritems():
+                    shareholders = chain.get('shareholders', {})
+                    template = chain.get('template', {})
+                    coinbasevalue = 0
+                    if template:
+                        coinbasevalue = template.get('coinbasevalue', 0)
+                    elif chain.get('coinbasevalue'):
+                        coinbasevalue = chain['coinbasevalue']
+                    
+                    don_pct = chain.get('donation_percentage', 1.0)
+                    wfee = chain.get('worker_fee', 0)
+                    miners_reward = coinbasevalue - int(coinbasevalue * don_pct / 100) - (int(coinbasevalue * wfee / 100) if wfee > 0 else 0)
+                    
+                    merged_payout_symbol = chain.get('merged_net_symbol', 'DOGE' if chain_id == 98 else 'AUX')
+                    
+                    for sh_addr, val in shareholders.iteritems():
+                        frac = val[0] if isinstance(val, tuple) else val
+                        sh_base = sh_addr.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
+                        if sh_base == address:
+                            current_merged_payout = int(miners_reward * frac) / 1e8
+                            break
+        except Exception:
+            pass
+        
+        # Find merged blocks found by this miner
+        miner_merged_blocks = []
+        total_estimated_rewards = 0.0
+        confirmed_rewards = 0.0
+        maturing_rewards = 0.0
+        
+        # Coinbase maturity for DOGE testnet (240 blocks)
+        MERGED_COINBASE_MATURITY = 240
+        
+        # Get current merged chain height for confirmation tracking
+        merged_current_height = 0
+        try:
+            if hasattr(wb, 'merged_work') and wb.merged_work and hasattr(wb.merged_work, 'value') and wb.merged_work.value:
+                for chain_id, chain in wb.merged_work.value.iteritems():
+                    template = chain.get('template', {})
+                    if template:
+                        merged_current_height = template.get('height', 0)
+                        break
+        except Exception:
+            pass
+        
+        # Block explorer URLs for merged chains
+        merged_explorers = {
+            98: {'testnet': 'https://blockexplorer.one/dogecoin/testnet/blockHash/',
+                 'mainnet': 'https://blockexplorer.one/dogecoin/mainnet/blockHash/'}
+        }
+        
+        for b in wb.recent_merged_blocks:
+            if b.get('verified') == False:
+                continue  # Skip orphaned blocks
+            
+            block_miner = b.get('miner', '')
+            block_miner_parent = b.get('miner_parent', '')
+            # Strip worker suffix from miner field for matching
+            if block_miner:
+                block_miner = block_miner.split('.')[0].split('+')[0].split('/')[0].split('_')[0]
+            if block_miner_parent:
+                block_miner_parent = block_miner_parent.split('.')[0].split('+')[0].split('/')[0].split('_')[0]
+            
+            if block_miner == address or block_miner_parent == address:
+                block_hash = b.get('hash', '')
+                block_height = b.get('height', 0)
+                sym = b.get('symbol', merged_payout_symbol or 'COIN')
+                chainid = b.get('chainid', 0)
+                coinbasevalue = b.get('coinbasevalue', 0)
+                block_reward = coinbasevalue / 1e8 if coinbasevalue > 0 else 0
+                
+                # Miner's estimated payout (in satoshis, stored at block-find time)
+                stored_payout = b.get('miner_payout', 0)
+                if stored_payout > 0:
+                    est_payout = stored_payout / 1e8
+                elif current_merged_payout > 0:
+                    # Fallback: use current PPLNS proportion
+                    est_payout = current_merged_payout
+                else:
+                    est_payout = block_reward  # Assume full reward if no PPLNS data
+                
+                # Confirmation tracking
+                confirmations = max(0, merged_current_height - block_height) if merged_current_height > 0 and block_height > 0 else 0
+                is_mature = confirmations >= MERGED_COINBASE_MATURITY
+                
+                if b.get('verified') == True:
+                    if is_mature:
+                        status = 'confirmed'
+                    else:
+                        status = 'maturing'
+                else:
+                    status = 'pending'
+                
+                # Explorer URL
+                is_testnet = b.get('is_testnet', True)
+                explorer = merged_explorers.get(chainid, {})
+                explorer_url = ''
+                if explorer:
+                    base_url = explorer.get('testnet' if is_testnet else 'mainnet', '')
+                    pow_hash = b.get('pow_hash', block_hash)
+                    explorer_url = base_url + pow_hash if base_url else ''
+                
+                block_entry = {
+                    'timestamp': b.get('ts', 0),
+                    'block_height': block_height,
+                    'block_hash': block_hash,
+                    'pow_hash': b.get('pow_hash', ''),
+                    'block_reward': block_reward,
+                    'explorer_url': explorer_url,
+                    'status': status,
+                    'estimated_payout': est_payout,
+                    'confirmations': confirmations,
+                    'confirmations_required': MERGED_COINBASE_MATURITY,
+                    'network': b.get('network', ''),
+                    'symbol': sym,
+                    'chainid': chainid,
+                }
+                miner_merged_blocks.append(block_entry)
+                
+                # Accumulate reward totals
+                if est_payout > 0:
+                    total_estimated_rewards += est_payout
+                    if status == 'confirmed':
+                        confirmed_rewards += est_payout
+                    elif status == 'maturing':
+                        maturing_rewards += est_payout
+        
+        return {
+            'address': address,
+            'current_payout': current_merged_payout,
+            'symbol': merged_payout_symbol,
+            'blocks_found': len(miner_merged_blocks),
+            'total_estimated_rewards': total_estimated_rewards,
+            'confirmed_rewards': confirmed_rewards,
+            'maturing_rewards': maturing_rewards,
+            'blocks': miner_merged_blocks,
+        }
+    
+    web_root.putChild('merged_miner_payouts', WebInterface(get_merged_miner_payouts))
+    
     # Block history storage - persisted to disk
     block_history = []
     block_history_path = os.path.join(datadir_path, 'block_history')

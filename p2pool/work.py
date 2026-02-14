@@ -614,6 +614,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 doge_tx_hashes=all_doge_tx_hashes,
                                 merged_net_name=merged_net_name,  # Store network name for block found message
                                 merged_net_symbol=merged_net_symbol,  # Store network symbol for block found message
+                                shareholders=shareholders,  # PPLNS distribution for miner payout calculation
+                                donation_percentage=self.donation_percentage,
+                                worker_fee=self.worker_fee,
                                 last_update=time.time(),
                             )}))
                             pass  # Suppressed: print '[MERGED-REFRESH] Template height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
@@ -1982,6 +1985,51 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         
                                         # Record merged block find
                                         merged_template = aux_work.get('template', {})
+                                        total_reward = merged_template.get('coinbasevalue', aux_work.get('coinbasevalue', 0))
+                                        
+                                        # Calculate miner's estimated payout from PPLNS shareholders
+                                        miner_payout = 0
+                                        try:
+                                            sh = aux_work.get('shareholders', {})
+                                            don_pct = aux_work.get('donation_percentage', 1.0)
+                                            wfee = aux_work.get('worker_fee', 0)
+                                            miners_reward = total_reward - int(total_reward * don_pct / 100) - (int(total_reward * wfee / 100) if wfee > 0 else 0)
+                                            # Match miner address (strip worker suffix) to shareholder
+                                            base_user = user.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
+                                            for addr, val in sh.iteritems():
+                                                frac = val[0] if isinstance(val, tuple) else val
+                                                # Check if shareholder address matches miner (parent or merged chain)
+                                                # Shareholders may be in merged chain format, so also try parent address match
+                                                addr_base = addr.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
+                                                if addr_base == base_user:
+                                                    miner_payout = int(miners_reward * frac)
+                                                    break
+                                            # If no direct match found, the shareholder addresses are in merged chain format
+                                            # Try converting the miner's parent address to merged chain format
+                                            if miner_payout == 0 and sh:
+                                                try:
+                                                    parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                                    is_conv, pkh, _ = is_pubkey_hash_address(base_user, parent_net)
+                                                    if is_conv and pkh:
+                                                        chainid_val = aux_work.get('chainid', 0)
+                                                        p_sym = getattr(parent_net, 'SYMBOL', '')
+                                                        is_tn = p_sym.lower().startswith('t') or 'test' in p_sym.lower()
+                                                        if chainid_val == 98:
+                                                            m_net = dogecoin_testnet_net if is_tn else dogecoin_net
+                                                        else:
+                                                            m_net = parent_net
+                                                        if m_net:
+                                                            merged_addr = bitcoin_data.pubkey_hash_to_address(pkh, m_net.ADDRESS_VERSION, -1, m_net)
+                                                            for addr, val in sh.iteritems():
+                                                                if addr == merged_addr:
+                                                                    frac = val[0] if isinstance(val, tuple) else val
+                                                                    miner_payout = int(miners_reward * frac)
+                                                                    break
+                                                except Exception:
+                                                    pass
+                                        except Exception as e:
+                                            print >>sys.stderr, '[MERGED] Error calculating miner payout: %s' % e
+                                        
                                         block_record = dict(
                                             ts=time.time(),
                                             hash='%064x' % aux_work['hash'],
@@ -1992,7 +2040,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             miner=user,
                                             chainid=aux_work.get('chainid', 0),
                                             height=merged_template.get('height', aux_work.get('height', 0)),
-                                            coinbasevalue=merged_template.get('coinbasevalue', aux_work.get('coinbasevalue', 0)),
+                                            coinbasevalue=total_reward,
+                                            miner_payout=miner_payout,
                                             txs=len(merged_block['txs']),
                                             size=len(complete_block),
                                             verified=None,  # None=pending, True=confirmed, False=orphaned
@@ -2082,6 +2131,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         except Exception as e:
                                             pass  # Keep original address on error
                                         
+                                        # In single-address mode, miner gets full reward minus fees
+                                        sa_coinbasevalue = aux_work.get('coinbasevalue', 0)
+                                        sa_don_pct = getattr(self, 'donation_percentage', 1.0)
+                                        sa_wfee = getattr(self, 'worker_fee', 0)
+                                        sa_miner_payout = sa_coinbasevalue - int(sa_coinbasevalue * sa_don_pct / 100) - (int(sa_coinbasevalue * sa_wfee / 100) if sa_wfee > 0 else 0)
+                                        
                                         # Create block record
                                         block_record = dict(
                                             ts=time.time(),
@@ -2094,7 +2149,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             miner_parent=user,  # Also store original parent chain address
                                             chainid=chainid,
                                             height=aux_work.get('height', 0),
-                                            coinbasevalue=aux_work.get('coinbasevalue', 0),
+                                            coinbasevalue=sa_coinbasevalue,
+                                            miner_payout=sa_miner_payout,
                                             is_testnet=is_testnet,
                                             verified=None,  # None=pending, True=confirmed, False=orphaned
                                         )

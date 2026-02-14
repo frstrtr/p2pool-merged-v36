@@ -631,6 +631,31 @@
             <div class="section-header" id="merged_blocks_header">
                 <h2>🔗 Merged Mining Blocks Found</h2>
             </div>
+            
+            <!-- Merged Payout Summary Stats -->
+            <div class="stats-grid" style="margin-bottom: 20px;">
+                <div class="stat-card">
+                    <h3>Merged Blocks Found</h3>
+                    <div class="stat-value success" id="merged_blocks_found">0</div>
+                    <div class="stat-label">Total merged blocks mined</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Merged Rewards</h3>
+                    <div class="stat-value" id="merged_total_rewards">0</div>
+                    <div class="stat-label">Estimated total earned</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Confirmed Merged Rewards</h3>
+                    <div class="stat-value success" id="merged_confirmed_rewards">0</div>
+                    <div class="stat-label">Confirmed payouts</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Maturing Merged Rewards</h3>
+                    <div class="stat-value warning" id="merged_pending_rewards">0</div>
+                    <div class="stat-label">Coinbase maturity (240 blocks)</div>
+                </div>
+            </div>
+            
             <div class="chart-container">
                 <div id="merged_blocks_loading" class="loading" style="padding: 20px;">
                     <div class="loading-spinner"></div>
@@ -645,6 +670,7 @@
                                 <th>Block Height</th>
                                 <th>Block Hash</th>
                                 <th>Block Reward</th>
+                                <th>Est. Payout</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
@@ -863,51 +889,37 @@
         }
         
         function loadMergedBlocks() {
-            d3.json('../recent_merged_blocks', function(blocks) {
+            d3.json('../merged_miner_payouts/' + minerAddress, function(payouts) {
                 document.getElementById('merged_blocks_loading').style.display = 'none';
                 document.getElementById('merged_blocks_container').style.display = 'block';
                 
-                if (!blocks || blocks.length === 0) {
+                if (!payouts || payouts.error) {
                     document.getElementById('no_merged_blocks').style.display = 'block';
                     return;
                 }
                 
-                // Helper to extract base address from worker name
-                function extractBaseAddress(workerName) {
-                    if (!workerName) return '';
-                    return workerName.split('+')[0].split('/')[0].split('.')[0].split('_')[0];
-                }
+                // Update merged summary stats
+                var msym = payouts.symbol || 'COIN';
+                document.getElementById('merged_blocks_found').textContent = payouts.blocks_found || 0;
+                document.getElementById('merged_total_rewards').textContent = d3.format('.4f')(payouts.total_estimated_rewards || 0) + ' ' + msym;
+                document.getElementById('merged_confirmed_rewards').textContent = d3.format('.4f')(payouts.confirmed_rewards || 0) + ' ' + msym;
+                document.getElementById('merged_pending_rewards').textContent = d3.format('.4f')(payouts.maturing_rewards || 0) + ' ' + msym;
                 
-                // Filter blocks by this miner (check miner, miner_parent fields)
-                var minerBlocks = blocks.filter(function(b) {
-                    var blockMiner = extractBaseAddress(b.miner || '');
-                    var blockMinerParent = extractBaseAddress(b.miner_parent || '');
-                    return blockMiner === minerAddress || blockMinerParent === minerAddress;
-                });
-                
-                if (minerBlocks.length === 0) {
+                if (!payouts.blocks || payouts.blocks.length === 0) {
                     document.getElementById('no_merged_blocks').style.display = 'block';
                     return;
                 }
-                
-                // Block explorer URLs
-                var merged_explorers = {
-                    98: { testnet: 'https://blockexplorer.one/dogecoin/testnet/blockHash/', mainnet: 'https://blockexplorer.one/dogecoin/mainnet/blockHash/' }
-                };
-                
-                // Merged chain symbols for reward display
-                var merged_symbols = { 98: 'DOGE' };
                 
                 var tbody = document.getElementById('merged_blocks_tbody');
                 tbody.innerHTML = '';
                 
-                minerBlocks.forEach(function(block) {
+                payouts.blocks.forEach(function(block) {
                     var tr = document.createElement('tr');
-                    var sym = block.symbol || merged_symbols[block.chainid] || 'COIN';
+                    var sym = block.symbol || msym;
                     
                     // Time
                     var tdTime = document.createElement('td');
-                    tdTime.textContent = new Date(block.ts * 1000).toLocaleString();
+                    tdTime.textContent = new Date(block.timestamp * 1000).toLocaleString();
                     tr.appendChild(tdTime);
                     
                     // Network
@@ -919,51 +931,49 @@
                     
                     // Block Height
                     var tdHeight = document.createElement('td');
-                    tdHeight.textContent = block.height || 'N/A';
+                    tdHeight.textContent = block.block_height || 'N/A';
                     tr.appendChild(tdHeight);
                     
                     // Block Hash
                     var tdHash = document.createElement('td');
                     var hashLink = document.createElement('a');
                     hashLink.className = 'hash-link';
-                    var explorer = merged_explorers[block.chainid];
-                    if (explorer && block.pow_hash) {
-                        hashLink.href = (block.is_testnet ? explorer.testnet : explorer.mainnet) + block.pow_hash;
-                    } else {
-                        hashLink.href = '#';
-                    }
+                    hashLink.href = block.explorer_url || '#';
                     hashLink.target = '_blank';
-                    hashLink.title = 'POW Hash: ' + (block.pow_hash || 'N/A');
-                    var hash = block.pow_hash || block.hash || '-';
+                    var hash = block.pow_hash || block.block_hash || '-';
+                    hashLink.title = 'POW Hash: ' + hash;
                     hashLink.textContent = hash.substring(0, 16) + '...';
                     tdHash.appendChild(hashLink);
                     tr.appendChild(tdHash);
                     
                     // Block Reward
                     var tdReward = document.createElement('td');
-                    if (block.coinbasevalue && block.coinbasevalue > 0) {
-                        // coinbasevalue is in satoshis
-                        tdReward.textContent = d3.format('.4f')(block.coinbasevalue / 1e8) + ' ' + sym;
-                    } else {
-                        tdReward.textContent = '\u2014';
-                    }
+                    tdReward.textContent = block.block_reward > 0 ? d3.format('.4f')(block.block_reward) + ' ' + sym : '\u2014';
                     tr.appendChild(tdReward);
                     
-                    // Status
+                    // Estimated Payout
+                    var tdPayout = document.createElement('td');
+                    tdPayout.textContent = block.estimated_payout > 0 ? d3.format('.4f')(block.estimated_payout) + ' ' + sym : '\u2014';
+                    tr.appendChild(tdPayout);
+                    
+                    // Status with confirmation progress
                     var tdStatus = document.createElement('td');
-                    var badge = document.createElement('span');
-                    badge.className = 'status-badge';
-                    if (block.verified === true) {
-                        badge.className += ' status-confirmed';
-                        badge.textContent = '\u2713 Verified';
-                    } else if (block.verified === false) {
-                        badge.className += ' status-orphaned';
-                        badge.textContent = '\u2717 Orphaned';
+                    var statusBadge = document.createElement('span');
+                    statusBadge.className = 'status-badge status-' + block.status;
+                    if (block.status === 'confirmed') {
+                        statusBadge.textContent = '\u2713 Confirmed';
+                    } else if (block.status === 'maturing') {
+                        var confs = block.confirmations || 0;
+                        var required = block.confirmations_required || 240;
+                        var remaining = Math.max(0, required - confs);
+                        statusBadge.textContent = '\u23f3 ' + confs + '/' + required + ' (' + remaining + ' left)';
+                        statusBadge.title = confs + ' of ' + required + ' confirmations';
+                    } else if (block.status === 'pending') {
+                        statusBadge.textContent = '\u23f3 Pending';
                     } else {
-                        badge.className += ' status-pending';
-                        badge.textContent = '\u23f3 Pending';
+                        statusBadge.textContent = '\u2717 Orphaned';
                     }
-                    tdStatus.appendChild(badge);
+                    tdStatus.appendChild(statusBadge);
                     tr.appendChild(tdStatus);
                     
                     tbody.appendChild(tr);
