@@ -1011,13 +1011,20 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         confirmed_rewards = 0.0
         maturing_rewards = 0.0
         
+        try:
+            block_explorer_url = node.net.PARENT.BLOCK_EXPLORER_URL_PREFIX
+        except:
+            block_explorer_url = ''
+        
         for b in block_history:
             if b.get('miner') == address:
+                block_hash = b.get('hash', '')
                 block_entry = {
                     'timestamp': b.get('ts', 0),
-                    'height': b.get('number', 0),
-                    'hash': b.get('hash', ''),
-                    'reward': 0,
+                    'block_height': b.get('number', 0),
+                    'block_hash': block_hash,
+                    'block_reward': 0,
+                    'explorer_url': block_explorer_url + block_hash if block_explorer_url else '',
                     'status': b.get('status', 'pending'),
                     'estimated_payout': 0,
                 }
