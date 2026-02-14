@@ -1563,6 +1563,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         # but the tracker uses SHA256d for s.header_hash. We need the SHA256d hash
                         # so the immediate record can be matched with the tracker record later.
                         sha256d_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(header))
+                        # Get block subsidy and miner's current payout for reward tracking
+                        block_subsidy = self.current_work.value.get('subsidy', 0)
+                        miner_payout = 0
+                        try:
+                            current_txouts = self.node.get_current_txouts()
+                            # Strip worker suffix to get base address for txout lookup
+                            base_user = user.split('.')[0].split('_')[0]
+                            miner_payout = current_txouts.get(base_user, 0)
+                        except:
+                            pass
                         block_info = {
                             'ts': time.time(),
                             'hash': '%064x' % sha256d_hash,
@@ -1572,6 +1582,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             'network_difficulty': bitcoin_data.target_to_difficulty(header['bits'].target),
                             'pow_hash': pow_hash,
                             'target': header['bits'].target,
+                            'subsidy': block_subsidy,
+                            'miner_payout': miner_payout,
                         }
                         self.block_found.happened(block_info)
                         # Reset round-level best difficulty stats

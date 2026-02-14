@@ -367,6 +367,11 @@
             color: var(--warning);
         }
         
+        .status-maturing {
+            background: rgba(0, 141, 228, 0.2);
+            color: var(--primary);
+        }
+        
         .status-orphaned {
             background: rgba(220, 53, 69, 0.2);
             color: var(--danger);
@@ -875,20 +880,31 @@
                     
                     // Block Reward
                     const tdReward = document.createElement('td');
-                    tdReward.textContent = block.block_reward > 0 ? d3.format('.4f')(block.block_reward) + ' ' + sym : 'Pending...';
+                    tdReward.textContent = block.block_reward > 0 ? d3.format('.4f')(block.block_reward) + ' ' + sym : '—';
                     tr.appendChild(tdReward);
                     
                     // Estimated Payout
                     const tdPayout = document.createElement('td');
-                    tdPayout.textContent = block.estimated_payout > 0 ? d3.format('.4f')(block.estimated_payout) + ' ' + sym : 'Calculating...';
+                    tdPayout.textContent = block.estimated_payout > 0 ? d3.format('.4f')(block.estimated_payout) + ' ' + sym : '—';
                     tr.appendChild(tdPayout);
                     
-                    // Status
+                    // Status with confirmation progress
                     const tdStatus = document.createElement('td');
                     const statusBadge = document.createElement('span');
                     statusBadge.className = 'status-badge status-' + block.status;
-                    statusBadge.textContent = block.status === 'confirmed' ? '✓ Confirmed' : 
-                                             (block.status === 'pending' ? '⏳ Pending' : '✗ Orphaned');
+                    if (block.status === 'confirmed') {
+                        statusBadge.textContent = '✓ Confirmed';
+                    } else if (block.status === 'maturing') {
+                        var confs = block.confirmations || 0;
+                        var required = block.confirmations_required || 100;
+                        var remaining = Math.max(0, required - confs);
+                        statusBadge.textContent = '⏳ ' + confs + '/' + required + ' (' + remaining + ' left)';
+                        statusBadge.title = confs + ' of ' + required + ' confirmations';
+                    } else if (block.status === 'pending') {
+                        statusBadge.textContent = '⏳ Pending';
+                    } else {
+                        statusBadge.textContent = '✗ Orphaned';
+                    }
                     tdStatus.appendChild(statusBadge);
                     tr.appendChild(tdStatus);
                     

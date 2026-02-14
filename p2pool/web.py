@@ -1016,19 +1016,73 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except:
             block_explorer_url = ''
         
+        # Get current blockchain height for confirmation tracking
+        try:
+            current_height = node.bitcoind_work.value['height']
+        except:
+            current_height = 0
+        
+        # Fallback subsidy (current) for old blocks that don't have it stored
+        try:
+            current_subsidy = node.bitcoind_work.value['subsidy']
+        except:
+            current_subsidy = 0
+        
+        # Coinbase maturity (100 for LTC)
+        COINBASE_MATURITY = 100
+        
         for b in block_history:
             if b.get('miner') == address:
                 block_hash = b.get('hash', '')
+                block_height = b.get('number', 0)
+                
+                # Block reward (subsidy) in coins - fall back to current if missing
+                subsidy = b.get('subsidy', 0) or current_subsidy
+                block_reward = subsidy / 1e8 if subsidy > 0 else 0
+                
+                # Miner's estimated payout from this block (in coins)
+                # Fall back to current_payout proportion * block_reward if not stored
+                stored_payout = b.get('miner_payout', 0)
+                if stored_payout > 0:
+                    est_payout = stored_payout / 1e8
+                elif current_payout > 0 and block_reward > 0:
+                    # Estimate: miner's current share proportion * block reward
+                    est_payout = current_payout
+                else:
+                    est_payout = 0
+                
+                # Confirmation tracking
+                confirmations = max(0, current_height - block_height) if current_height > 0 and block_height > 0 else 0
+                is_mature = confirmations >= COINBASE_MATURITY
+                
+                if b.get('status') == 'confirmed' or b.get('verified'):
+                    if is_mature:
+                        status = 'confirmed'
+                    else:
+                        status = 'maturing'
+                else:
+                    status = 'pending'
+                
                 block_entry = {
                     'timestamp': b.get('ts', 0),
-                    'block_height': b.get('number', 0),
+                    'block_height': block_height,
                     'block_hash': block_hash,
-                    'block_reward': 0,
+                    'block_reward': block_reward,
                     'explorer_url': block_explorer_url + block_hash if block_explorer_url else '',
-                    'status': b.get('status', 'pending'),
-                    'estimated_payout': 0,
+                    'status': status,
+                    'estimated_payout': est_payout,
+                    'confirmations': confirmations,
+                    'confirmations_required': COINBASE_MATURITY,
                 }
                 miner_blocks.append(block_entry)
+                
+                # Accumulate reward totals
+                if est_payout > 0:
+                    total_estimated_rewards += est_payout
+                    if is_mature:
+                        confirmed_rewards += est_payout
+                    else:
+                        maturing_rewards += est_payout
                 
         return {
             'address': address,
@@ -1138,6 +1192,19 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                                             s.new_script, node.net.ADDRESS_VERSION, -1, node.net.PARENT)
                                     except Exception as e2:
                                         print('Failed to extract miner address: %s / %s' % (e, e2))
+                            # Fill in subsidy and miner_payout if missing
+                            if not b.get('subsidy'):
+                                try:
+                                    b['subsidy'] = node.bitcoind_work.value['subsidy']
+                                except:
+                                    pass
+                            if not b.get('miner_payout') and b.get('miner'):
+                                try:
+                                    current_txouts = node.get_current_txouts()
+                                    miner_addr = b['miner'].split('.')[0].split('_')[0]
+                                    b['miner_payout'] = current_txouts.get(miner_addr, 0)
+                                except:
+                                    pass
                             break
                     continue
                 
@@ -1165,7 +1232,15 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     'verified': is_verified,
                     'status': 'confirmed' if is_verified else 'pending',
                     'pool_hashrate_at_find': pool_hashrate,
+                    'subsidy': node.bitcoind_work.value.get('subsidy', 0),
                 }
+                # Get miner's payout from current txouts
+                try:
+                    current_txouts = node.get_current_txouts()
+                    base_addr = miner_addr.split('.')[0].split('_')[0]
+                    block_info['miner_payout'] = current_txouts.get(base_addr, 0)
+                except:
+                    block_info['miner_payout'] = 0
                 
                 # Calculate expected time based on difficulty and pool hashrate
                 if pool_hashrate > 0:
@@ -1258,6 +1333,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'verified': False,
                 'status': 'pending',
                 'pool_hashrate_at_find': pool_hashrate,
+                'subsidy': block_info.get('subsidy', 0),
+                'miner_payout': block_info.get('miner_payout', 0),
             }
             
             # Calculate expected time and luck
@@ -1994,8 +2071,14 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     add['address'], 0) * 1e-8
         hd.datastreams['current_payout'].add_datum(t, my_current_payouts)
         miner_hash_rates, miner_dead_hash_rates = wb.get_local_rates()
-        current_txouts_by_address = current_txouts
-        hd.datastreams['current_payouts'].add_datum(t, dict((user, current_txouts_by_address[user]*1e-8) for user in miner_hash_rates if user in current_txouts_by_address))
+        # Build payout dict keyed by base address (strip worker suffix)
+        # miner_hash_rates keys may have .worker suffix, current_txouts keys are base addresses
+        payouts_by_address = {}
+        for user in miner_hash_rates:
+            base_addr = user.split('.')[0].split('_')[0]
+            if base_addr in current_txouts:
+                payouts_by_address[base_addr] = current_txouts[base_addr] * 1e-8
+        hd.datastreams['current_payouts'].add_datum(t, payouts_by_address)
         
         # Track merged mining payouts per miner (DOGE)
         try:
