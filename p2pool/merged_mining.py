@@ -81,8 +81,8 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     - P2Pool donation (configurable %, always present as blockchain marker)
     
     DONATION SYSTEM:
-    - V36: Full donation goes to COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
-    - Fallback: Full donation to PRIMARY_DONATION_SCRIPT (forrestv P2PK).
+    Always uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
+    Either party can spend independently.
     
     ADDRESS CONVERSION:
     Shareholder addresses are auto-converted from pubkey_hash stored in share chain.
@@ -111,27 +111,16 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     # Calculate fees from total reward
     # Order: donation first, then worker fee, then miners split the rest
     #
-    # DONATION SYSTEM:
-    # V36: Full donation goes to COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
-    #      Either party can spend independently.
-    # Fallback: If v36_active is False, use PRIMARY_DONATION_SCRIPT (forrestv P2PK).
+    # DONATION: Always COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
+    # Only V36 nodes build merged coinbases, so v36_active is irrelevant here.
+    # Either party can spend independently.
     #
     # The donation/marker output MUST always carry a nonzero value (at least dust
     # threshold) so the output is standard and identifiable on-chain.
-    
-    # Determine donation script and amount based on V36 status
-    if v36_active:
-        # V36: Full donation to combined 1-of-2 P2MS
-        donation_script = COMBINED_DONATION_SCRIPT
-        donation_amount = int(total_reward * donation_percentage / 100)
-        if DEBUG_COINBASE:
-            print >>sys.stderr, '[MERGED COINBASE] V36 ACTIVE: Using COMBINED_DONATION_SCRIPT (1-of-2 P2MS)'
-    else:
-        # Fallback: full donation to primary (forrestv P2PK)
-        donation_script = PRIMARY_DONATION_SCRIPT
-        donation_amount = int(total_reward * donation_percentage / 100)
-        if DEBUG_COINBASE:
-            print >>sys.stderr, '[MERGED COINBASE] Pre-V36: Using PRIMARY_DONATION_SCRIPT (full donation)'
+    donation_script = COMBINED_DONATION_SCRIPT
+    donation_amount = int(total_reward * donation_percentage / 100)
+    if DEBUG_COINBASE:
+        print >>sys.stderr, '[MERGED COINBASE] Using COMBINED_DONATION_SCRIPT (1-of-2 P2MS)'
     
     # Ensure minimum dust for marker output (like parent chain rounding remainder)
     # Use the merged chain's DUST_THRESHOLD if available, else 1e8 (1 coin)
@@ -264,9 +253,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     # Even if donation_percentage=0, this output marks every block as P2Pool-mined
     # This is equivalent to gentx_before_refhash on parent chain
     #
-    # The donation_script is chosen based on V36 status:
-    #   Pre-V36:  PRIMARY_DONATION_SCRIPT (forrestv P2PK) — halved amount
-    #   Post-V36: COMBINED_DONATION_SCRIPT (1-of-2 P2MS) — full amount
+    # Always COMBINED_DONATION_SCRIPT (1-of-2 P2MS) — full amount
     #
     # Collect rounding remainder from miner distribution (like parent chain).
     # Integer truncation in amount = int(miners_reward * fraction) means
@@ -280,9 +267,8 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     })
     
     if DEBUG_COINBASE:
-        script_name = 'COMBINED (P2MS)' if v36_active else 'PRIMARY (P2PK)'
-        print >>sys.stderr, '[DONATION] P2Pool marker/donation to %s: %d satoshis (%.1f%% + %d rounding)' % (
-            script_name, final_donation, donation_percentage / (1 if v36_active else 2), rounding_remainder)
+        print >>sys.stderr, '[DONATION] P2Pool marker/donation to COMBINED (P2MS): %d satoshis (%.1f%% + %d rounding)' % (
+            final_donation, donation_percentage, rounding_remainder)
         print >>sys.stderr, '[MERGED COINBASE] Total outputs: %d (miners) + 1 (OP_RETURN) + 1 (donation marker) = %d' % (
             len(tx_outs) - 2, len(tx_outs))
     
