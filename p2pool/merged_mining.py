@@ -24,22 +24,14 @@ DEBUG_COINBASE = False
 # These mirror the parent chain donation system (data.py) for merged mining.
 # Raw scripts are chain-agnostic (P2PK, P2PKH, bare P2MS work on any chain).
 #
-# Transition mechanism:
-#   Pre-V36:  Explicit donation halved, goes to PRIMARY (forrestv P2PK).
-#             Our project gets the other half via fake miner PPLNS shares
-#             (already in the shareholders dict passed to build_merged_coinbase).
-#   Post-V36: Full donation to COMBINED (1-of-2 P2MS, either party can spend).
+# V36: Full donation to COMBINED (1-of-2 P2MS, either party can spend).
 # ============================================================================
 
 # PRIMARY_DONATION_SCRIPT: Original P2Pool donation (forrestv, P2PK format)
 # Same raw script as data.py DONATION_SCRIPT - chain-agnostic
 # P2PK: 0x41 <65-byte uncompressed pubkey> 0xac (OP_CHECKSIG)
+# Kept for fallback if V36 is not active.
 PRIMARY_DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac'.decode('hex')
-
-# SECONDARY_DONATION_SCRIPT: Our project's donation (P2PKH format)
-# Same raw script as data.py SECONDARY_DONATION_SCRIPT
-# P2PKH: OP_DUP OP_HASH160 <20-byte pubkey_hash> OP_EQUALVERIFY OP_CHECKSIG
-SECONDARY_DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'.decode('hex')
 
 # COMBINED_DONATION_SCRIPT: 1-of-2 P2MS (bare multisig) for V36+
 # Same raw script as data.py COMBINED_DONATION_SCRIPT
@@ -47,11 +39,8 @@ SECONDARY_DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'
 # OP_1 PUSH33 <forrestv_compressed> PUSH33 <our_compressed> OP_2 OP_CHECKMULTISIG
 COMBINED_DONATION_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d12102fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a52ae'.decode('hex')
 
-# Enable/disable secondary donation during transition period
-SECONDARY_DONATION_ENABLED = True
-
-# Legacy alias for backward compatibility (points to our project's script)
-DONATION_SCRIPT = SECONDARY_DONATION_SCRIPT
+# Default donation script alias (points to combined P2MS)
+DONATION_SCRIPT = COMBINED_DONATION_SCRIPT
 
 # P2Pool merged mining identifier for OP_RETURN
 P2POOL_TAG = 'P2Pool merged mining'
@@ -91,13 +80,9 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     - OP_RETURN tag (identifies merged P2Pool blocks on Dogecoin chain)
     - P2Pool donation (configurable %, always present as blockchain marker)
     
-    DONATION SYSTEM (mirrors parent chain data.py):
-    - Pre-V36 + SECONDARY_DONATION_ENABLED:
-        Explicit donation is HALVED and goes to PRIMARY_DONATION_SCRIPT (forrestv P2PK).
-        Our project gets the other half via fake miner PPLNS shares already in shareholders.
-        This matches parent chain: coinbase_donation_pct = donation_percentage / 2.
-    - Post-V36:
-        Full donation goes to COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
+    DONATION SYSTEM:
+    - V36: Full donation goes to COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
+    - Fallback: Full donation to PRIMARY_DONATION_SCRIPT (forrestv P2PK).
     
     ADDRESS CONVERSION:
     Shareholder addresses are auto-converted from pubkey_hash stored in share chain.
@@ -126,43 +111,27 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     # Calculate fees from total reward
     # Order: donation first, then worker fee, then miners split the rest
     #
-    # DONATION SYSTEM (mirrors parent chain data.py):
-    #
-    # Pre-V36 + SECONDARY_DONATION_ENABLED:
-    #   Explicit donation is HALVED — matches parent chain behavior where
-    #   coinbase_donation_pct = self.donation_percentage / 2 (work.py ~line 1285).
-    #   The halved amount goes to PRIMARY_DONATION_SCRIPT (forrestv P2PK).
-    #   Our project gets the other ~half via fake miner PPLNS shares that are
-    #   already included in the shareholders dict.
-    #   Result: ~0.5% explicit (forrestv) + ~0.5% PPLNS (our project) = ~1% total.
-    #
-    # Post-V36:
-    #   Full donation goes to COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
-    #   Either party can spend. No fake miner needed.
+    # DONATION SYSTEM:
+    # V36: Full donation goes to COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
+    #      Either party can spend independently.
+    # Fallback: If v36_active is False, use PRIMARY_DONATION_SCRIPT (forrestv P2PK).
     #
     # The donation/marker output MUST always carry a nonzero value (at least dust
     # threshold) so the output is standard and identifiable on-chain.
     
     # Determine donation script and amount based on V36 status
     if v36_active:
-        # Post-V36: Full donation to combined 1-of-2 P2MS
+        # V36: Full donation to combined 1-of-2 P2MS
         donation_script = COMBINED_DONATION_SCRIPT
         donation_amount = int(total_reward * donation_percentage / 100)
         if DEBUG_COINBASE:
             print >>sys.stderr, '[MERGED COINBASE] V36 ACTIVE: Using COMBINED_DONATION_SCRIPT (1-of-2 P2MS)'
-    elif SECONDARY_DONATION_ENABLED:
-        # Pre-V36 transition: Halve explicit donation (other half via fake miner PPLNS)
-        donation_script = PRIMARY_DONATION_SCRIPT
-        donation_amount = int(total_reward * donation_percentage / 200)  # Halved!
-        if DEBUG_COINBASE:
-            print >>sys.stderr, '[MERGED COINBASE] Pre-V36: Using PRIMARY_DONATION_SCRIPT (forrestv P2PK), donation halved'
-            print >>sys.stderr, '[MERGED COINBASE] Pre-V36: Secondary donation via fake miner PPLNS in shareholders'
     else:
-        # Secondary donation disabled: full donation to primary
+        # Fallback: full donation to primary (forrestv P2PK)
         donation_script = PRIMARY_DONATION_SCRIPT
         donation_amount = int(total_reward * donation_percentage / 100)
         if DEBUG_COINBASE:
-            print >>sys.stderr, '[MERGED COINBASE] Secondary disabled: Using PRIMARY_DONATION_SCRIPT, full donation'
+            print >>sys.stderr, '[MERGED COINBASE] Pre-V36: Using PRIMARY_DONATION_SCRIPT (full donation)'
     
     # Ensure minimum dust for marker output (like parent chain rounding remainder)
     # Use the merged chain's DUST_THRESHOLD if available, else 1e8 (1 coin)
@@ -311,7 +280,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     })
     
     if DEBUG_COINBASE:
-        script_name = 'COMBINED (P2MS)' if v36_active else ('PRIMARY (P2PK)' if SECONDARY_DONATION_ENABLED else 'PRIMARY (P2PK, full)')
+        script_name = 'COMBINED (P2MS)' if v36_active else 'PRIMARY (P2PK)'
         print >>sys.stderr, '[DONATION] P2Pool marker/donation to %s: %d satoshis (%.1f%% + %d rounding)' % (
             script_name, final_donation, donation_percentage / (1 if v36_active else 2), rounding_remainder)
         print >>sys.stderr, '[MERGED COINBASE] Total outputs: %d (miners) + 1 (OP_RETURN) + 1 (donation marker) = %d' % (

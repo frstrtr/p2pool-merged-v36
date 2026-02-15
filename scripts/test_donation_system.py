@@ -49,14 +49,6 @@ check('DONATION_SCRIPT starts with 0x41 (push 65 bytes)',
 check('DONATION_SCRIPT ends with 0xac (OP_CHECKSIG)',
       p2pool_data.DONATION_SCRIPT[-1] == '\xac')
 
-# SECONDARY_DONATION_SCRIPT: P2PKH (25 bytes)
-check('SECONDARY_DONATION_SCRIPT length = 25 bytes (P2PKH)',
-      len(p2pool_data.SECONDARY_DONATION_SCRIPT) == 25)
-check('SECONDARY_DONATION_SCRIPT starts with 76a914 (OP_DUP OP_HASH160 PUSH20)',
-      p2pool_data.SECONDARY_DONATION_SCRIPT[:3] == '\x76\xa9\x14')
-check('SECONDARY_DONATION_SCRIPT ends with 88ac (OP_EQUALVERIFY OP_CHECKSIG)',
-      p2pool_data.SECONDARY_DONATION_SCRIPT[-2:] == '\x88\xac')
-
 # COMBINED_DONATION_SCRIPT: 1-of-2 P2MS (71 bytes)
 check('COMBINED_DONATION_SCRIPT length = 71 bytes (1-of-2 P2MS)',
       len(p2pool_data.COMBINED_DONATION_SCRIPT) == 71)
@@ -111,11 +103,8 @@ check('COMBINED_DONATION_PUBKEY_HASH matches hash160(forrestv_compressed) [LE in
       p2pool_data.COMBINED_DONATION_PUBKEY_HASH == actual_forrestv_compressed_hash,
       'expected=0x%x got=0x%x' % (actual_forrestv_compressed_hash, p2pool_data.COMBINED_DONATION_PUBKEY_HASH))
 
-# Our compressed key hash160
+# Our compressed key hash160 (kept for reference — used in COMBINED_DONATION_SCRIPT)
 actual_our_hash = compute_hash160_le(our_compressed)
-check('SECONDARY_DONATION_PUBKEY_HASH matches hash160(our_compressed) [LE int]',
-      p2pool_data.SECONDARY_DONATION_PUBKEY_HASH == actual_our_hash,
-      'expected=0x%x got=0x%x' % (actual_our_hash, p2pool_data.SECONDARY_DONATION_PUBKEY_HASH))
 
 # ============================================================
 # 3. hash160 Performance Hacks in bitcoin/data.py
@@ -135,8 +124,8 @@ check('hash160 hack: forrestv compressed returns correct LE int',
 
 hack_our_compressed = bitcoin_data.hash160(our_compressed)
 check('hash160 hack: our compressed returns correct LE int',
-      hack_our_compressed == p2pool_data.SECONDARY_DONATION_PUBKEY_HASH,
-      'hack=0x%x expected=0x%x' % (hack_our_compressed, p2pool_data.SECONDARY_DONATION_PUBKEY_HASH))
+      hack_our_compressed == actual_our_hash,
+      'hack=0x%x expected=0x%x' % (hack_our_compressed, actual_our_hash))
 
 # ============================================================
 # 4. gentx_before_refhash Consistency
@@ -190,10 +179,6 @@ print('\n--- 5. script_to_pubkey_hash() Fast-paths ---')
 h1 = p2pool_data.script_to_pubkey_hash(p2pool_data.DONATION_SCRIPT)
 check('script_to_pubkey_hash(DONATION_SCRIPT) returns DONATION_PUBKEY_HASH',
       h1 == p2pool_data.DONATION_PUBKEY_HASH)
-
-h2 = p2pool_data.script_to_pubkey_hash(p2pool_data.SECONDARY_DONATION_SCRIPT)
-check('script_to_pubkey_hash(SECONDARY_DONATION_SCRIPT) returns SECONDARY_DONATION_PUBKEY_HASH',
-      h2 == p2pool_data.SECONDARY_DONATION_PUBKEY_HASH)
 
 h3 = p2pool_data.script_to_pubkey_hash(p2pool_data.COMBINED_DONATION_SCRIPT)
 check('script_to_pubkey_hash(COMBINED_DONATION_SCRIPT) returns COMBINED_DONATION_PUBKEY_HASH',
@@ -272,12 +257,6 @@ try:
           primary_addr is not None and len(primary_addr) > 20,
           'got: %s' % primary_addr)
     print('       -> Primary donation address: %s' % primary_addr)
-    
-    secondary_addr = p2pool_data.secondary_donation_script_to_address(net)
-    check('secondary_donation_script_to_address(litecoin) returns valid address',
-          secondary_addr is not None and len(secondary_addr) > 20,
-          'got: %s' % secondary_addr)
-    print('       -> Secondary donation address: %s' % secondary_addr)
     
     combined_addr = p2pool_data.combined_donation_script_to_address(net)
     check('combined_donation_script_to_address returns synthetic address',

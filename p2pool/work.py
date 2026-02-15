@@ -235,13 +235,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         # Track recently found merged mined blocks
         self.recent_merged_blocks = []
-        
-        # Secondary donation tracking:
-        # - first_secondary_donation_share_found: Until True, ALL work uses secondary donation
-        # - last_secondary_donation_share_time: Tracks when last secondary donation share was found
-        #   Used to ensure at least one secondary share per PPLNS window period
-        self.first_secondary_donation_share_found = False
-        self.last_secondary_donation_share_time = 0  # epoch time of last secondary donation share
 
         self.address_throttle = 0
         self.address = None  # Dynamic address, set later if --dynamic-address used
@@ -1011,104 +1004,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         if random.uniform(0, 100) < self.worker_fee:
             pubkey_hash = self.my_pubkey_hash
-        # Secondary donation logic:
-        # 
-        # PRE-V36 (<95% signaling) - FAKE MINER MECHANISM:
-        #   Split donation: half goes to primary (DONATION_SCRIPT in coinbase),
-        #   half to secondary (via fake miner - shares credited to SECONDARY_DONATION_PUBKEY_HASH)
-        #   First share guarantee ensures secondary donation appears in PPLNS window.
-        #   Safety net re-credits if too long since last secondary share.
-        #
-        # POST-V36 (>=95% signaling) - 1-of-2 P2MS IN COINBASE:
-        #   COMBINED_DONATION_SCRIPT replaces both donation outputs.
-        #   Single output, either party can spend independently.
-        #   No fake miner needed - normal user address resolution.
-        #
-        # PPLNS window = 8640 shares. At ~1 share/min = 8640 minutes = 144 hours = 6 days
-        # We use half window (72 hours) as safety threshold for pre-V36
-        elif p2pool_data.SECONDARY_DONATION_ENABLED:
-            # Check V36 status for donation switch
-            v36_active, v36_signaling = self.is_v36_active()
-            
-            if v36_active:
-                # V36 ACTIVE: 1-of-2 P2MS combined donation in coinbase - no fake miner needed!
-                # COMBINED_DONATION_SCRIPT receives full donation, either party can spend.
-                # Just resolve normal user address.
-                try:
-                    if not user or not user.strip():
-                        pubkey_hash = self.my_pubkey_hash
-                    else:
-                        is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
-                        if is_convertible:
-                            pubkey_hash = validated_pubkey_hash
-                        else:
-                            print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
-                            pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
-                except:
-                    pubkey_hash = self.my_pubkey_hash
-            else:
-                # PRE-V36: Split donation - half to primary via coinbase, half to secondary via fake miner
-                # Check if we need to force secondary donation (safety net)
-                # Half PPLNS window in seconds: 8640 shares / 2 * ~60 sec/share = ~259200 sec = 72 hours
-                HALF_PPLNS_WINDOW_SECONDS = 259200
-                time_since_last_secondary = time.time() - self.last_secondary_donation_share_time
-                needs_safety_secondary = (self.first_secondary_donation_share_found and 
-                                          time_since_last_secondary > HALF_PPLNS_WINDOW_SECONDS)
-                
-                MARKER_CHANCE = 0.012  # ~1 share per 8640 PPLNS window = marker in every block
-                secondary_donation_chance = max(MARKER_CHANCE, self.donation_percentage / 2)
-                
-                # Until first share is FOUND, ALL work uses secondary donation to guarantee it appears
-                # OR if safety net triggered (too long since last secondary share)
-                # OR probabilistic chance (for ongoing secondary donation)
-                use_secondary = (not self.first_secondary_donation_share_found or 
-                               needs_safety_secondary or 
-                               random.uniform(0, 100) < secondary_donation_chance)
-                
-                if use_secondary:
-                    if not self.first_secondary_donation_share_found:
-                        print '[SECONDARY DONATION] Pre-V36 - Work assigned to secondary donation (waiting for first share). user=%s' % user
-                    elif needs_safety_secondary:
-                        print '[SECONDARY DONATION] Pre-V36 - Safety net triggered (%.1f hours since last). user=%s' % (time_since_last_secondary/3600, user)
-                    # Credit this share to secondary donation address (our project's donation)
-                    pubkey_hash = p2pool_data.SECONDARY_DONATION_PUBKEY_HASH
-                else:
-                    try:
-                        if not user or not user.strip():
-                            # Credit to primary donation (original P2Pool developer donation)
-                            pubkey_hash = p2pool_data.DONATION_PUBKEY_HASH
-                        else:
-                            is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
-                            if is_convertible:
-                                pubkey_hash = validated_pubkey_hash
-                            else:
-                                print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
-                                pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
-                    except:
-                        pubkey_hash = self.my_pubkey_hash
+        # Resolve miner address to pubkey_hash for share creation.
+        # V36 uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS) in coinbase for donations.
+        # No fake miner mechanism needed — donation is handled entirely in coinbase.
         else:
-            # SECONDARY_DONATION_ENABLED=False
-            # Standard behavior - no secondary donation
             try:
-                # Skip validation if user is empty (can happen with pre-authorization work requests)
-                # Use donation script pubkey_hash so rewards go to P2Pool development
                 if not user or not user.strip():
-                    # Extract pubkey_hash from DONATION_SCRIPT (P2PK script - need different handling)
-                    # For empty user, fall back to my_pubkey_hash
                     pubkey_hash = self.my_pubkey_hash
                 else:
-                    # Validate that miner's address is convertible for merged mining
                     is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
-                    
                     if is_convertible:
                         pubkey_hash = validated_pubkey_hash
                     else:
-                        # Address is not convertible (P2SH, P2WSH, P2TR)
-                        # Log warning but still allow mining on parent chain
-                        # Merged mining rewards will be skipped for this miner
                         print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
-                        print >>sys.stderr, '[WARN] This miner will NOT receive merged mining rewards! Use P2PKH or P2WPKH address.'
-                        # Fall back to parsing anyway for parent chain mining
                         pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
             except: # XXX blah
                 pubkey_hash = self.my_pubkey_hash
@@ -1340,20 +1248,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # Build share_data differently based on share version
             # VERSION >= 34 uses 'address' (string), VERSION < 34 uses 'pubkey_hash' (int)
             # 
-            # DONATION SYSTEM (based on V36 signaling):
-            # ==========================================
-            # Pre-V36 (<95%): Split donation - half to primary (DONATION_SCRIPT in coinbase),
-            #                 half to secondary (via fake miner shares to SECONDARY_DONATION_PUBKEY_HASH)
-            #
-            # Post-V36 (>=95%): COMBINED_DONATION_SCRIPT (1-of-2 P2MS) in coinbase
-            #                   Single output, either party can spend independently
-            #                   No fake miner needed - full donation in coinbase!
-            #
-            # The donation field controls total donation %. Distribution between scripts is in data.py
-            coinbase_donation_pct = self.donation_percentage
-            if p2pool_data.SECONDARY_DONATION_ENABLED and self.donation_percentage > 0 and not v36_active:
-                # Pre-V36: Split donation - half to primary via coinbase, half to secondary via fake miner
-                coinbase_donation_pct = self.donation_percentage / 2
+            # DONATION SYSTEM:
+            # V36 uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS) in coinbase.
+            # Full donation percentage goes to coinbase — no fake miner mechanism.
             
             share_data_base = dict(
                 previous_share_hash=self.node.best_share_var.value,
@@ -1363,7 +1260,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 ]) + self.current_work.value['coinbaseflags'] + getattr(self.node.net, 'COINBASEEXT', b''))[:100],
                 nonce=random.randrange(2**32),
                 subsidy=self.current_work.value['subsidy'],
-                donation=math.perfect_round(65535*coinbase_donation_pct/100),
+                donation=math.perfect_round(65535*self.donation_percentage/100),
                 stale_info=(lambda (orphans, doas), total, (orphans_recorded_in_chain, doas_recorded_in_chain):
                     'orphan' if orphans > orphans_recorded_in_chain else
                     'doa' if doas > doas_recorded_in_chain else
@@ -2271,17 +2168,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     time.time() - getwork_time,
                     ' DEAD ON ARRIVAL' if not on_time else '',
                 )
-                
-                # Check if this share was assigned to secondary donation
-                # Track both first share and last share time for safety net
-                # V35+ shares use 'address' (string), V<34 use 'pubkey_hash' (int)
-                secondary_addr = p2pool_data.secondary_donation_script_to_address(self.node.net)
-                is_secondary = (share.address == secondary_addr) if secondary_addr else False
-                if is_secondary:
-                    self.last_secondary_donation_share_time = time.time()
-                    if not self.first_secondary_donation_share_found:
-                        self.first_secondary_donation_share_found = True
-                        print '[SECONDARY DONATION] First share with secondary donation FOUND! hash=%s addr=%s' % (p2pool_data.format_hash(share.hash), share.address)
                 
                 self.my_share_hashes.add(share.hash)
                 if not on_time:

@@ -110,20 +110,6 @@ DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd370
 # Avoids recalculating hash160 on every share
 DONATION_PUBKEY_HASH = 0x384f570ccc88ac2e7e00b026d1690a3fca63dd0
 
-# SECONDARY_DONATION_SCRIPT: Our project's donation (P2PKH format)
-# This is added as a regular payout BEFORE the original donation, preserving share compatibility
-# P2PKH script: 0x76 0xa9 0x14 <20-byte pubkey_hash> 0x88 0xac
-# Address: LU66WRMeuxt45vwGh9bWopRsBaZ8owBAb6 (Litecoin mainnet)
-SECONDARY_DONATION_SCRIPT = '76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac'.decode('hex')
-
-# Precomputed pubkey_hash for SECONDARY_DONATION_SCRIPT (performance optimization)
-# hash160 as little-endian int (matching bitcoin/data.py hash160() return format)
-# hash160(02fe6578...) BE hex = 20cb5c22b1e4d5947e5c112c7696b51ad9af3c61
-SECONDARY_DONATION_PUBKEY_HASH = 0x613cafd91ab596762c115c7e94d5e4b1225ccb20
-
-# Enable/disable secondary donation during transition period
-SECONDARY_DONATION_ENABLED = True
-
 # COMBINED_DONATION_SCRIPT: 1-of-2 P2MS (bare multisig) for V36+
 # Replaces BOTH donation outputs with a single output after V36 transition.
 # Either party can spend independently (1-of-2), solving the "lost key" problem.
@@ -157,8 +143,6 @@ def script_to_pubkey_hash(script):
     # Performance optimization: check for known donation scripts first
     if script == DONATION_SCRIPT:
         return DONATION_PUBKEY_HASH
-    if script == SECONDARY_DONATION_SCRIPT:
-        return SECONDARY_DONATION_PUBKEY_HASH
     if script == COMBINED_DONATION_SCRIPT:
         return COMBINED_DONATION_PUBKEY_HASH
     
@@ -202,20 +186,6 @@ def donation_script_to_address(net):
     except ValueError:
         return bitcoin_data.script2_to_address(
                 DONATION_SCRIPT, net.PARENT.ADDRESS_P2SH_VERSION, -1, net.PARENT)
-
-def secondary_donation_script_to_address(net):
-    """Get address for secondary donation script (our project's donation)"""
-    if not SECONDARY_DONATION_ENABLED:
-        return None
-    try:
-        return bitcoin_data.script2_to_address(
-                SECONDARY_DONATION_SCRIPT, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
-    except ValueError:
-        try:
-            return bitcoin_data.script2_to_address(
-                    SECONDARY_DONATION_SCRIPT, net.PARENT.ADDRESS_P2SH_VERSION, -1, net.PARENT)
-        except ValueError:
-            return None
 
 def combined_donation_script_to_address(net):
     """Get a synthetic address string for the 1-of-2 P2MS combined donation script.
@@ -789,7 +759,6 @@ class BaseShare(object):
             known_txs = dict((bitcoin_data.hash256(bitcoin_data.tx_type.pack(tx)), tx) for tx in known_txs)
         
         # Generate the expected coinbase transaction
-        # With "fake miner" mechanism for secondary donation, all nodes generate identical coinbases
         share_info, gentx, other_tx_hashes2, get_share = self.generate_transaction(
             tracker, self.share_info['share_data'], self.header['bits'].target, 
             self.share_info['timestamp'], self.share_info['bits'].target, 
