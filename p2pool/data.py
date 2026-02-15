@@ -1430,7 +1430,10 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
     
     grand_total = total_weight + donation_weight
     
-    if v36_count > 0 or pre_v36_count > 0:
+    _last = getattr(get_v36_merged_weights, '_last_log', None)
+    _cur = (v36_count, pre_v36_count, explicit_count)
+    if _last != _cur:
+        get_v36_merged_weights._last_log = _cur
         msg = 'Merged mining weights: %d V36-signaling shares (weight=%d), %d pre-V36 excluded' % (
             v36_count, grand_total, pre_v36_count)
         if explicit_count > 0:
