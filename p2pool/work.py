@@ -420,6 +420,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             best_share_hash,
                                             max(0, min(share_height, self.node.net.REAL_CHAIN_LENGTH)),
                                             65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(target),
+                                            chain_id=chainid,
                                         )
                                     
                                     # Determine the correct merged chain network for address conversion
@@ -442,15 +443,30 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
                                     
                                     # Convert weights (address/script -> weight) to shareholders (merged_address -> fraction)
-                                    # In VERSION >= 34, the key is an address string (from share.address)
-                                    # In older versions, the key is a P2PKH script that needs conversion
+                                    #
+                                    # Keys from get_v36_merged_weights() come in two forms:
+                                    #   1. 'MERGED:<hex_script>' — explicit merged chain script from V36 share's
+                                    #      merged_addresses field. No conversion needed; use script directly.
+                                    #   2. Parent chain address string (from share.address) — needs auto-conversion
+                                    #      from LTC to DOGE format. Unconvertible (P2SH, P2WSH, P2TR) are skipped.
                                     shareholders = {}
                                     skipped_addresses = []
                                     for key, weight in weights.iteritems():
                                         try:
-                                            # Check if key is already an address string (VERSION >= 34)
-                                            # Address strings are alphanumeric and 25-35 chars for base58, or longer for bech32
-                                            # Script bytes would have non-printable characters
+                                            if key.startswith('MERGED:'):
+                                                # Explicit merged chain script from V36 share's merged_addresses.
+                                                # Decode hex script and convert to address for build_merged_coinbase()
+                                                merged_script = key[7:].decode('hex')
+                                                try:
+                                                    merged_address = bitcoin_data.script2_to_address(merged_script, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                                except Exception:
+                                                    # Script might not be standard P2PKH — use raw script as key
+                                                    merged_address = key  # Fallback: use tagged key as-is
+                                                fraction = float(weight) / float(total_weight) if total_weight > 0 else 0
+                                                shareholders[merged_address] = shareholders.get(merged_address, 0) + fraction
+                                                continue
+                                            
+                                            # Parent chain address — check if convertible to merged chain
                                             key_is_address = len(key) >= 25 and len(key) <= 100 and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' for c in key)
                                             
                                             if key_is_address:

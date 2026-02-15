@@ -1320,46 +1320,56 @@ def get_desired_version_counts(tracker, best_share_hash, dist):
         res[share.desired_version] = res.get(share.desired_version, 0) + bitcoin_data.target_to_average_attempts(share.target)
     return res
 
-def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight):
-    """Calculate PPLNS weights for merged mining, including ONLY V36+ shares.
+def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, chain_id=None):
+    """Calculate PPLNS weights for merged mining, including ONLY V36-signaling shares.
     
     During the V36 transition, pre-V36 shares should not receive merged mining
     rewards because V35 nodes don't contribute to merged block building.
     Their weight is excluded entirely — redistributed proportionally to V36
     miners by virtue of a smaller total_weight denominator.
     
-    This mirrors WeightsSkipList.get_delta() logic but with a version filter:
-    - weight per share = target_to_average_attempts(share.target) * (65535 - donation)
-    - donation weight per share = att * share.donation
-    - address key = share.address (same as WeightsSkipList)
+    IMPORTANT: We filter on share.desired_version (not share.VERSION) because
+    share VERSION only flips to 36 after 95% activation.  Before that, even
+    V36 nodes produce V35-type shares but signal desired_version=36.
+    desired_version identifies which software the miner runs.
     
-    Note: A V36 node only calls this when it finds a merged block.  Since
-    a V36 node always produces V36 shares, there will always be at least
-    one V36 share in the window (the block-finder's own shares).
+    ADDRESS RESOLUTION (two-tier):
+    1. If share.VERSION >= 36 and share has merged_addresses with a matching
+       chain_id entry, use that explicit merged-chain script as key.
+       These addresses are marked with a 'MERGED:' prefix so work.py knows
+       they don't need auto-conversion.
+    2. Otherwise, use share.address (parent chain address) as key.
+       work.py will auto-convert P2PKH addresses to merged chain format.
+       Unconvertible addresses (P2SH, P2WSH, P2TR) are handled in work.py
+       — their weight is skipped and redistributed to convertible miners.
     
     Args:
         tracker: OkayTracker instance
         best_share_hash: Head of share chain
         chain_length: Number of shares to walk (typically REAL_CHAIN_LENGTH)
         max_weight: Weight cap (65535 * SPREAD * target_to_average_attempts)
+        chain_id: Merged chain AuxPoW ID (e.g., 98 for Dogecoin).
+                  If provided, looks up explicit merged_addresses in V36 shares.
     
     Returns:
         (weights, total_weight, donation_weight) — same format as
         get_cumulative_weights() where total_weight == sum(weights) + donation_weight.
-        Only V36+ shares are counted.
+        Only V36-signaling shares are counted.
+        Keys prefixed with 'MERGED:' are already merged-chain scripts (hex-encoded).
     """
-    weights = {}  # {address: weight}
+    weights = {}  # {address_key: weight}
     total_weight = 0
     donation_weight = 0
     v36_count = 0
     pre_v36_count = 0
+    explicit_count = 0
     
     for share in tracker.get_chain(best_share_hash, chain_length):
         att = bitcoin_data.target_to_average_attempts(share.target)
         share_total = att * 65535  # Total contribution of this share
         
-        if share.VERSION < 36:
-            # Pre-V36 share: exclude from merged mining distribution.
+        if share.desired_version < 36:
+            # Pre-V36 signaling share: exclude from merged mining distribution.
             # Still count towards max_weight so the window size is consistent
             # with the parent chain PPLNS window.
             pre_v36_count += 1
@@ -1367,7 +1377,7 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight):
                 break
             continue
         
-        # V36+ share: include with same weight formula as WeightsSkipList
+        # V36-signaling share: include with same weight formula as WeightsSkipList
         share_weight = att * (65535 - share.share_data['donation'])
         share_donation = att * share.share_data['donation']
         
@@ -1382,8 +1392,30 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight):
             else:
                 break
         
-        address = share.address
-        weights[address] = weights.get(address, 0) + share_weight
+        # Address resolution: try explicit merged_addresses first, then parent address
+        address_key = None
+        
+        if chain_id is not None and share.VERSION >= 36:
+            # V36 share type: may have explicit merged_addresses
+            merged_addrs = getattr(share, 'merged_addresses', None)
+            if merged_addrs is None:
+                # Try share_info path (V36 shares store it in share_info)
+                merged_addrs = share.share_info.get('merged_addresses', None) if hasattr(share, 'share_info') and isinstance(share.share_info, dict) else None
+            
+            if merged_addrs:
+                for entry in merged_addrs:
+                    if entry['chain_id'] == chain_id:
+                        # Explicit merged chain script — tag with MERGED: prefix
+                        # so work.py knows it doesn't need auto-conversion
+                        address_key = 'MERGED:' + entry['script'].encode('hex')
+                        explicit_count += 1
+                        break
+        
+        if address_key is None:
+            # No explicit merged address: use parent chain address (auto-convert in work.py)
+            address_key = share.address
+        
+        weights[address_key] = weights.get(address_key, 0) + share_weight
         total_weight += share_weight
         donation_weight += share_donation
         v36_count += 1
@@ -1391,8 +1423,11 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight):
     grand_total = total_weight + donation_weight
     
     if v36_count > 0 or pre_v36_count > 0:
-        print 'Merged mining weights: %d V36 shares (weight=%d), %d pre-V36 excluded' % (
+        msg = 'Merged mining weights: %d V36-signaling shares (weight=%d), %d pre-V36 excluded' % (
             v36_count, grand_total, pre_v36_count)
+        if explicit_count > 0:
+            msg += ', %d with explicit merged addresses' % explicit_count
+        print msg
     
     return weights, grand_total, donation_weight
 
