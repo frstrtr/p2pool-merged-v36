@@ -1320,6 +1320,82 @@ def get_desired_version_counts(tracker, best_share_hash, dist):
         res[share.desired_version] = res.get(share.desired_version, 0) + bitcoin_data.target_to_average_attempts(share.target)
     return res
 
+def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight):
+    """Calculate PPLNS weights for merged mining, including ONLY V36+ shares.
+    
+    During the V36 transition, pre-V36 shares should not receive merged mining
+    rewards because V35 nodes don't contribute to merged block building.
+    Their weight is excluded entirely — redistributed proportionally to V36
+    miners by virtue of a smaller total_weight denominator.
+    
+    This mirrors WeightsSkipList.get_delta() logic but with a version filter:
+    - weight per share = target_to_average_attempts(share.target) * (65535 - donation)
+    - donation weight per share = att * share.donation
+    - address key = share.address (same as WeightsSkipList)
+    
+    Note: A V36 node only calls this when it finds a merged block.  Since
+    a V36 node always produces V36 shares, there will always be at least
+    one V36 share in the window (the block-finder's own shares).
+    
+    Args:
+        tracker: OkayTracker instance
+        best_share_hash: Head of share chain
+        chain_length: Number of shares to walk (typically REAL_CHAIN_LENGTH)
+        max_weight: Weight cap (65535 * SPREAD * target_to_average_attempts)
+    
+    Returns:
+        (weights, total_weight, donation_weight) — same format as
+        get_cumulative_weights() where total_weight == sum(weights) + donation_weight.
+        Only V36+ shares are counted.
+    """
+    weights = {}  # {address: weight}
+    total_weight = 0
+    donation_weight = 0
+    v36_count = 0
+    pre_v36_count = 0
+    
+    for share in tracker.get_chain(best_share_hash, chain_length):
+        att = bitcoin_data.target_to_average_attempts(share.target)
+        share_total = att * 65535  # Total contribution of this share
+        
+        if share.VERSION < 36:
+            # Pre-V36 share: exclude from merged mining distribution.
+            # Still count towards max_weight so the window size is consistent
+            # with the parent chain PPLNS window.
+            pre_v36_count += 1
+            if total_weight + donation_weight + share_total > max_weight:
+                break
+            continue
+        
+        # V36+ share: include with same weight formula as WeightsSkipList
+        share_weight = att * (65535 - share.share_data['donation'])
+        share_donation = att * share.share_data['donation']
+        
+        # Respect weight cap — stop when window is full
+        if total_weight + donation_weight + share_weight + share_donation > max_weight:
+            # Proportional truncation for boundary share (matches WeightsSkipList)
+            remaining = max_weight - total_weight - donation_weight
+            if remaining > 0 and (share_weight + share_donation) > 0:
+                ratio = remaining / float(share_weight + share_donation)
+                share_weight = int(share_weight * ratio)
+                share_donation = int(share_donation * ratio)
+            else:
+                break
+        
+        address = share.address
+        weights[address] = weights.get(address, 0) + share_weight
+        total_weight += share_weight
+        donation_weight += share_donation
+        v36_count += 1
+    
+    grand_total = total_weight + donation_weight
+    
+    if v36_count > 0 or pre_v36_count > 0:
+        print 'Merged mining weights: %d V36 shares (weight=%d), %d pre-V36 excluded' % (
+            v36_count, grand_total, pre_v36_count)
+    
+    return weights, grand_total, donation_weight
+
 def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value):
     res = []
     

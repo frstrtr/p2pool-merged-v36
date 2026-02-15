@@ -408,15 +408,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 try:
                                     if (previous_share is not None and 
                                         hasattr(previous_share, 'share_data')):
-                                        # Get PPLNS weights from share chain
-                                        # Use best_share_hash directly (not grandparent) - merged mining should
-                                        # include all current shareholders, unlike generate_transaction which
-                                        # excludes the finder of the new share being generated.
+                                        # Get PPLNS weights from share chain — V36 shares ONLY.
+                                        # Pre-V36 shares are excluded from merged mining distribution
+                                        # because V35 nodes don't build merged blocks. Their weight
+                                        # is naturally redistributed to V36 miners (smaller denominator).
                                         target = int(target_hex, 16)
                                         best_share_hash = self.node.best_share_var.value
                                         share_height = self.node.tracker.get_height(best_share_hash)
-                                        weights, total_weight, donation_weight = self.node.tracker.get_cumulative_weights(
-                                            best_share_hash,  # Use best share, not grandparent
+                                        weights, total_weight, donation_weight = p2pool_data.get_v36_merged_weights(
+                                            self.node.tracker,
+                                            best_share_hash,
                                             max(0, min(share_height, self.node.net.REAL_CHAIN_LENGTH)),
                                             65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(target),
                                         )
@@ -488,8 +489,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     # This is expected during bootstrap when share chain is empty or incomplete
                                     previous_share = None  # Force fallback path
                                 
-                                if previous_share is None:
-                                    # Fallback: No shares yet or PPLNS failed, use single address mode
+                                if previous_share is None or not shareholders:
+                                    # Fallback: No shares yet, PPLNS failed, or no V36 shares in window.
+                                    # Use single address mode — this V36 node operator gets 100%.
                                     # Need to convert to merged chain address format
                                     pass  # Suppressed: print >>sys.stderr, '[MERGED] Entering no-shares fallback path, chainid=%s' % chainid
                                     if chainid == 98:  # Dogecoin
