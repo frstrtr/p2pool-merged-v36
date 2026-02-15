@@ -1,7 +1,7 @@
 # P2Pool Merged Mining - Dual Coinbase Structure
 
-**Status:** ✅ WORKING - Successfully mining real blocks on Dogecoin testnet!
-**Last Updated:** December 24, 2024
+**Status:** ✅ WORKING - Multi-output PPLNS blocks on Dogecoin testnet4alpha!
+**Last Updated:** February 15, 2026
 
 ## Overview
 
@@ -371,8 +371,67 @@ The code is **production-ready** based on testnet validation:
 - Lower orphan rate allows rewards to mature reliably
 - 100 confirmations = 100 minutes (vs 26 seconds on testnet)
 
+## V36 Donation Script Transition (Feb 2026)
+
+### Three Donation Scripts
+
+V36 implements a three-script donation system for merged chain coinbase:
+
+| Script | Format | Purpose | Era |
+|--------|--------|---------|-----|
+| `PRIMARY_DONATION_SCRIPT` | P2PK (65-byte pubkey) | Original author (forrestv) — **PRIVATE KEY LOST** | Pre-V36 explicit |
+| `SECONDARY_DONATION_SCRIPT` | P2PKH (20-byte hash) | Our project — **WE CONTROL** | Pre-V36 via fake miner |
+| `COMBINED_DONATION_SCRIPT` | 1-of-2 P2MS (bare multisig) | Either party can spend independently | Post-V36 |
+
+### Pre-V36 Transition Mechanism
+
+During V35→V36 transition, the parent chain's "fake miner" hack is mirrored:
+
+1. **Explicit donation** (coinbase output) is **halved** and goes to `PRIMARY_DONATION_SCRIPT`
+2. **Secondary donation** goes via PPLNS fake miner shares credited to `SECONDARY_DONATION_PUBKEY_HASH`
+3. The fake miner's parent chain address IS in the shareholders dict → receives merged payout
+
+```python
+# Pre-V36: build_merged_coinbase()
+donation_script = PRIMARY_DONATION_SCRIPT
+donation_amount = int(total_reward * donation_percentage / 200)  # Halved!
+# Other half comes via fake miner PPLNS weight
+```
+
+### Post-V36 Mechanism
+
+When V36 reaches supermajority (95%+ signaling):
+
+```python
+# Post-V36: build_merged_coinbase()
+donation_script = COMBINED_DONATION_SCRIPT  # 1-of-2 P2MS
+donation_amount = int(total_reward * donation_percentage / 100)  # Full amount
+# No fake miner needed — single output, either party can spend
+```
+
+### Donation Marker Dust Minimum
+
+The donation output MUST always carry a nonzero value (minimum 1 DOGE = 1e8 satoshis) to:
+- Ensure the output is standard (non-dust)
+- Serve as an on-chain P2Pool block marker
+- Collect integer rounding remainder from miner payouts
+
+```python
+DUST_THRESHOLD = 100000000  # 1 DOGE
+rounding_remainder = miners_reward - total_distributed_to_miners
+final_donation = max(DUST_THRESHOLD, donation_amount) + rounding_remainder
+```
+
+### On-Chain Verification (Testnet)
+
+Post-fix blocks show correct donation marker:
+```
+vout[4]: 1.00000001 DOGE → donation script (1 DOGE dust + rounding remainder)
+```
+
 ## References
 
 - **P2Pool Original**: https://github.com/p2pool/p2pool
 - **Donation Address**: Original P2Pool author donation address
 - **Implementation**: Based on forrestv's P2Pool design with donations to support development
+- **V36 Design**: V36_IMPLEMENTATION_PLAN.md Parts 3, 9, 14

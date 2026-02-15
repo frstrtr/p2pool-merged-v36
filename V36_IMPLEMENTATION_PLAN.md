@@ -3238,8 +3238,404 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 
 ---
 
-*Document Version: 1.10*
-*Last Updated: February 2026*
+# Part 14: Testnet Validation Results (Feb 2026)
+
+## 14.1 Test Environment
+
+Three-node isolated testnet cluster running V35/V36 mixed:
+
+| Node | IP | Version | Miner Address (LTC) | Hashrate |
+|------|----|---------|---------------------|----------|
+| node29 | 192.168.86.29 | V36 | `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW` | ~1.2 MH/s |
+| node31 | 192.168.86.31 | V36 | `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g` | ~1.2 MH/s |
+| node30 | 192.168.86.30 | V35 (jtoomim) | `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ` | ~1.2 MH/s |
+
+- LTC daemon: 192.168.86.26:19332 (testnet)
+- DOGE daemon: 192.168.86.27:44555 (testnet4alpha, port 44557 P2P)
+- mm-adapter: 127.0.0.1:44556 on each V36 node
+- Runtime: PyPy 2.7 (pypy2.7-v7.3.20-linux64)
+
+## 14.2 Critical Bug Fixes Discovered
+
+### 14.2.1 Target Endianness Bug (Commit 3e2b3f6)
+
+`getblocktemplate` returns targets as **big-endian hex strings**. The legacy `createauxblock` returns targets as **little-endian packed bytes**. V36 multiaddress path parsed with `IntType(256).unpack()` which assumes little-endian, producing astronomically incorrect targets.
+
+```python
+# WRONG — treats big-endian hex as little-endian bytes
+parsed_target = pack.IntType(256).unpack(target_hex.decode('hex'))
+# Result: target off by 2^181 — NO merged blocks could EVER be found
+
+# CORRECT — big-endian hex string to integer
+parsed_target = int(target_hex, 16)
+```
+
+**Impact**: Without this fix, merged blocks were NEVER found despite months of mining.
+
+### 14.2.2 Unicode/Bytes Mixing (Commit 3e2b3f6)
+
+Python 2 (PyPy 2.7) silently mixes `unicode` and `str`. JSON from mm-adapter arrives as `unicode`. Concatenating with binary `\xff` bytes in coinbase construction caused `StringIO.getvalue()` failures.
+
+**Fix**: Explicit `str()` / `.encode('utf-8')` of all JSON-sourced text before binary concatenation in `merged_mining.py`.
+
+### 14.2.3 Merged Block Detection (Commit 3e2b3f6)
+
+The merged target check `pow_hash <= aux_target` runs on **every share**, not gated by parent block check. If gated by `pow_hash <= header['bits'].target`, merged blocks would only be found when simultaneously finding a parent block — probability ≈ 0.
+
+### 14.2.4 Donation Marker Dust (Commit cbf9047)
+
+When `give-author=0`, the donation/marker output had value 0. This made the output non-standard and invisible on-chain. Fixed with `DUST_THRESHOLD = 1e8` (1 DOGE) minimum, plus collecting rounding remainder from integer truncation in miner payouts.
+
+## 14.3 Validated Results
+
+### Multi-Output Coinbase (On-Chain Verified)
+
+From DOGE testnet blocks found by V36 nodes:
+
+```
+Block 2459 (V36 node29):
+  vout[0]: 152,134.48 DOGE → miner_A (PPLNS ~53%)
+  vout[1]:  52,035.70 DOGE → miner_B (PPLNS ~18%)
+  vout[2]:  81,463.82 DOGE → miner_C (PPLNS ~29%)
+  vout[3]:       0.00 DOGE → OP_RETURN "c2poolmerged"
+  vout[4]:       1.00 DOGE → donation script (marker with dust)
+```
+
+Compared to V35 single-output blocks:
+```
+Block 2452 (V35 node30):
+  vout[0]: 285,634.00 DOGE → single wallet address (all reward)
+```
+
+### Transition Dynamics
+
+| Test | Result |
+|------|--------|
+| V36 shares accepted by V35 nodes | ✅ No issues |
+| V35 shares accepted by V36 nodes | ✅ No issues |
+| Mixed pool hashrate stability | ✅ Stable at ~4 MH/s across 3 nodes |
+| Share chain fork/orphan rate | Normal — no version-related forks |
+| Merged block submission from V36 | ✅ Accepted by DOGE daemon |
+| V35 legacy `getauxblock` path | ✅ Still working alongside V36 |
+
+### Block Statistics (Testnet4alpha)
+
+| Metric | Value |
+|--------|-------|
+| Total DOGE blocks found (V36) | 14+ |
+| Blocks with rewards (after fixes) | 8+ |
+| Multi-output blocks verified | All V36 blocks have 5 vouts |
+| Confirmations (post-fix blocks) | 240+ (matured) |
+| PPLNS distribution accuracy | Proportional to share weights |
+
+## 14.4 PPLNS Weight System Verification
+
+P2Pool uses **work-weighted PPLNS**, not simple share counting:
+
+```python
+# Each share's weight = attempts * (65535 - donation) / 65535
+# where attempts = 2^256 / (target + 1)
+# Higher difficulty share = proportionally more weight
+```
+
+Key finding: The assigned vardiff target is used, NOT the actual pow_hash value. A block-finding share gets the **same weight** as any other share from that miner — the actual hash quality is discarded for weight purposes.
+
+### Finder Fee Analysis
+
+Parent chain awards **0.5%** (`subsidy // 200`) to the share meeting the block target. For merged mining, no explicit finder fee is currently implemented — all merged rewards are PPLNS proportional.
+
+**Rationale**: The miner cannot intentionally target the merged chain. Meeting the merged target is a side effect. Rewarding this rewards randomness, not effort.
+
+**Recommendation**: Consider redirecting 0.5% finder fee to the incentive pool during Three-Pool transition (Part 3).
+
+---
+
+# Part 15: Pool Security — Anti-Hopping Defenses (Feb 2026)
+
+## 15.1 Pool Hopping Attack
+
+A high-hashrate miner ("whale") exploits PPLNS window dynamics:
+
+```
+T=0: Pool hashrate = H, PPLNS window contains normal miners
+T=1: Whale joins with hashrate 10H
+T=2: Whale floods window — now owns 90% of PPLNS weight
+T=3: Block found — whale gets 90% of reward
+T=4: Whale leaves
+T=5: Pool difficulty still elevated for 10H
+T=6..N: Remaining miners (H) produce shares very slowly
+        Pool is "stale" until difficulty adjusts down
+```
+
+Pool hopping is **more attractive** with merged mining because total extractable value per block = R_ltc + R_doge.
+
+## 15.2 Defense 1: Asymmetric Difficulty Adjustment (No Consensus Required)
+
+Difficulty should adjust **down faster than up**:
+
+```python
+def adjust_difficulty(old_diff, actual_time, target_time):
+    ratio = actual_time / target_time
+    
+    if ratio > 1.5:
+        # Shares coming too slowly — hashrate dropped
+        # Fast downward adjustment (4x normal rate)
+        return old_diff / (ratio * 4)
+    elif ratio < 0.67:
+        # Shares coming too fast — hashrate increased  
+        # Normal upward adjustment
+        return old_diff * (target_time / actual_time)
+    else:
+        # Normal range — standard adjustment
+        return old_diff * (target_time / actual_time)
+```
+
+**Risk**: Low — only affects vardiff targeting, not share format or PPLNS. Can be deployed per-node.
+
+## 15.3 Defense 2: Share Vesting (Requires V36 Supermajority)
+
+Shares don't reach full PPLNS weight immediately — they vest based on share chain depth:
+
+```python
+def vesting_factor(share_depth, total_chain_length):
+    """Deterministic vesting based on share chain position."""
+    VESTING_DEPTH = total_chain_length // 6  # vest over 1/6 of window
+    if share_depth < VESTING_DEPTH:
+        return share_depth / VESTING_DEPTH
+    return 1.0
+```
+
+**Effect**: Whale mining for 10 minutes gets shares at ~17% vesting → 15% effective weight (not 90%).
+
+**Note**: Uses chain depth (deterministic) not wall-clock time (non-deterministic) for consensus safety.
+
+## 15.4 Defense 3: Dual-Window PPLNS (Requires V36 Supermajority)
+
+Blend short and long PPLNS windows:
+
+```python
+short_window = last N/12 shares   # ~2 hours
+long_window  = last N shares      # ~24 hours
+payout_weight = 0.3 * short_window_weight + 0.7 * long_window_weight
+```
+
+Whale dominates short window (90%) but has 0% in long window:
+  - Effective weight = 0.3 × 90% + 0.7 × 0% = **27%** (not 90%)
+
+## 15.5 Defense 4: Concentration Penalty (Merged-Chain Only, No Consensus)
+
+Quadratic penalty when single miner exceeds 33% of total weight:
+
+```python
+CONCENTRATION_THRESHOLD = 0.33
+excess = max(0, fraction - CONCENTRATION_THRESHOLD)
+penalty = excess ** 2
+effective_fraction = fraction * (1.0 - penalty)
+```
+
+**Caveat**: Sybil-defeatable — whale splits across N addresses. Best used as merged-chain-only soft defense.
+
+## 15.6 Recommended Implementation Order
+
+| Priority | Defense | Consensus | Phase |
+|----------|---------|-----------|-------|
+| 1 | Asymmetric difficulty decay | No | Immediate (testnet) |
+| 2 | Share vesting (depth-based) | V36 supermajority | Testnet validation |
+| 3 | Dual-window PPLNS | V36 supermajority | Mainnet |
+| 4 | Concentration penalty | No | Optional |
+
+## 15.7 Anti-Patterns to Avoid
+
+| Anti-pattern | Why It Fails |
+|-------------|-------------|
+| Minimum share count before payout | Whale submits minimum+1 and hops |
+| Address blacklisting | Trivially defeated by new address |
+| Proof-of-stake lockup | Incompatible with P2Pool trustless design |
+| Rate-limiting connections | Whale uses multiple proxy nodes |
+| Manual intervention | Defeats decentralization |
+
+---
+
+# Part 16: Hierarchical Sub-Chain Architecture (Feb 2026)
+
+## 16.1 The Difficulty Floor Problem
+
+P2Pool's share chain difficulty tracks total pool hashrate. As the pool grows, small miners are excluded:
+
+```
+Pool hashrate: 100 MH/s, Share period: 10s
+Miner at 1 MH/s:    ~1 share/1000s  (17 min)  — marginal
+Miner at 100 KH/s:  ~1 share/10000s (2.8 hr)  — excluded  
+Miner at 10 KH/s:   ~1 share/100000s (28 hr)  — impossible
+```
+
+These miners cannot maintain meaningful PPLNS presence — shares expire before accumulating weight.
+
+Simply lowering difficulty doesn't work: a 100 MH/s whale at low difficulty produces 600,000 shares/minute, flooding the share chain.
+
+## 16.2 Tiered Share Chain Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      MAIN SHARE CHAIN                         │
+│              Difficulty: tracks pool hashrate                 │
+│              Participants: tier-1 miners + summary shares     │
+│                                                                │
+│  ┌─────────────────┐           ┌─────────────────┐           │
+│  │  Tier-2 Sub     │           │  Tier-3 Sub     │           │
+│  │  Chain          │           │  Chain          │           │
+│  │  Diff: main/100 │           │  Diff: main/10K │           │
+│  │  100KH-1MH      │           │  10KH-100KH     │           │
+│  │                  │           │                  │           │
+│  │  sub sub sub ──▶ │ Summary   │  sub sub sub ──▶ │ Summary  │
+│  └─────────────────┘ to main   └─────────────────┘ to main   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Tier Definitions
+
+| Tier | Hashrate Range | Difficulty | Share Rate |
+|------|---------------|------------|------------|
+| Tier 1 | > 1 MH/s | Main chain | ~10s/share |
+| Tier 2 | 100 KH – 1 MH | Main / 100 | ~10s/share |
+| Tier 3 | 10 KH – 100 KH | Main / 10000 | ~10s/share |
+
+Each tier's difficulty targets ~1 share per 10 seconds for midpoint miner.
+
+## 16.3 Summary Share Promotion
+
+A sub-chain promotes a **summary share** to the main chain when:
+
+```python
+class SubChain:
+    def should_promote(self):
+        main_share_work = target_to_average_attempts(self.main_chain.current_target)
+        
+        # Condition 1: Accumulated work >= one main share equivalent
+        if self.accumulated_work >= main_share_work:
+            return True
+        # Condition 2: Time limit (prevent isolation)
+        if time.time() - self.last_promotion > MAX_PROMOTION_INTERVAL:
+            return True
+        # Condition 3: Sub-share naturally meets main chain target
+        if self.latest_sub_share.pow_hash <= self.main_chain.current_target:
+            return True
+        return False
+```
+
+**Key invariant**: Promotion normalizes work. A summary carrying 5000 work units contributes exactly 5000 units to main chain PPLNS — no amplification, no discount.
+
+### Summary Share Structure
+
+```python
+class SummaryShare:
+    type: SUMMARY_SHARE
+    sub_chain_id: int              # tier identifier
+    sub_weights: dict              # {miner_address: accumulated_work}
+    total_work: int                # sum of sub-share work
+    merkle_root: hash              # merkle root of included sub-shares
+    sub_share_count: int           # number of sub-shares summarized
+    prev_share: hash               # previous MAIN chain share
+```
+
+## 16.4 Anti-Whale Property
+
+A whale CANNOT exploit sub-chains for advantage:
+
+```
+Whale (100 MH/s) joins tier-2 (1/100th difficulty):
+→ Produces 10,000 sub-shares/second
+→ Accumulated work reaches main-chain-equivalent in 0.01 seconds
+→ Summary promoted immediately
+→ Net effect: identical to submitting directly at full difficulty
+→ ZERO advantage from using sub-chain
+```
+
+Automatic tier assignment prevents whales from choosing lower tiers:
+
+```python
+def assign_tier(observed_hashrate):
+    if observed_hashrate > 1_000_000: return 'tier1'  # Main chain
+    elif observed_hashrate > 100_000:  return 'tier2'
+    else:                               return 'tier3'
+```
+
+## 16.5 PPLNS Integration
+
+When `get_cumulative_weights()` encounters a summary share, it unpacks per-miner weights:
+
+```
+Main PPLNS Window:
+  Direct share:  miner_A (tier1)      weight: 5000
+  Direct share:  miner_B (tier1)      weight: 4800
+  Summary tier2: {miner_C: 2000, miner_D: 1500, miner_E: 1600}
+  Summary tier3: {miner_F: 800, miner_G: 3500}
+
+Flattened coinbase outputs:
+  miner_A: 5000 (27.4%)
+  miner_B: 4800 (26.3%)
+  miner_G: 3500 (19.2%)  ← tier-3 miner, full coinbase inclusion!
+  miner_C: 2000 (11.0%)
+  miner_E: 1600 (8.8%)
+  miner_D: 1500 (8.2%)
+  miner_F:  800 (4.4%)
+```
+
+Small miners from sub-chains appear in the coinbase identically to tier-1 miners.
+
+## 16.6 Verification
+
+| Level | Verified | Who | Cost |
+|-------|----------|-----|------|
+| SPV | Trust summary if deep in chain | Light clients | Zero |
+| Light | `sub_share_count * avg_difficulty ≈ total_work` | Most peers | Minimal |
+| Full | Download sub-shares, verify PoW, verify merkle root | Validators | Proportional |
+
+## 16.7 Network Protocol Extensions
+
+```
+MSG_SUB_SHARE:      Relay to tier peers only (NOT broadcast to all)
+MSG_SUMMARY:        Relay promoted summary to ALL peers  
+MSG_GET_SUB_SHARES: Request sub-shares for verification
+```
+
+Sub-shares only relay between same-tier peers — tier-3 sub-shares don't flood tier-1 nodes.
+
+## 16.8 Implementation Phases
+
+| Phase | What | Consensus | Risk |
+|-------|------|-----------|------|
+| Phase 1 | Widen vardiff range (node-local, no sub-chains) | None | Minimal |
+| Phase 2 | Local sub-share accumulation + summary promotion | Summary share format | Medium |
+| Phase 3 | P2P sub-share relay between tier peers | Network protocol | Medium |
+| Phase 4 | Tier-aware peer discovery + bandwidth optimization | Peer protocol | Low |
+
+Phase 1 is deployable **immediately** — just relax vardiff bounds so small miners submit easier shares that the local node aggregates into normal shares at pool difficulty.
+
+## 16.9 Bitcoin Analogy: Lightning Network Parallel
+
+| Bitcoin L1/L2 | P2Pool Hierarchical |
+|---------------|-------------------|
+| Bitcoin mainchain | Main share chain |
+| Lightning channel | Sub-share chain |
+| Channel capacity | Accumulated work threshold |
+| Channel close (settlement) | Summary share promotion |
+| HTLCs for atomic verification | Merkle root + sub-share PoW |
+| Small payments viable on L2 | Small miners viable on sub-chain |
+| Whale can't flood L1 via L2 | Whale can't exploit sub-chain |
+
+## 16.10 Open Questions
+
+1. Should sub-share difficulty adjust independently per tier?
+2. Maximum `sub_weights` dict size (DoS vector)?
+3. If pool hashrate drops and tier-2 diff equals tier-1, should tiers merge?
+4. How quickly should tier assignment change when miner hashrate changes (hysteresis)?
+5. Incentive for tier-1 nodes to relay tier-2/3 sub-shares?
+
+---
+
+*Document Version: 1.13*
+*Last Updated: February 15, 2026*
 *Author: P2Pool Merged Mining Team*
 *Changelog:*
 - *v1.0: Initial V36 merged mining plan*
@@ -3253,3 +3649,6 @@ Notable: Block uses native SegWit (witness data) but excludes all MWEB txs
 - *v1.8: NEW: Added Part 11 - MWEB Compatibility Issue. Documented jtoomim ~15-25% hashrate loss due to MWEB parsing failures. Our fix reduces failure rate from 97% to <1%. V35 shares remain compatible across MWEB/non-MWEB nodes.*
 - *v1.9: NEW: Added Part 12 - Share Size Optimization. Derivation mode encoding reduces V36 overhead from +57% to +3% for typical miners. Includes future compression and commitment scheme roadmap.*
 - *v1.10: NEW: Added Part 13 - Security Analysis. Analyzed P2Pool blocks (ZERO MWEB txs included - 100% fee loss). Documented share modification attack vectors and security solutions. Recommended: merged_payload in share_info for cryptographic protection.*
+- *v1.11: NEW: Added Part 14 - Testnet Validation Results. Three-node cluster (2 V36 + 1 V35) validated multi-output merged coinbase, transition dynamics, endianness bug fix, donation marker dust, PPLNS weight verification, finder fee analysis.*
+- *v1.12: NEW: Added Part 15 - Pool Security & Anti-Hopping Defenses. Asymmetric difficulty adjustment, share vesting (depth-based), dual-window PPLNS, concentration penalty. Prioritized implementation order with consensus requirements.*
+- *v1.13: NEW: Added Part 16 - Hierarchical Sub-Chain Architecture. Tiered share chains for small miner inclusion. Summary share promotion, anti-whale proof, PPLNS integration, verification levels, network protocol extensions, Lightning Network parallel.*

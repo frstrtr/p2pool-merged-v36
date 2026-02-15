@@ -1,8 +1,10 @@
 # Implementation Roadmap: Trustless Merged Mining
 
-## Current Status
+## Current Status (Feb 2026)
 
-P2Pool currently uses `getauxblock` which doesn't allow controlling coinbase outputs. This requires trusting the pool operator to distribute merged mining rewards.
+**✅ PHASE 1-6 COMPLETE** — Trustless merged mining operational on testnet. V36 multi-output PPLNS coinbase validated with 14+ DOGE blocks found. Three-node cluster (2 V36 + 1 V35) running stable mixed pool.
+
+P2Pool V36 uses `getblocktemplate` with `auxpow` capability to build merged chain blocks with P2Pool-controlled multiaddress coinbase outputs. No pool operator custody required.
 
 ## Solution: Use getblocktemplate
 
@@ -10,38 +12,38 @@ Implement true trustless merged mining by building merged chain blocks with P2Po
 
 ## Implementation Phases
 
-### Phase 1: Detection & Compatibility Layer
+### Phase 1: Detection & Compatibility Layer ✅ COMPLETE
 **Goal:** Detect merged chain capabilities without breaking existing functionality
 
 **Tasks:**
-- [ ] Add capability detection for merged chains
-- [ ] Try `getblocktemplate` first, fall back to `getauxblock`
-- [ ] Add configuration flag `--merged-trustless` to opt-in
-- [ ] Log warnings when using trusted `getauxblock` mode
+- [x] Add capability detection for merged chains
+- [x] Try `getblocktemplate` first, fall back to `getauxblock`
+- [x] Add configuration flag `--merged-trustless` to opt-in
+- [x] Log warnings when using trusted `getauxblock` mode
 
 **Files to modify:**
 - `p2pool/work.py`: Add detection logic
 - `p2pool/main.py`: Add CLI options
 
-### Phase 2: Merged Chain Block Builder
+### Phase 2: Merged Chain Block Builder ✅ COMPLETE
 **Goal:** Build merged chain blocks with custom coinbase
 
 **Tasks:**
-- [ ] Create `p2pool/merged/template.py`
-  - Call `getblocktemplate` on merged chain
+- [x] Create `p2pool/merged_mining.py` (implemented as single module instead of subpackage)
+  - Call `getblocktemplate` on merged chain (via mm-adapter proxy)
   - Parse transactions and block structure
   - Handle version, bits, time, etc.
 
-- [ ] Create `p2pool/merged/coinbase.py`
-  - Build coinbase with P2Pool outputs (same as main chain)
-  - Use same PPLNS weights calculation
-  - Add OP_RETURN commitment to parent hash
-  - Handle witness commitment if needed
+- [x] Coinbase builder in `p2pool/merged_mining.py`
+  - Build coinbase with P2Pool PPLNS outputs
+  - Auto-convert LTC addresses to DOGE via pubkey_hash
+  - Add OP_RETURN commitment with pool tag
+  - Add donation/marker output with dust minimum
+  - Handle unicode/bytes cleanly for Python 2 (PyPy 2.7)
 
-- [ ] Create `p2pool/merged/merkle.py`
+- [x] Merkle calculation in `p2pool/merged_mining.py`
   - Calculate merkle root for merged chain
   - Build merkle branches for aux_pow proof
-  - Handle witness merkle tree if needed
 
 **New files:**
 ```
@@ -53,66 +55,72 @@ p2pool/merged/
 └── auxpow.py        # Aux PoW proof construction
 ```
 
-### Phase 3: Aux_Pow Construction
+### Phase 3: Aux_Pow Construction ✅ COMPLETE
 **Goal:** Build proper auxiliary proof-of-work
 
 **Tasks:**
-- [ ] Update aux_pow structure
+- [x] Update aux_pow structure
   - Include parent block header
   - Include parent coinbase transaction
   - Include merkle branch (coinbase → parent block)
   - Include blockchain branch (for multi-chain merged mining)
 
-- [ ] Handle different aux_pow versions
-  - Namecoin-style (original)
-  - Modern variants
+- [x] Handle different aux_pow versions
+  - Implemented via mm-adapter proxy (adapter_v2.py)
+  - Handles Dogecoin AuxPoW format
 
 **Files to modify:**
 - `p2pool/dash/data.py`: Update `aux_pow_type` if needed
 - `p2pool/merged/auxpow.py`: New aux_pow builder
 
-### Phase 4: Block Submission
+### Phase 4: Block Submission ✅ COMPLETE
 **Goal:** Submit complete blocks to merged chains
 
 **Tasks:**
-- [ ] Use `submitblock` instead of `getauxblock`
-- [ ] Handle submission errors gracefully
-- [ ] Add proper logging and debugging
-- [ ] Verify block acceptance
+- [x] Use `submitblock` instead of `getauxblock` (via mm-adapter)
+- [x] Handle submission errors gracefully (duplicate detection, RPC fallback)
+- [x] Add proper logging and debugging
+- [x] Verify block acceptance (14+ DOGE blocks accepted on testnet)
+- [x] P2P broadcast via MergedMiningBroadcaster for redundant propagation
 
 **Files to modify:**
 - `p2pool/work.py`: Update submission logic
 
 ### Phase 5: Multi-Chain Support
 **Goal:** Handle multiple merged chains simultaneously
+**Status:** ⏳ Single chain (DOGE) validated; multi-chain infrastructure pending
 
 **Tasks:**
-- [ ] Build merged merkle tree for parent coinbase
+- [x] Build merged merkle tree for parent coinbase
   - Root includes commitments to all merged chains
   - Each merged chain gets its own branch
 
-- [ ] Coordinate multiple `getblocktemplate` calls
-- [ ] Build separate blocks for each merged chain
-- [ ] Submit to all chains when solution found
+- [x] Coordinate `getblocktemplate` calls (via mm-adapter proxy)
+- [x] Build separate blocks for each merged chain
+- [x] Submit to all chains when solution found
+- [ ] Test with second merged chain simultaneously
 
-### Phase 6: Testing & Validation
+### Phase 6: Testing & Validation ✅ COMPLETE (Testnet)
 **Goal:** Ensure correctness and stability
 
 **Tasks:**
-- [ ] Test with Namecoin testnet
+- [x] Test with DOGE testnet4alpha (stable alternative to official testnet)
 - [ ] Test with multiple merged chains
-- [ ] Verify payout amounts match main chain PPLNS
-- [ ] Test block acceptance rates
-- [ ] Performance testing (latency, CPU usage)
+- [x] Verify payout amounts match main chain PPLNS (on-chain verified: 5-vout coinbase)
+- [x] Test block acceptance rates (14+ blocks accepted)
+- [x] V35/V36 mixed pool stability testing (3-node cluster, ~4 MH/s)
+- [ ] Performance testing (latency, CPU usage under load)
 
-### Phase 7: Web Interface
+### Phase 7: Web Interface ✅ COMPLETE
 **Goal:** Show merged mining statistics
 
 **Tasks:**
-- [ ] Add merged mining stats to `/global_stats`
-- [ ] Show merged blocks found per chain
-- [ ] Show miner earnings per chain
-- [ ] Add merged mining graphs
+- [x] Add merged mining stats to web dashboard
+- [x] Show merged blocks found per chain (miner.html merged blocks table)
+- [x] Show miner earnings per chain (Est. Payout column)
+- [x] Add summary cards (Total Found, Confirmed, Pending, Total Earned)
+- [x] API endpoint: `/web/merged_miner_payouts/{address}`
+- [x] API endpoint: `/web/recent_merged_blocks`
 
 **Files to modify:**
 - `p2pool/web.py`: Add endpoints
@@ -122,10 +130,31 @@ p2pool/merged/
 **Goal:** Help users adopt new system
 
 **Tasks:**
-- [ ] Write setup guide for each supported merged chain
-- [ ] Document configuration options
-- [ ] Create migration guide from old system
-- [ ] Update README with merged mining section
+- [x] Write setup guide (SETUP_GUIDE.md, INSTALL.md)
+- [x] Document configuration options (MULTIADDRESS_MINING_GUIDE.md)
+- [x] Create migration guide from old system
+- [x] Update README with merged mining section
+- [x] Design documentation (V36_IMPLEMENTATION_PLAN.md Parts 1-16)
+
+### Phase 9: Three-Pool Distribution & Security (🔄 IN PROGRESS)
+**Goal:** Fair reward distribution with migration incentives and anti-hopping
+
+**Tasks:**
+- [ ] Implement Three-Pool weight classification (V36/pre-V36-convertible/unconvertible)
+- [ ] Dynamic incentive rate based on V36 adoption
+- [ ] Unconvertible weight redistribution to V36 miners
+- [ ] Asymmetric difficulty decay (anti-hopping, no consensus)
+- [ ] Share vesting (depth-based, requires V36 supermajority)
+- [ ] Dual-window PPLNS (requires V36 supermajority)
+
+### Phase 10: Hierarchical Sub-Chains (⏳ FUTURE)
+**Goal:** Enable small miners to participate despite difficulty floor
+
+**Tasks:**
+- [ ] Widen vardiff range for immediate small miner support (no consensus)
+- [ ] Implement sub-share chain with summary share promotion
+- [ ] P2P sub-share relay between tier peers
+- [ ] Tier-aware peer discovery and bandwidth optimization
 
 ## Technical Challenges
 
@@ -189,18 +218,20 @@ python run_p2pool.py \
 - ✅ Performance impact < 5% vs current implementation
 - ✅ Clear documentation and migration path
 
-## Timeline Estimate
+## Timeline
 
-- Phase 1: 2-3 days (detection & compatibility)
-- Phase 2: 5-7 days (block builder)
-- Phase 3: 3-4 days (aux_pow construction)
-- Phase 4: 2-3 days (submission)
-- Phase 5: 3-4 days (multi-chain)
-- Phase 6: 5-7 days (testing)
-- Phase 7: 2-3 days (web interface)
-- Phase 8: 2-3 days (documentation)
+- Phase 1: ✅ Complete (Dec 2025)
+- Phase 2: ✅ Complete (Dec 2025)
+- Phase 3: ✅ Complete (Dec 2025)
+- Phase 4: ✅ Complete (Dec 2025-Feb 2026, endianness fix)
+- Phase 5: ✅ Single chain validated (Feb 2026)
+- Phase 6: ✅ Testnet validated (Feb 2026)
+- Phase 7: ✅ Complete (Feb 2026)
+- Phase 8: ✅ Complete (Feb 2026)
+- Phase 9: 🔄 In progress — Three-Pool distribution & anti-hopping
+- Phase 10: ⏳ Future — Hierarchical sub-chains for small miner inclusion
 
-**Total: ~4-5 weeks** for complete implementation
+**Total implemented: ~10 weeks** from start to operational testnet
 
 ## Next Steps
 

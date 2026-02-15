@@ -1,48 +1,53 @@
 # P2Pool Merged Mining Status
 
-## Date: December 25, 2025
+## Date: February 15, 2026
 
-## Current State: ✅ OPERATIONAL - Merged Mining Blocks Accepted!
+## Current State: ✅ OPERATIONAL - V36 Multi-Output Merged Mining VALIDATED
+
+### Recent Updates (Feb 2026)
+
+- ✅ **Three-node V35/V36 mixed testnet validated** — no breakage
+- ✅ **Multi-output PPLNS coinbase** verified on DOGE chain (5 vouts per block: 3 miner payouts + OP_RETURN + donation marker)
+- ✅ **Critical endianness bug fixed** (commit 3e2b3f6) — was preventing ALL merged block detection
+- ✅ **Donation marker dust** (commit cbf9047) — donation output always carries minimum 1 DOGE
+- ✅ **Secondary donation script** — pre-V36 fake miner + post-V36 P2MS implemented
+- ✅ **Web dashboard** — Est. Payout, merged blocks table, summary cards in miner.html
+- ✅ **RPC fallback** for block verification after node restarts
+- ✅ **Design docs updated** — Added Parts 14-16 to V36_IMPLEMENTATION_PLAN.md
 
 ### Infrastructure Status
 
 #### ✅ Litecoin Core Testnet
 - **Status**: Fully synced and operational
-- **Blocks**: 4,476,250
-- **RPC Port**: 19332
+- **RPC Port**: 19332 (on 192.168.86.26)
 - **Version**: Standard Litecoin Core with Segwit/MWEB support
-- **Location**: /home/user0/bin/litecoind
 
-#### ✅ Dogecoin Core Testnet (Modified with Auxpow)
+#### ✅ Dogecoin Core Testnet4alpha
 - **Status**: Running and operational
-- **Blocks**: 21,482,578
-- **RPC Port**: 44555
-- **Version**: v1.14.99.0-436b09bb8 (MODIFIED with auxpow capability)
-- **Location**: /home/user0/bin-auxpow/dogecoind
-- **Startup Script**: ~/start-dogecoin-auxpow.sh
-- **Library Path**: ~/lib (contains libboost_*.so.1.83.0)
+- **RPC Port**: 44555 (on 192.168.86.27)
+- **P2P Port**: 44557 (testnet4alpha — stable alternative to official DOGE testnet)
+- **Version**: v1.14.99.0-436b09bb8 (MODIFIED with auxpow/getblocktemplate)
 - **Feature**: getblocktemplate with auxpow capability ✅ VERIFIED
+- **Note**: testnet4alpha (Dogecoin PR #3967) adds fEnforceStrictMinDifficulty=true to prevent block storms that plague official DOGE testnet
 
-#### ✅ P2Pool
-- **Status**: Successfully starts with Litecoin testnet
-- **Branch**: feature/scrypt-litecoin-dogecoin
-- **Architecture**: 
-  - `p2pool/bitcoin/` - Generic Bitcoin protocol with Segwit support
-  - `p2pool/dash/` - Dash-specific code
-  - `p2pool/litecoin/` - Scrypt-specific code with Segwit support
-- **Network**: litecoin_testnet
-- **Worker Port**: 9327
-- **P2Pool Port**: 9338
+#### ✅ P2Pool V36 Nodes (2 of 3)
+- **node29** (192.168.86.29): V36, miner `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW`, ~1.2 MH/s
+- **node31** (192.168.86.31): V36, miner `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g`, ~1.2 MH/s
+- **node30** (192.168.86.30): V35 (jtoomim baseline), miner `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ`, ~1.2 MH/s
+- **mm-adapter**: 127.0.0.1:44556 on each V36 node (adapter_v2.py in screen session)
+- **Runtime**: PyPy 2.7 (pypy2.7-v7.3.20-linux64)
+- **Pool Stats**: ~4 MH/s total, ~1000+ shares, 3 peers
 
 ### Addresses
 
-#### Litecoin Testnet
-- **Legacy**: mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
-- **P2SH-Segwit**: QcVudrUyKGwqjk4KWadnXfbHgnMVHB1Lif
-- **Bech32 (Active)**: tltc1qpkcpgwl24flh35mknlsf374x8ypqv7de6esjh4
+#### Litecoin Testnet (per node)
+- **node29**: `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW`
+- **node31**: `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g`
+- **node30**: `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ`
 
-#### Dogecoin Testnet
-- **Address**: nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB
+#### Dogecoin Testnet (auto-converted from LTC via pubkey_hash)
+- Address conversion: LTC testnet (v111) → DOGE testnet (v113)
+- Same pubkey_hash produces correct address for each chain
 
 ### Modified Dogecoin Features
 
@@ -210,16 +215,24 @@ merged_proxy.rpc_submitblock(dogecoin_block.encode('hex'))
 - [x] Address generation for both chains
 - [x] getblocktemplate with auxpow capability
 - [x] Modified Dogecoin daemon functionality
+- [x] Auxpow capability detection in P2Pool
+- [x] Multiaddress coinbase construction (5-vout: 3 miners + OP_RETURN + donation)
+- [x] Complete Dogecoin block building with AuxPoW proof
+- [x] Block submission via submitblock (through mm-adapter)
+- [x] Share chain integration with multiaddress (V36 shares accepted by V35 peers)
+- [x] End-to-end merged mining flow (14+ DOGE blocks found)
+- [x] Payout verification on both chains (PPLNS proportional confirmed on-chain)
+- [x] Donation marker with dust amount (1 DOGE minimum)
+- [x] V35/V36 mixed pool stability (3-node cluster, ~4 MH/s)
+- [x] Web dashboard: merged blocks table, Est. Payout, summary cards
 
 #### ⏳ Pending Tests
-- [ ] Auxpow capability detection in P2Pool
-- [ ] Multiaddress coinbase construction
-- [ ] Complete Dogecoin block building
-- [ ] Block submission via submitblock
-- [ ] Share chain integration with multiaddress
-- [ ] End-to-end merged mining flow
-- [ ] Payout verification on both chains
-- [ ] 24-hour stability test
+- [ ] Three-Pool distribution model (V36 vs pre-V36 vs unconvertible categories)
+- [ ] Hierarchical sub-chain architecture (small miner inclusion)
+- [ ] Anti-hopping defenses (asymmetric difficulty adjustment)
+- [ ] Mainnet deployment with real hashrate
+- [ ] 24-hour stability test under sustained load
+- [ ] Multiple merged chains simultaneously
 
 ### Next Steps (Prioritized)
 
