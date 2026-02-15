@@ -920,9 +920,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         # Parse merged mining addresses (format: ltc_addr,doge_addr or ltc_addr,doge_addr.worker)
         # Using , (comma) separator - URL-safe and not used in difficulty parsing
-        # NOTE: This parsing exists but merged addresses are NOT stored in share chain.
-        # They're used for current work only. Historical shares use auto-conversion.
-        # To make this persistent would require P2Pool protocol changes (new share format).
+        # V36 shares store validated merged addresses in share_info['merged_addresses'].
+        # Each entry is (chain_id, script) where script is the payment script for that chain.
+        # Validation cascade:
+        #   1. Parse address from stratum username
+        #   2. Validate against merged chain network (checksum, version byte)
+        #   3. Convert to payment script for storage
+        #   4. If invalid: log warning, omit from merged_addresses (auto-conversion fallback)
         merged_addresses = {}
         worker = ''
         
@@ -937,9 +941,37 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     merged_addr, worker = merged_addr.split('.', 1)
                 elif '_' in merged_addr:
                     merged_addr, worker = merged_addr.split('_', 1)
-                merged_addresses['dogecoin'] = merged_addr
-                # Debug: Uncomment to trace merged address usage
-                #print '[DEBUG] Using miner dogecoin address:', merged_addr
+                
+                # Validate the merged address against known chain networks
+                # Try all DOGE networks (testnet4alpha, testnet, mainnet)
+                validated = False
+                for chain_name, chain_net in [
+                    ('dogecoin_testnet4alpha', dogecoin_testnet4alpha_net),
+                    ('dogecoin_testnet', dogecoin_testnet_net),
+                    ('dogecoin', dogecoin_net),
+                ]:
+                    if chain_net is None:
+                        continue
+                    try:
+                        pubkey_hash, version, witver = bitcoin_data.address_to_pubkey_hash(merged_addr, chain_net)
+                        # Convert to payment script for storage in share
+                        script = bitcoin_data.pubkey_hash_to_script2(pubkey_hash, version, witver, chain_net)
+                        merged_addresses['dogecoin'] = merged_addr
+                        # Store validated script with chain_id for share storage
+                        # chain_id 98 = Dogecoin (0x62)
+                        merged_addresses['_validated'] = [{'chain_id': 98, 'script': script}]
+                        validated = True
+                        break
+                    except (ValueError, Exception):
+                        continue
+                
+                if not validated:
+                    # Address failed validation on all known DOGE networks.
+                    # Do NOT store it — fallback to auto-conversion from parent address.
+                    print >>sys.stderr, '[MERGED] WARNING: Invalid DOGE address from stratum: %s (will auto-convert from LTC address)' % merged_addr
+                    # Still store unvalidated for current-work display, but NOT for share storage
+                    merged_addresses['dogecoin'] = merged_addr
+                    merged_addresses['_validated'] = None  # Signals: do not store in share
         
         # Parse worker name from primary address if not already set
         if not worker:
@@ -1347,6 +1379,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 # Older share versions use 'pubkey_hash' as an integer  
                 share_data_base['pubkey_hash'] = pubkey_hash
             
+            # Build validated merged_addresses list for V36 share storage.
+            # Only include addresses that passed validation in get_user_details().
+            # If miner provided no merged address or it failed validation,
+            # merged_addresses_for_share will be None (triggers auto-conversion).
+            merged_addresses_for_share = None
+            current_merged = getattr(self, '_current_merged_addresses', {})
+            if current_merged and current_merged.get('_validated'):
+                merged_addresses_for_share = current_merged['_validated']
+            
             share_info, gentx, other_transaction_hashes, get_share = share_type.generate_transaction(
                 tracker=self.node.tracker,
                 share_data=share_data_base,
@@ -1359,6 +1400,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 known_txs=tx_map,
                 base_subsidy=self.current_work.value['subsidy'],
                 v36_active=v36_active,  # Pass V36 status for donation script switch
+                merged_addresses=merged_addresses_for_share,  # Validated merged chain addresses
             )
 
         packed_gentx = bitcoin_data.tx_type.pack(gentx)

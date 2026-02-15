@@ -310,7 +310,7 @@ class BaseShare(object):
         return t
 
     @classmethod
-    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False):
+    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False, merged_addresses=None):
         # V36 Donation Switch:
         # - Pre-V36 (<95%): Uses DONATION_SCRIPT (P2PK, original P2Pool author)
         # - Post-V36 (>=95%): Uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS, either party can spend)
@@ -521,9 +521,12 @@ class BaseShare(object):
         if segwit_activated:
             share_info['segwit_data'] = segwit_data
         
-        # V36+: include merged_addresses field (empty list = auto-convert from parent address)
+        # V36+: include merged_addresses field
+        # If miner provided validated merged chain addresses via stratum, store them.
+        # None = use default (auto-conversion from parent chain pubkey_hash).
+        # List of [{chain_id: int, script: bytes}] = explicit addresses per chain.
         if cls.VERSION >= 36:
-            share_info['merged_addresses'] = None  # None = use default (auto-conversion)
+            share_info['merged_addresses'] = merged_addresses  # None or list of validated entries
         
         # Build payouts list - IMPORTANT: donation script must be LAST for gentx_before_refhash compatibility
         # Pre-V36: DONATION_SCRIPT (P2PK, 67 bytes) as last output
@@ -687,6 +690,11 @@ class BaseShare(object):
                     self.share_data['pubkey_hash'],
                     net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
         self.desired_version = self.share_data['desired_version']
+        # V36+: Read merged_addresses from share_info (may be None for auto-conversion)
+        if self.VERSION >= 36:
+            self.merged_addresses = self.share_info.get('merged_addresses', None)
+        else:
+            self.merged_addresses = None
         self.absheight = self.share_info['absheight']
         self.abswork = self.share_info['abswork']
         if net.NAME == 'bitcoin' and self.absheight > 3927800 and self.desired_version == 16:
