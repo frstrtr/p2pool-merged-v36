@@ -203,6 +203,11 @@ class TransactionType(pack.Type):
             return dict(version=version, tx_ins=tx_ins, tx_outs=next['tx_outs'], lock_time=next['lock_time'])
     
     def write(self, file, item):
+        # Raw hex string transactions (from GBT rawtx approach): decode and write directly
+        # This enables P2P block broadcast with hex-encoded txs from getblocktemplate
+        if isinstance(item, (str, unicode)):
+            file.write(item.decode('hex'))
+            return
         # GBT dict transactions: write raw hex data directly
         if isinstance(item, dict) and 'data' in item and 'txid' in item:
             file.write(item['data'].decode('hex'))

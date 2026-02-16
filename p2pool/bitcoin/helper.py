@@ -161,7 +161,7 @@ def submit_block(block, ignore_failure, node, broadcaster=None):
     Returns:
         Deferred from RPC submission
     """
-    # fixme: in bitcoin/data.py, block_type needs to be updated to accept hex raw transactions
+    # TransactionType.write() in bitcoin/data.py now handles hex raw transactions
     # submit_block_p2p(block, node.factory, node.net)
     
     # If broadcaster available, do parallel broadcast to additional peers
