@@ -22,11 +22,18 @@ LTC_P2P_PORT="19335"
 LTC_RPC_USER="litecoinrpc"
 LTC_RPC_PASS="litecoinrpc_mainnet_2026"
 
-# Dogecoin Testnet RPC (shared daemon on .27)
-DOGE_RPC_HOST="192.168.86.27"
-DOGE_RPC_PORT="44555"
+# Dogecoin Testnet RPC via MM-Adapter (local proxy for coinbase manipulation)
+# The mm-adapter proxies getblocktemplate to the Dogecoin daemon, allowing
+# p2pool to inject PPLNS shareholder payouts into the merged coinbase.
+# Direct daemon is used for P2P block propagation only.
+DOGE_ADAPTER_HOST="127.0.0.1"
+DOGE_ADAPTER_PORT="44556"
 DOGE_RPC_USER="dogecoinrpc"
 DOGE_RPC_PASS="testpass"
+
+# Dogecoin daemon direct connection (for P2P block broadcasting)
+DOGE_P2P_HOST="192.168.86.27"
+DOGE_P2P_PORT="44557"
 
 # Dogecoin testnet payout address (operator fee)
 DOGE_OPERATOR_ADDRESS="nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T"
@@ -85,7 +92,8 @@ show_status() {
     echo "Code:      p2pool-merged-v36 (experimental v36 shares)"
     echo "Network:   litecoin --testnet"
     echo "LTC RPC:   ${LTC_RPC_HOST}:${LTC_RPC_PORT}"
-    echo "DOGE RPC:  ${DOGE_RPC_HOST}:${DOGE_RPC_PORT}"
+    echo "DOGE RPC:  ${DOGE_ADAPTER_HOST}:${DOGE_ADAPTER_PORT} (mm-adapter)"
+    echo "DOGE P2P:  ${DOGE_P2P_HOST}:${DOGE_P2P_PORT} (direct daemon)"
     echo "LTC Addr:  $LTC_ADDRESS"
     echo "DOGE Addr: $DOGE_OPERATOR_ADDRESS"
     echo "Coinbase:  $COINB_TEXT"
@@ -124,10 +132,12 @@ case "${1:-start}" in
                 --bitcoind-address $LTC_RPC_HOST \\
                 --bitcoind-rpc-port $LTC_RPC_PORT \\
                 --bitcoind-p2p-port $LTC_P2P_PORT \\
-                --merged-coind-address $DOGE_RPC_HOST \\
-                --merged-coind-rpc-port $DOGE_RPC_PORT \\
+                --merged-coind-address $DOGE_ADAPTER_HOST \\
+                --merged-coind-rpc-port $DOGE_ADAPTER_PORT \\
                 --merged-coind-rpc-user $DOGE_RPC_USER \\
                 --merged-coind-rpc-password $DOGE_RPC_PASS \\
+                --merged-coind-p2p-address $DOGE_P2P_HOST \\
+                --merged-coind-p2p-port $DOGE_P2P_PORT \\
                 --merged-operator-address $DOGE_OPERATOR_ADDRESS \\
                 -a $LTC_ADDRESS \\
                 --coinbtext $COINB_TEXT \\
@@ -166,10 +176,12 @@ case "${1:-start}" in
             --bitcoind-address "$LTC_RPC_HOST" \
             --bitcoind-rpc-port "$LTC_RPC_PORT" \
             --bitcoind-p2p-port "$LTC_P2P_PORT" \
-            --merged-coind-address "$DOGE_RPC_HOST" \
-            --merged-coind-rpc-port "$DOGE_RPC_PORT" \
+            --merged-coind-address "$DOGE_ADAPTER_HOST" \
+            --merged-coind-rpc-port "$DOGE_ADAPTER_PORT" \
             --merged-coind-rpc-user "$DOGE_RPC_USER" \
             --merged-coind-rpc-password "$DOGE_RPC_PASS" \
+            --merged-coind-p2p-address "$DOGE_P2P_HOST" \
+            --merged-coind-p2p-port "$DOGE_P2P_PORT" \
             --merged-operator-address "$DOGE_OPERATOR_ADDRESS" \
             -a "$LTC_ADDRESS" \
             --coinbtext "$COINB_TEXT" \
@@ -198,10 +210,12 @@ case "${1:-start}" in
                 --bitcoind-address $LTC_RPC_HOST \\
                 --bitcoind-rpc-port $LTC_RPC_PORT \\
                 --bitcoind-p2p-port $LTC_P2P_PORT \\
-                --merged-coind-address $DOGE_RPC_HOST \\
-                --merged-coind-rpc-port $DOGE_RPC_PORT \\
+                --merged-coind-address $DOGE_ADAPTER_HOST \\
+                --merged-coind-rpc-port $DOGE_ADAPTER_PORT \\
                 --merged-coind-rpc-user $DOGE_RPC_USER \\
                 --merged-coind-rpc-password $DOGE_RPC_PASS \\
+                --merged-coind-p2p-address $DOGE_P2P_HOST \\
+                --merged-coind-p2p-port $DOGE_P2P_PORT \\
                 --merged-operator-address $DOGE_OPERATOR_ADDRESS \\
                 -a $LTC_ADDRESS \\
                 --coinbtext $COINB_TEXT \\
