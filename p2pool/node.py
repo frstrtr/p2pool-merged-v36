@@ -2,7 +2,7 @@ import random
 import sys
 import time
 
-from twisted.internet import defer, reactor
+from twisted.internet import defer, error, reactor
 from twisted.python import log
 
 from p2pool import data as p2pool_data, p2p
@@ -60,6 +60,8 @@ class P2PNode(p2p.Node):
                 parents=0,
                 stops=[],
             )
+        except (defer.TimeoutError, error.ConnectionLost, error.ConnectionDone, error.ConnectError):
+            pass
         except:
             log.err(None, 'in handle_share_hashes:')
             peer.badPeerHappened(30)
@@ -124,6 +126,9 @@ class P2PNode(p2p.Node):
                     )
                 except defer.TimeoutError:
                     print 'Share request timed out!'
+                    continue
+                except (error.ConnectionLost, error.ConnectionDone, error.ConnectError):
+                    print 'Lost connection to %s:%i during share download' % peer.addr
                     continue
                 except:
                     log.err(None, 'in download_shares:')
