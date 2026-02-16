@@ -290,7 +290,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             auxpow_capable = True
                             
                             chainid = template['auxpow']['chainid']
-                            target_hex = template['auxpow']['target']
+                            # CRITICAL: template['auxpow']['target'] is LE hex (Dogecoin internal format)
+                            # but template['target'] is BE hex (standard getblocktemplate format).
+                            # Use template['target'] so int(target_hex, 16) gives the correct value.
+                            target_hex = template['target']
                             
                             # Initialize merged broadcaster for this chain (once)
                             if not broadcaster_initialized and chainid not in self.node.merged_broadcasters:
@@ -601,10 +604,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             # PHASE B: Store for embedding in Litecoin coinbase
                             # This hash will be embedded in the Litecoin coinbase via mm_data
                             # NOW with actual block hash for merged mining commitment
-                            # CRITICAL: getblocktemplate returns target as big-endian hex string.
-                            # IntType(256) defaults to little-endian and would reverse the bytes,
-                            # producing an astronomically wrong target (e.g., ~2^48 instead of ~2^229).
-                            # Use int(hex, 16) for correct big-endian parsing.
+                            # target_hex comes from template['target'] (BE hex), so int() works directly.
                             parsed_target = int(target_hex, 16)
                             pass  # Suppressed: print '[DEBUG] Dogecoin target from template: %064x' % parsed_target
                             
@@ -764,6 +764,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     
                     self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: dict(
                         hash=new_hash,
+                        # createauxblock returns target in LE hex; use IntType(256) LE unpack
+                        # to get the correct integer (same result as int(BE_hex, 16))
                         target='p2pool' if auxblock['target'] == 'p2pool' else pack.IntType(256).unpack(auxblock['target'].decode('hex')),
                         merged_proxy=merged_proxy,
                         multiaddress=False,
