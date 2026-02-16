@@ -275,8 +275,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # Try to detect auxpow capability on first call
             auxpow_capable = None
             
+            # Merged daemon warnings (polled periodically via getnetworkinfo)
+            merged_daemon_warnings = ''
+            merged_daemon_warnings_last_poll = 0
+            MERGED_WARNING_POLL_INTERVAL = 5 * 60  # 5 minutes
+            
             while self.running:
                 try:
+                    # Poll merged daemon warnings periodically
+                    if time.time() - merged_daemon_warnings_last_poll > MERGED_WARNING_POLL_INTERVAL:
+                        try:
+                            merged_netinfo = yield merged_proxy.rpc_getnetworkinfo()
+                            merged_daemon_warnings = merged_netinfo.get('warnings', '')
+                            merged_daemon_warnings_last_poll = time.time()
+                        except Exception:
+                            pass  # Non-critical: daemon may not support getnetworkinfo
+                    
                     # First, try getblocktemplate with auxpow capability (multiaddress support)
                     if auxpow_capable is None or auxpow_capable:
                         template = yield deferral.retry('Error while calling merged getblocktemplate on %s:' % (merged_url,), 30)(
@@ -631,6 +645,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 shareholders=shareholders,  # PPLNS distribution for miner payout calculation
                                 donation_percentage=self.donation_percentage,
                                 worker_fee=self.worker_fee,
+                                daemon_warnings=merged_daemon_warnings,
                                 last_update=time.time(),
                             )}))
                             pass  # Suppressed: print '[MERGED-REFRESH] Template height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
@@ -772,6 +787,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         use_submitauxblock=use_submitauxblock,
                         coinbasevalue=auxblock.get('coinbasevalue', 0),  # Block reward + fees
                         height=auxblock.get('height', 0),
+                        daemon_warnings=merged_daemon_warnings,
                         last_update=time.time(),
                     )}))
                     

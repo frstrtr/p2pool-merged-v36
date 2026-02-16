@@ -1411,8 +1411,12 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
     
     return weights, grand_total, donation_weight
 
-def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value):
+def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value, merged_work=None):
     res = []
+    
+    # Parent coin symbol for clear daemon identification
+    parent_symbol = getattr(net.PARENT, 'SYMBOL', 'BTC') if hasattr(net, 'PARENT') else 'BTC'
+    parent_name = getattr(net.PARENT, 'NAME', parent_symbol) if hasattr(net, 'PARENT') else parent_symbol
     
     desired_version_counts = get_desired_version_counts(tracker, best_share,
         min(net.CHAIN_LENGTH, 60*60//net.SHARE_PERIOD, tracker.get_height(best_share)))
@@ -1424,14 +1428,32 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
     
     if bitcoind_getinfo['warnings'] != '':
         if 'This is a pre-release test build' not in bitcoind_getinfo['warnings']:
-            res.append('(from bitcoind) %s' % (bitcoind_getinfo['warnings'],))
+            res.append('(from %s daemon) %s' % (parent_symbol, bitcoind_getinfo['warnings']))
     
     version_warning = getattr(net, 'VERSION_WARNING', lambda v: None)(bitcoind_getinfo['version'])
     if version_warning is not None:
         res.append(version_warning)
     
     if time.time() > bitcoind_work_value['last_update'] + 60:
-        res.append('''LOST CONTACT WITH BITCOIND for %s! Check that it isn't frozen or dead!''' % (math.format_dt(time.time() - bitcoind_work_value['last_update']),))
+        res.append('LOST CONTACT WITH %s DAEMON for %s! Check that it isn\'t frozen or dead!' % (
+            parent_symbol, math.format_dt(time.time() - bitcoind_work_value['last_update'])))
+    
+    # Merged mining daemon warnings
+    if merged_work:
+        for chainid, mw in merged_work.iteritems():
+            merged_name = mw.get('merged_net_name', 'Merged Chain (chainid %d)' % chainid)
+            merged_symbol = mw.get('merged_net_symbol', 'chainid %d' % chainid)
+            
+            # Warnings from merged daemon's getnetworkinfo
+            merged_warnings = mw.get('daemon_warnings', '')
+            if merged_warnings and 'This is a pre-release test build' not in merged_warnings:
+                res.append('(from %s daemon) %s' % (merged_symbol, merged_warnings))
+            
+            # Lost contact with merged daemon
+            if 'last_update' in mw and time.time() > mw['last_update'] + 60:
+                res.append('LOST CONTACT WITH %s DAEMON (%s) for %s! Check that mm-adapter or the merged daemon isn\'t frozen or dead!' % (
+                    merged_symbol, merged_name,
+                    math.format_dt(time.time() - mw['last_update'])))
     
     return res
 

@@ -434,14 +434,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             attempts_to_block=bitcoin_data.target_to_average_attempts(node.bitcoind_work.value['bits'].target),
             attempts_to_merged_block=get_attempts_to_merged_block(wb),
             block_value=node.bitcoind_work.value['subsidy']*1e-8,
-            warnings=p2pool_data.get_warnings(node.tracker, node.best_share_var.value, node.net, bitcoind_getinfo_var.value, node.bitcoind_work.value) + [
-                'LOST CONTACT WITH MERGED MINING DAEMON (%s) for %s! Check that mm-adapter or the merged daemon isn\'t frozen or dead!' % (
-                    mw.get('merged_net_name', 'chainid %d' % chainid),
-                    math.format_dt(time.time() - mw['last_update']),
-                )
-                for chainid, mw in wb.merged_work.value.iteritems()
-                if 'last_update' in mw and time.time() > mw['last_update'] + 60
-            ] if hasattr(wb, 'merged_work') and wb.merged_work and hasattr(wb.merged_work, 'value') and wb.merged_work.value else p2pool_data.get_warnings(node.tracker, node.best_share_var.value, node.net, bitcoind_getinfo_var.value, node.bitcoind_work.value),
+            warnings=p2pool_data.get_warnings(node.tracker, node.best_share_var.value, node.net, bitcoind_getinfo_var.value, node.bitcoind_work.value,
+                merged_work=wb.merged_work.value if hasattr(wb, 'merged_work') and wb.merged_work and hasattr(wb.merged_work, 'value') and wb.merged_work.value else None),
             donation_proportion=wb.donation_percentage/100,
             version=p2pool.__version__,
             protocol_version=p2p.Protocol.VERSION,
