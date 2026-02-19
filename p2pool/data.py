@@ -222,9 +222,9 @@ class BaseShare(object):
 
     # Donation scripts in coinbase (last output before OP_RETURN):
     # Pre-V36: DONATION_SCRIPT (P2PK, 67 bytes) - original P2Pool author Forrest Voight
-    # Post-V36: COMBINED_DONATION_SCRIPT (1-of-2 P2MS, 71 bytes) - either party can spend
+    # Post-V36: COMBINED_DONATION_SCRIPT (P2SH scriptPubKey wrapping 1-of-2 P2MS redeem script)
     #   - MergedMiningShare overrides gentx_before_refhash with COMBINED_DONATION_SCRIPT
-    #   - Saves 30 bytes per share (single output replaces two separate donation outputs)
+    #   - P2SH output is standard/addressable while preserving 1-of-2 spend semantics
     gentx_before_refhash = pack.VarStrType().pack(DONATION_SCRIPT) + pack.IntType(64).pack(0) + pack.VarStrType().pack('\x6a\x28' + pack.IntType(256).pack(0) + pack.IntType(64).pack(0))[:3]
 
     gentx_size = 50000 # conservative estimate, will be overwritten during execution
@@ -290,7 +290,7 @@ class BaseShare(object):
     def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False, merged_addresses=None):
         # V36 Donation Switch:
         # - Pre-V36 (<95%): Uses DONATION_SCRIPT (P2PK, original P2Pool author)
-        # - Post-V36 (>=95%): Uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS, either party can spend)
+        # - Post-V36 (>=95%): Uses COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS redeem script)
         # MergedMiningShare has its own gentx_before_refhash matching COMBINED_DONATION_SCRIPT
         t0 = time.time()
         previous_share = tracker.items[share_data['previous_share_hash']] if share_data['previous_share_hash'] is not None else None
@@ -406,7 +406,7 @@ class BaseShare(object):
         # V36 Donation System:
         # =====================
         # Pre-V36: DONATION_SCRIPT only (P2PK, original author Forrest Voight)
-        # Post-V36: COMBINED_DONATION_SCRIPT (1-of-2 P2MS, either party can spend)
+        # Post-V36: COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS redeem script)
         #   - Single output replaces two separate donation outputs
         #   - Saves 30 bytes per share coinbase (110 -> 80 bytes)
         #   - COMBINED_DONATION_SCRIPT MUST be LAST (before OP_RETURN) for V36 gentx_before_refhash
@@ -414,7 +414,7 @@ class BaseShare(object):
         # Primary donation (pre-V36) goes to original author (DONATION_SCRIPT)
         primary_donation_address = donation_script_to_address(net)
         
-        # Combined donation (V36+) goes to 1-of-2 P2MS (COMBINED_DONATION_SCRIPT)
+        # Combined donation (V36+) goes to P2SH-wrapped combined script (COMBINED_DONATION_SCRIPT)
         combined_donation_addr = combined_donation_script_to_address(net)
         
         # 0.5% goes to block finder
@@ -425,7 +425,7 @@ class BaseShare(object):
         total_donation = share_data['subsidy'] - sum(amounts.itervalues())
         
         if v36_active:
-            # V36 (95%+): Single 1-of-2 P2MS output (COMBINED_DONATION_SCRIPT)
+            # V36 (95%+): Single P2SH-wrapped combined donation output (COMBINED_DONATION_SCRIPT)
             # All donation goes to the combined script - either party can spend
             amounts[combined_donation_addr] = amounts.get(combined_donation_addr, 0) + total_donation
         else:
@@ -443,7 +443,7 @@ class BaseShare(object):
         # block length limit, unlikely to ever be hit
         # Exclude donation addresses from dests - they are added separately at the end
         # Pre-V36: primary_donation_address (P2PK)
-        # V36+: combined_donation_addr (1-of-2 P2MS synthetic address)
+        # V36+: combined_donation_addr (derived from P2SH combined donation script)
         excluded_dests = {primary_donation_address, combined_donation_addr}
         dests = sorted([addr for addr in amounts.iterkeys() if addr not in excluded_dests], 
                        key=lambda address: (amounts[address], address))[-4000:]
@@ -507,7 +507,7 @@ class BaseShare(object):
         
         # Build payouts list - IMPORTANT: donation script must be LAST for gentx_before_refhash compatibility
         # Pre-V36: DONATION_SCRIPT (P2PK, 67 bytes) as last output
-        # V36+:    COMBINED_DONATION_SCRIPT (1-of-2 P2MS, 71 bytes) as last output
+        # V36+:    COMBINED_DONATION_SCRIPT (P2SH scriptPubKey) as last output
         
         # Build payouts from dests (donation addresses already excluded from dests above)
         payouts = [dict(value=amounts[addr],
@@ -515,7 +515,7 @@ class BaseShare(object):
                         ) for addr in dests if amounts[addr]]
         
         if v36_active:
-            # V36 (95%+): Single 1-of-2 P2MS donation output (COMBINED_DONATION_SCRIPT)
+            # V36 (95%+): Single P2SH-wrapped combined donation output (COMBINED_DONATION_SCRIPT)
             # MUST BE LAST output before OP_RETURN (matches V36 gentx_before_refhash)
             payouts.append({'script': COMBINED_DONATION_SCRIPT, 'value': amounts[combined_donation_addr]})
         else:
@@ -563,7 +563,7 @@ class BaseShare(object):
         cutoff_prefix = packed_gentx[:-32-8-4]  # Remove ref_hash + nonce + lock_time
         
         # Donation script is always LAST output before OP_RETURN
-        # Pre-V36: DONATION_SCRIPT (P2PK), V36: COMBINED_DONATION_SCRIPT (1-of-2 P2MS)
+        # Pre-V36: DONATION_SCRIPT (P2PK), V36: COMBINED_DONATION_SCRIPT (P2SH-wrapped combined script)
         # cls.gentx_before_refhash is version-specific (MergedMiningShare overrides BaseShare)
         
         # Debug: Uncomment to trace gentx validation (confirmed working)
@@ -896,9 +896,9 @@ class MergedMiningShare(BaseShare):
     # Set to 3600 when V36 is finalized and ready for production.
     MINIMUM_PROTOCOL_VERSION = 3503
     
-    # V36 uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS) instead of DONATION_SCRIPT (P2PK)
+    # V36 uses COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS redeem script) instead of DONATION_SCRIPT (P2PK)
     # This replaces two separate donation outputs with one combined output.
-    # Either forrestv or we can spend independently (1-of-2 multisig).
+    # Either forrestv or we can spend independently (1-of-2 multisig via redeem script).
     # gentx_before_refhash MUST match the last output pattern before OP_RETURN.
     gentx_before_refhash = pack.VarStrType().pack(COMBINED_DONATION_SCRIPT) + pack.IntType(64).pack(0) + pack.VarStrType().pack('\x6a\x28' + pack.IntType(256).pack(0) + pack.IntType(64).pack(0))[:3]
     

@@ -49,21 +49,29 @@ check('DONATION_SCRIPT starts with 0x41 (push 65 bytes)',
 check('DONATION_SCRIPT ends with 0xac (OP_CHECKSIG)',
       p2pool_data.DONATION_SCRIPT[-1] == '\xac')
 
-# COMBINED_DONATION_SCRIPT: 1-of-2 P2MS (71 bytes)
-check('COMBINED_DONATION_SCRIPT length = 71 bytes (1-of-2 P2MS)',
-      len(p2pool_data.COMBINED_DONATION_SCRIPT) == 71)
-check('COMBINED_DONATION_SCRIPT starts with 0x51 (OP_1)',
-      p2pool_data.COMBINED_DONATION_SCRIPT[0] == '\x51')
-check('COMBINED_DONATION_SCRIPT byte[1] = 0x21 (push 33 bytes, compressed pubkey 1)',
-      p2pool_data.COMBINED_DONATION_SCRIPT[1] == '\x21')
-check('COMBINED_DONATION_SCRIPT byte[35] = 0x21 (push 33 bytes, compressed pubkey 2)',
-      p2pool_data.COMBINED_DONATION_SCRIPT[35] == '\x21')
-check('COMBINED_DONATION_SCRIPT ends with 52ae (OP_2 OP_CHECKMULTISIG)',
-      p2pool_data.COMBINED_DONATION_SCRIPT[-2:] == '\x52\xae')
+# COMBINED_DONATION_REDEEM_SCRIPT: 1-of-2 P2MS (71 bytes)
+check('COMBINED_DONATION_REDEEM_SCRIPT length = 71 bytes (1-of-2 P2MS)',
+      len(p2pool_data.COMBINED_DONATION_REDEEM_SCRIPT) == 71)
+check('COMBINED_DONATION_REDEEM_SCRIPT starts with 0x51 (OP_1)',
+      p2pool_data.COMBINED_DONATION_REDEEM_SCRIPT[0] == '\x51')
+check('COMBINED_DONATION_REDEEM_SCRIPT byte[1] = 0x21 (push 33 bytes, compressed pubkey 1)',
+      p2pool_data.COMBINED_DONATION_REDEEM_SCRIPT[1] == '\x21')
+check('COMBINED_DONATION_REDEEM_SCRIPT byte[35] = 0x21 (push 33 bytes, compressed pubkey 2)',
+      p2pool_data.COMBINED_DONATION_REDEEM_SCRIPT[35] == '\x21')
+check('COMBINED_DONATION_REDEEM_SCRIPT ends with 52ae (OP_2 OP_CHECKMULTISIG)',
+      p2pool_data.COMBINED_DONATION_REDEEM_SCRIPT[-2:] == '\x52\xae')
 
-# Verify pubkeys in P2MS match expected
-forrestv_compressed = p2pool_data.COMBINED_DONATION_SCRIPT[2:2+33]
-our_compressed = p2pool_data.COMBINED_DONATION_SCRIPT[36:36+33]
+# COMBINED_DONATION_SCRIPT: P2SH scriptPubKey (23 bytes)
+check('COMBINED_DONATION_SCRIPT length = 23 bytes (P2SH scriptPubKey)',
+      len(p2pool_data.COMBINED_DONATION_SCRIPT) == 23)
+check('COMBINED_DONATION_SCRIPT starts with a9 14 (OP_HASH160 PUSH20)',
+      p2pool_data.COMBINED_DONATION_SCRIPT[:2] == '\xa9\x14')
+check('COMBINED_DONATION_SCRIPT ends with 87 (OP_EQUAL)',
+      p2pool_data.COMBINED_DONATION_SCRIPT[-1] == '\x87')
+
+# Verify pubkeys in redeem script match expected
+forrestv_compressed = p2pool_data.COMBINED_DONATION_REDEEM_SCRIPT[2:2+33]
+our_compressed = p2pool_data.COMBINED_DONATION_REDEEM_SCRIPT[36:36+33]
 check('P2MS pubkey1 starts with 03 (compressed, odd y)',
       forrestv_compressed[0] == '\x03')
 check('P2MS pubkey2 starts with 02 (compressed, even y)',
@@ -97,13 +105,16 @@ check('DONATION_PUBKEY_HASH matches hash160(forrestv_uncompressed) [LE int]',
       p2pool_data.DONATION_PUBKEY_HASH == actual_forrestv_uncompressed_hash,
       'expected=0x%x got=0x%x' % (actual_forrestv_uncompressed_hash, p2pool_data.DONATION_PUBKEY_HASH))
 
-# Forrestv compressed key hash160
-actual_forrestv_compressed_hash = compute_hash160_le(forrestv_compressed)
-check('COMBINED_DONATION_PUBKEY_HASH matches hash160(forrestv_compressed) [LE int]',
-      p2pool_data.COMBINED_DONATION_PUBKEY_HASH == actual_forrestv_compressed_hash,
-      'expected=0x%x got=0x%x' % (actual_forrestv_compressed_hash, p2pool_data.COMBINED_DONATION_PUBKEY_HASH))
+# Combined donation script hash160 (embedded in P2SH scriptPubKey)
+actual_combined_script_hash = pack.IntType(160).unpack(p2pool_data.COMBINED_DONATION_SCRIPT[2:22])
+check('COMBINED_DONATION_PUBKEY_HASH matches embedded P2SH hash160 [LE int]',
+      p2pool_data.COMBINED_DONATION_PUBKEY_HASH == actual_combined_script_hash,
+      'expected=0x%x got=0x%x' % (actual_combined_script_hash, p2pool_data.COMBINED_DONATION_PUBKEY_HASH))
 
-# Our compressed key hash160 (kept for reference — used in COMBINED_DONATION_SCRIPT)
+# Forrestv compressed key hash160 (still used for bitcoin/data.py hash160() fast-path)
+actual_forrestv_compressed_hash = compute_hash160_le(forrestv_compressed)
+
+# Our compressed key hash160 (kept for reference — used in COMBINED_DONATION_REDEEM_SCRIPT)
 actual_our_hash = compute_hash160_le(our_compressed)
 
 # ============================================================
@@ -118,9 +129,9 @@ check('hash160 hack: forrestv uncompressed returns correct LE int',
       'hack=0x%x expected=0x%x' % (hack_forrestv_uncompressed, p2pool_data.DONATION_PUBKEY_HASH))
 
 hack_forrestv_compressed = bitcoin_data.hash160(forrestv_compressed)
-check('hash160 hack: forrestv compressed returns correct LE int',
-      hack_forrestv_compressed == p2pool_data.COMBINED_DONATION_PUBKEY_HASH,
-      'hack=0x%x expected=0x%x' % (hack_forrestv_compressed, p2pool_data.COMBINED_DONATION_PUBKEY_HASH))
+check('hash160 hack: forrestv compressed pubkey still returns expected LE int',
+      hack_forrestv_compressed == actual_forrestv_compressed_hash,
+      'hack=0x%x expected=0x%x' % (hack_forrestv_compressed, actual_forrestv_compressed_hash))
 
 hack_our_compressed = bitcoin_data.hash160(our_compressed)
 check('hash160 hack: our compressed returns correct LE int',
@@ -152,11 +163,13 @@ check('MergedMiningShare.gentx_before_refhash matches expected (COMBINED_DONATIO
 check('MergedMiningShare.gentx_before_refhash length = %d bytes' % len(expected_v36),
       len(p2pool_data.MergedMiningShare.gentx_before_refhash) == len(expected_v36))
 
-# Size difference: P2MS (71 bytes) vs P2PK (67 bytes) = 4 bytes script + varint change
+# Size difference tracks donation script size difference.
+# With P2SH-wrapped combined script: 23 bytes vs 67-byte legacy P2PK script.
 size_diff = len(p2pool_data.MergedMiningShare.gentx_before_refhash) - len(p2pool_data.BaseShare.gentx_before_refhash)
-check('V36 gentx_before_refhash is 4 bytes longer than BaseShare (71 vs 67 byte script)',
-      size_diff == 4,
-      'diff=%d' % size_diff)
+expected_size_diff = len(p2pool_data.COMBINED_DONATION_SCRIPT) - len(p2pool_data.DONATION_SCRIPT)
+check('V36 gentx_before_refhash size delta matches donation script size delta',
+      size_diff == expected_size_diff,
+      'diff=%d expected=%d' % (size_diff, expected_size_diff))
 
 # They must NOT be equal (different donation scripts)
 check('BaseShare and MergedMiningShare gentx_before_refhash are DIFFERENT',
@@ -185,13 +198,13 @@ check('script_to_pubkey_hash(COMBINED_DONATION_SCRIPT) returns COMBINED_DONATION
       h3 == p2pool_data.COMBINED_DONATION_PUBKEY_HASH)
 
 # ============================================================
-# 6. P2MS Address Display (script2_to_address)
+# 6. Combined Donation Address Display
 # ============================================================
-print('\n--- 6. P2MS Address Display ---')
+print('\n--- 6. Combined Donation Address Display ---')
 
-# Test that P2MS scripts can be parsed
-parsed = bitcoin_data.parse_p2ms_script(p2pool_data.COMBINED_DONATION_SCRIPT)
-check('parse_p2ms_script() succeeds on COMBINED_DONATION_SCRIPT',
+# Test that redeem script parses as 1-of-2 P2MS
+parsed = bitcoin_data.parse_p2ms_script(p2pool_data.COMBINED_DONATION_REDEEM_SCRIPT)
+check('parse_p2ms_script() succeeds on COMBINED_DONATION_REDEEM_SCRIPT',
       parsed is not None)
 if parsed:
     n, m, pubkeys = parsed
@@ -206,10 +219,10 @@ if parsed:
     check('P2MS pubkey2 = our compressed',
           pubkeys[1] == our_compressed)
 
-# Test combined_donation_script_to_address returns synthetic key
+# Test combined_donation_script_to_address returns synthetic key when net is None
 synthetic_addr = p2pool_data.combined_donation_script_to_address(None)
 check('combined_donation_script_to_address returns synthetic key',
-      synthetic_addr == 'P2MS:combined_donation',
+      synthetic_addr == 'P2SH:combined_donation',
       'got: %s' % synthetic_addr)
 
 # ============================================================
@@ -250,18 +263,19 @@ print('\n--- 8. Donation Amounts Logic ---')
 
 # Test that donation addresses can be computed
 try:
-    from p2pool.networks import litecoin as ltc_net
-    net = ltc_net.networks['litecoin']
+    from p2pool import networks as p2pool_networks
+    net = p2pool_networks.nets['litecoin']
     primary_addr = p2pool_data.donation_script_to_address(net)
     check('donation_script_to_address(litecoin) returns valid address',
           primary_addr is not None and len(primary_addr) > 20,
           'got: %s' % primary_addr)
     print('       -> Primary donation address: %s' % primary_addr)
-    
+
     combined_addr = p2pool_data.combined_donation_script_to_address(net)
-    check('combined_donation_script_to_address returns synthetic address',
-          combined_addr == 'P2MS:combined_donation')
-    print('       -> Combined donation synthetic: %s' % combined_addr)
+    check('combined_donation_script_to_address returns standard address',
+          combined_addr is not None and len(combined_addr) > 20,
+          'got: %s' % combined_addr)
+    print('       -> Combined donation address: %s' % combined_addr)
 except ImportError:
     print('  [SKIP] Could not import litecoin network - skipping address tests')
 

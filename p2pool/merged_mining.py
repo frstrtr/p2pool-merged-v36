@@ -22,9 +22,9 @@ DEBUG_COINBASE = False
 # MERGED CHAIN DONATION SCRIPTS
 # ============================================================================
 # These mirror the parent chain donation system (data.py) for merged mining.
-# Raw scripts are chain-agnostic (P2PK, P2PKH, bare P2MS work on any chain).
+# Raw scripts are chain-agnostic (P2PK, P2PKH, redeem scripts).
 #
-# V36: Full donation to COMBINED (1-of-2 P2MS, either party can spend).
+# V36: Full donation to COMBINED (P2SH-wrapped 1-of-2 P2MS redeem script).
 # ============================================================================
 
 # PRIMARY_DONATION_SCRIPT: Original P2Pool donation (forrestv, P2PK format)
@@ -81,8 +81,8 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     - P2Pool donation (configurable %, always present as blockchain marker)
     
     DONATION SYSTEM:
-    Always uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS).
-    Either party can spend independently.
+    Always uses COMBINED_DONATION_SCRIPT (P2SH-wrapped 1-of-2 P2MS redeem script).
+    Either party can spend independently via the redeem script.
     
     ADDRESS CONVERSION:
     Shareholder addresses are auto-converted from pubkey_hash stored in share chain.
