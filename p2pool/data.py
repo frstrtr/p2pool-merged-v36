@@ -110,22 +110,23 @@ DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd370
 # Avoids recalculating hash160 on every share
 DONATION_PUBKEY_HASH = 0x384f570ccc88ac2e7e00b026d1690a3fca63dd0
 
-# COMBINED_DONATION_SCRIPT: 1-of-2 P2MS (bare multisig) for V36+
-# Replaces BOTH donation outputs with a single output after V36 transition.
-# Either party can spend independently (1-of-2), solving the "lost key" problem.
+# COMBINED_DONATION_REDEEM_SCRIPT: 1-of-2 P2MS redeem script for V36+
 # OP_1 PUSH33 <forrestv_compressed> PUSH33 <our_compressed> OP_2 OP_CHECKMULTISIG
-# Script: 51 21 <33-byte forrestv compressed> 21 <33-byte our compressed> 52 ae
-# Saves 30 bytes per share coinbase (2 outputs -> 1 output, 110 -> 80 bytes)
-COMBINED_DONATION_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d12102fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a52ae'.decode('hex')
+COMBINED_DONATION_REDEEM_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d12102fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a52ae'.decode('hex')
 
-# Precomputed pubkey_hash for COMBINED_DONATION_SCRIPT (hash160 of first pubkey = forrestv compressed)
-# hash160 as little-endian int (matching bitcoin/data.py hash160() return format)
-# hash160(03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1)
-#   BE hex = 74aa67f6b12c432041d3f3cb0a9fc3d5c48dec7d
-#   LE int  = 0x7dec8dc4d5c39f0acbf3d34120432cb1f667aa74
-# Litecoin address: LVrpnVLEf3vU5rZahS7QF5UW8u6G1VgLUR
-# Bitcoin address:  1BdsXH2QaPgQq3sRXJ86y4QjvgiystJhru
-COMBINED_DONATION_PUBKEY_HASH = 0x7dec8dc4d5c39f0acbf3d34120432cb1f667aa74
+# COMBINED_DONATION_SCRIPT: P2SH-wrapped 1-of-2 P2MS scriptPubKey for V36+
+# scriptPubKey = OP_HASH160 <hash160(redeem_script)> OP_EQUAL
+COMBINED_DONATION_SCRIPT = 'a9148c6272621d89e8fa526dd86acff60c7136be8e8587'.decode('hex')
+
+# Precomputed hash key for COMBINED_DONATION_SCRIPT fast-path.
+#
+# For P2SH-wrapped combined donation script, the key is the embedded script hash
+# (hash160(redeem_script)) from: OP_HASH160 <20-byte-hash> OP_EQUAL.
+#
+# COMBINED_DONATION_SCRIPT = a9 14 <hash160> 87
+#   BE hex hash160 = 8c6272621d89e8fa526dd86acff60c7136be8e85
+#   LE int         = 0x858ebe36710cf6cf6ad86d52fae8891d6272628c
+COMBINED_DONATION_PUBKEY_HASH = 0x858ebe36710cf6cf6ad86d52fae8891d6272628c
 
 def script_to_pubkey_hash(script):
     """
@@ -188,13 +189,19 @@ def donation_script_to_address(net):
                 DONATION_SCRIPT, net.PARENT.ADDRESS_P2SH_VERSION, -1, net.PARENT)
 
 def combined_donation_script_to_address(net):
-    """Get a synthetic address string for the 1-of-2 P2MS combined donation script.
-    
-    P2MS scripts don't have a standard Base58 address encoding, so we return
-    a deterministic synthetic string usable as a dict key in the amounts dict.
-    This address is excluded from the dests list (never passed to address_to_script2).
+    """Get display/key address for the V36 combined donation script.
+
+    For P2SH-wrapped combined donation script, return a standard Base58 P2SH address.
+    If net is None (tests/utilities), fall back to deterministic synthetic key.
     """
-    return 'P2MS:combined_donation'
+    if net is None:
+        return 'P2SH:combined_donation'
+    try:
+        return bitcoin_data.script2_to_address(
+                COMBINED_DONATION_SCRIPT, net.PARENT.ADDRESS_P2SH_VERSION, -1, net.PARENT)
+    except ValueError:
+        return bitcoin_data.script2_to_address(
+                COMBINED_DONATION_SCRIPT, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
 
 class BaseShare(object):
     VERSION = 0
