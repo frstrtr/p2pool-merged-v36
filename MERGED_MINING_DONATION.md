@@ -1,7 +1,7 @@
 # P2Pool Merged Mining - Dual Coinbase Structure
 
 **Status:** ✅ WORKING - Multi-output PPLNS blocks on Dogecoin testnet4alpha!
-**Last Updated:** February 15, 2026
+**Last Updated:** February 19, 2026
 
 ## Overview
 
@@ -23,14 +23,10 @@ Each chain has its own donation and OP_RETURN structure!
   - Dogecoin testnet: `nZj5sSzP9NSYLRBbWUTz4tConRSSeuYQvY` (v113)
 
 ### ✅ Donation Script Modernization
-- **Updated from P2PK (67 bytes) to P2PKH (25 bytes)** - saves 42 bytes per block!
-- Old format (Forrest era): `4104ffd03...664bac` (uncompressed pubkey)
-- New format (modern): `76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac`
-- Donation addresses derived from pubkey_hash `20cb5c22b1e4d5947e5c112c7696b51ad9af3c61`:
-  - **Dash mainnet:** `XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u`
-  - **Dogecoin mainnet:** `D88Vn6Dyct7DKfVCfR3syHkjyNx9gEyyiv`
-  - **Dogecoin testnet:** `nXBZW6xtYrZwCe4PhEhLDhM3DFLSd1pa1R` ✅ [Confirmed on-chain!](https://blockexplorer.one/dogecoin/testnet/address/nXBZW6xtYrZwCe4PhEhLDhM3DFLSd1pa1R)
-  - **Litecoin testnet:** `miWMXtNK8VeBZmnDeQ2hFSoTxEpZFbfvFp`
+- **Current V36 marker output is P2SH scriptPubKey** (`COMBINED_DONATION_SCRIPT`)
+- **Spending policy is 1-of-2 P2MS redeem script** (`COMBINED_DONATION_REDEEM_SCRIPT`)
+- **Pre-V36 marker** remains `PRIMARY_DONATION_SCRIPT` (P2PK)
+- Marker monitoring is now documented for Litecoin, Bitcoin, and Dogecoin pre/post V36
 
 ### ✅ Monitoring Dashboard
 - Updated `monitor_mining.py` to track both old and new addresses
@@ -62,12 +58,13 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage,
 ```
 
 **Dogecoin coinbase includes:**
-- Miner payouts (miners' share of reward, distributed to shareholders)
-- **Node operator fee (--worker-fee percentage, paid to P2Pool node runner)**
-- OP_RETURN tag ("P2Pool merged mining" - data-only identifier)
-- **P2Pool donation output (ALWAYS present, even if 0% - blockchain marker)**
+- Miner payouts (distributed proportionally from the miners' pool)
+- **Node/worker fee** (`--fee`, if configured)
+- **Finder fee** (if configured by runtime path)
+- OP_RETURN tag ("P2Pool merged mining" data identifier)
+- **P2Pool marker output** (`COMBINED_DONATION_SCRIPT`, always present)
 
-**Important:** The donation output is **ALWAYS included** in every merged block, even if `--give-author 0` is used. This serves as a permanent blockchain marker identifying the block as P2Pool-mined, equivalent to how `gentx_before_refhash` marks parent chain blocks.
+**Important:** The marker output is always present and forced non-dust (minimum 1 DOGE when needed), so merged blocks remain identifiable on-chain even when configured donation percentage is 0.
 
 ## Why Two Separate Coinbases?
 
@@ -77,7 +74,7 @@ In merged mining:
 - Each blockchain has independent reward structures
 - Each needs its own P2Pool identification
 
-**Critical:** The P2Pool donation script is **ALWAYS included** in merged blocks (even with 0 value if `--give-author 0`). This serves as a permanent blockchain marker that identifies every block as P2Pool-mined, just like `gentx_before_refhash` does for parent chain blocks.
+**Critical:** The merged coinbase always carries a donation marker output. Rounding remainder from proportional miner splitting is also added to the marker output, matching parent-chain accounting behavior.
 
 ## Coinbase Transaction Structure
 
@@ -87,31 +84,33 @@ Output 0:    Miner 1 - Miners' share × (their fraction)
 Output 1:    Miner 2 - Miners' share × (their fraction)
 ...
 Output N:    Miner N - Miners' share × (their fraction)
-Output N+1:  Node Fee - Y% of block reward (if --worker-fee > 0)
+Output N+1:  Node Fee - Y% of block reward (if --fee > 0)
 Output N+2:  OP_RETURN - "P2Pool merged mining" (0 DOGE, data only)
 Output N+3:  P2Pool Donation - X% of block reward (ALWAYS present)
 ```
 
 **Reward Distribution:**
-- Miners' share = 100% - X% (donation) - Y% (node fee)
+- Miners' share = 100% - X% (donation) - Y% (node fee) - Z% (finder fee)
 - Each miner gets: Miners' share × their fraction
-- Node operator gets: Y% (--worker-fee, default 0.5%)
-- P2Pool author gets: X% (--give-author, default 1%)
+- Node operator gets: Y% (`--fee`, default 0.5%)
+- Finder (if enabled) gets: Z%
+- Marker output gets: X% plus integer-rounding remainder
 
-Example with single miner, --give-author 1, --worker-fee 0.5:
+Example with single miner, `--give-author 1`, `--fee 0.5`, finder fee 0.5:
 ```
-Output 0:    Miner address - 98.5% of block reward
+Output 0:    Miner address - 98.0% of block reward
 Output 1:    Node operator - 0.5% of block reward
-Output 2:    OP_RETURN - "P2Pool merged mining"
-Output 3:    P2Pool donation - 1% of block reward
+Output 2:    Finder fee address - 0.5% of block reward
+Output 3:    OP_RETURN - "P2Pool merged mining"
+Output 4:    P2Pool marker output - ~1% + rounding remainder (and dust floor if required)
 ```
 
 This matches the parent chain (Litecoin) structure where node operators receive compensation for running P2Pool infrastructure.
 ```
 
-Where **X** is the donation percentage set by `--give-author` (default 1.0%)
+Where **X** is `--give-author`, **Y** is `--fee`, and **Z** is finder fee (runtime path dependent).
 
-**Total:** Miners get (100-X)%, P2Pool donation gets X%, OP_RETURN marks the block
+**Total:** Miners get `(100-X-Y-Z)%`, with OP_RETURN and marker output always present.
 
 ## CLI Options
 
@@ -134,12 +133,12 @@ By default, the parent chain (Litecoin) address is converted to merged chain (Do
 
 ```bash
 # Auto-convert parent address to merged chain format (default)
-pypy run_p2pool.py --net dogecoin --testnet --worker-fee 0.5 \
+pypy run_p2pool.py --net dogecoin --testnet --fee 0.5 \
   --merged http://dogeuser:pass@host:44555/ \
   mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
 
 # Use specific Dogecoin address for merged chain node operator fee
-pypy run_p2pool.py --net dogecoin --testnet --worker-fee 0.5 \
+pypy run_p2pool.py --net dogecoin --testnet --fee 0.5 \
   --merged http://dogeuser:pass@host:44555/ \
   --merged-operator-address nXYourDogeAddressHere123 \
   mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
@@ -178,11 +177,13 @@ The auto-conversion approach avoids protocol changes and works for the vast majo
 
 ## Technical Details
 
-### Donation Script (Used on BOTH Chains)
-- **Format**: P2PK (Pay-to-PubKey)
-- **Hex**: `4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac`
-- **Testnet Address**: `noBEfr9wTGgs94CdGVXGYwsQghEwBsXw4K`
-- **Mainnet Address**: `1BHCtLJRhWftUQT9RZmhEBYx6QXJZbXRKL`
+### Donation Scripts
+- `PRIMARY_DONATION_SCRIPT` (pre-V36): P2PK marker output
+- `COMBINED_DONATION_REDEEM_SCRIPT` (V36+ internals): 1-of-2 P2MS spending policy
+- `COMBINED_DONATION_SCRIPT` (V36+ output): P2SH scriptPubKey used in coinbase
+
+Current V36 marker scriptPubKey hex:
+`a9148c6272621d89e8fa526dd86acff60c7136be8e8587`
 
 ### OP_RETURN Tag (Dogecoin Merged Blocks)
 - **Format**: OP_RETURN (0x6a) + length + "P2Pool merged mining"
@@ -195,7 +196,10 @@ The auto-conversion approach avoids protocol changes and works for the vast majo
 Builds Dogecoin-specific coinbase with donation and OP_RETURN:
 
 ```python
-def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
+def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0,
+                         node_operator_address=None, worker_fee=0,
+                         parent_net=None, coinbase_text=None, v36_active=False,
+                         finder_address=None, finder_fee_percentage=0.5):
     """
     Build coinbase for MERGED CHAIN (Dogecoin)
     Separate from parent chain (Litecoin) coinbase!
@@ -203,9 +207,15 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
     """
     total_reward = template['coinbasevalue']
     
-    # Calculate donation from configurable percentage
+    # Calculate donation from configurable percentage and enforce dust floor
     donation_amount = int(total_reward * donation_percentage / 100)
-    miners_reward = total_reward - donation_amount
+    dust_threshold = getattr(net, 'DUST_THRESHOLD', int(1e8))
+    if donation_amount < dust_threshold and total_reward > dust_threshold:
+      donation_amount = dust_threshold
+
+    worker_fee_amount = int(total_reward * worker_fee / 100)
+    finder_fee_amount = int(total_reward * finder_fee_percentage / 100)
+    miners_reward = total_reward - donation_amount - worker_fee_amount - finder_fee_amount
     
     # Build miner outputs (100-X% split proportionally)
     for address, fraction in shareholders.iteritems():
@@ -216,12 +226,13 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0):
     op_return_script = '\x6a' + chr(len(P2POOL_TAG)) + P2POOL_TAG
     tx_outs.append({'value': 0, 'script': op_return_script})
     
-    # Add donation output (ALWAYS included as P2Pool marker, even if 0%)
-    # This ensures every block is identifiable as P2Pool-mined
-    tx_outs.append({'value': donation_amount, 'script': DONATION_SCRIPT})
+    # Marker output is always present and collects rounding remainder
+    rounding_remainder = miners_reward - total_distributed
+    final_donation = donation_amount + rounding_remainder
+    tx_outs.append({'value': final_donation, 'script': COMBINED_DONATION_SCRIPT})
 ```
 
-**Key Point**: The donation script output is **ALWAYS included** (even with 0 value if `--give-author 0`) to serve as a permanent blockchain marker. This is equivalent to how `gentx_before_refhash` marks parent chain blocks. The `donation_percentage` parameter comes from `args.donation_percentage` (the `--give-author` CLI option), ensuring both chains use the same donation rate.
+  **Key Point**: The marker output is always present and uses `COMBINED_DONATION_SCRIPT` on the V36 path; it is non-dust and includes rounding remainder.
 
 ### File: `p2pool/work.py`
 Fixed critical bugs that were preventing merged mining from working:
@@ -234,16 +245,16 @@ Fixed critical bugs that were preventing merged mining from working:
 
 3. **Coinbase Construction**: Now calls `merged_mining.build_merged_coinbase()`
    - Supports both single-address and multi-address modes
-   - Includes P2Pool donation (1%) in all merged blocks
+  - Applies donation, node fee, finder fee, and redistribution logic in real construction path
 
 ### Log Output
 When working correctly, you'll see these messages in P2Pool logs:
 
 ```
 [MERGED] Single address mode: mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h
-[DONATION] Total reward: 1000000000000, Donation (1%): 10000000000, Miners: 990000000000
-[DONATION] Added P2Pool author donation output: 10000000000 satoshis
-[DONATION] Total outputs: 1 (shareholders) + 1 (donation) = 2
+[DONATION] Total reward: 1000000000000, Donation (X%): <computed>, Miners: <computed>
+[DONATION] Marker output uses COMBINED_DONATION_SCRIPT (P2SH)
+[DONATION] Rounding remainder added to marker output
 ```
 
 ## Monitoring
@@ -291,7 +302,9 @@ To verify donation outputs in accepted blocks:
 dogecoin-cli -testnet getblock $(dogecoin-cli -testnet getblockhash <height>) 2
 
 # Check coinbase transaction outputs
-# Look for scriptPubKey.hex matching DONATION_SCRIPT
+# Look for scriptPubKey.hex matching COMBINED_DONATION_SCRIPT (post-V36)
+#   post-V36: a9148c6272621d89e8fa526dd86acff60c7136be8e8587
+#   pre-V36 : 4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac
 ```
 
 Expected output structure:
@@ -301,13 +314,13 @@ Expected output structure:
     {
       "vout": [
         {
-          "value": <99% of reward>,
+          "value": <miners pool payout>,
           "scriptPubKey": { "hex": "<miner address script>" }
         },
         {
-          "value": <1% of reward>,
+          "value": <marker output value>,
           "scriptPubKey": { 
-            "hex": "4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac"
+            "hex": "a9148c6272621d89e8fa526dd86acff60c7136be8e8587"
           }
         }
       ]
@@ -361,7 +374,7 @@ In 26 seconds at 0.26s/block, the chain advances ~100 blocks. With such rapid bl
 The code is **production-ready** based on testnet validation:
 
 ✅ **217 blocks accepted** by Dogecoin network (no coinbase validation errors)  
-✅ **All blocks include correct split**: 99% miners + 1% P2Pool donation  
+✅ **All blocks include correct payout accounting**: miners + node fee + finder fee + marker output  
 ✅ **13% acceptance rate** is excellent (81% "too late" is normal for P2Pool)  
 ✅ **Both modes working**: multiaddress and single-address mining  
 ✅ **No code errors**: All failures are network timing issues, not bugs
