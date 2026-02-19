@@ -460,7 +460,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     #   2. Parent chain address string (from share.address) — needs auto-conversion
                                     #      from LTC to DOGE format. Unconvertible (P2SH, P2WSH, P2TR) are skipped.
                                     shareholders = {}
+                                    accepted_weights = {}
                                     skipped_addresses = []
+                                    accepted_total_weight = 0
                                     for key, weight in weights.iteritems():
                                         try:
                                             if key.startswith('MERGED:'):
@@ -472,8 +474,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                 except Exception:
                                                     # Script might not be standard P2PKH — use raw script as key
                                                     merged_address = key  # Fallback: use tagged key as-is
-                                                fraction = float(weight) / float(total_weight) if total_weight > 0 else 0
-                                                shareholders[merged_address] = shareholders.get(merged_address, 0) + fraction
+                                                accepted_weights[merged_address] = accepted_weights.get(merged_address, 0) + weight
+                                                accepted_total_weight += weight
                                                 continue
                                             
                                             # Parent chain address — check if convertible to merged chain
@@ -500,10 +502,18 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                 # Older VERSION: key is P2PKH script
                                                 merged_address = bitcoin_data.script2_to_address(key, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
                                             
-                                            fraction = float(weight) / float(total_weight) if total_weight > 0 else 0
-                                            shareholders[merged_address] = fraction
+                                            accepted_weights[merged_address] = accepted_weights.get(merged_address, 0) + weight
+                                            accepted_total_weight += weight
                                         except Exception as e:
                                             pass  # Suppressed: print >>sys.stderr, '[MERGED] Warning: Could not convert key to address: %s' % e
+
+                                    # Redistribute unconvertible-address rewards to convertible/provided addresses.
+                                    # We do this by normalizing fractions over accepted_total_weight (not total_weight).
+                                    # This ensures skipped weight is proportionally redistributed instead of leaking
+                                    # into donation via rounding remainder.
+                                    if accepted_total_weight > 0:
+                                        for merged_address, accepted_weight in accepted_weights.iteritems():
+                                            shareholders[merged_address] = float(accepted_weight) / float(accepted_total_weight)
                                     
                                     if skipped_addresses:
                                         # Summary only - suppress verbose per-address output
@@ -645,6 +655,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 shareholders=shareholders,  # PPLNS distribution for miner payout calculation
                                 donation_percentage=self.donation_percentage,
                                 worker_fee=self.worker_fee,
+                                node_operator_address=node_operator_address,
+                                finder_fee_percentage=0.5,
                                 daemon_warnings=merged_daemon_warnings,
                                 last_update=time.time(),
                             )}))
@@ -787,6 +799,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         use_submitauxblock=use_submitauxblock,
                         coinbasevalue=auxblock.get('coinbasevalue', 0),  # Block reward + fees
                         height=auxblock.get('height', 0),
+                        finder_fee_percentage=0.5,
                         daemon_warnings=merged_daemon_warnings,
                         last_update=time.time(),
                     )}))
@@ -1167,6 +1180,117 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         return result
 
+    def _get_merged_address_net(self, chainid):
+        if chainid == 98:  # Dogecoin
+            parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
+            is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
+            merged_addr_net = dogecoin_testnet_net if is_testnet else dogecoin_net
+            if merged_addr_net is not None:
+                return merged_addr_net
+        return self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+
+    def _derive_merged_finder_address(self, user, merged_addresses, chainid, merged_addr_net, parent_net):
+        # 1) Prefer validated merged address/script supplied via stratum for this chain.
+        if merged_addresses and merged_addresses.get('_validated'):
+            for entry in merged_addresses['_validated']:
+                if entry.get('chain_id') != chainid:
+                    continue
+                try:
+                    return bitcoin_data.script2_to_address(
+                        entry['script'], merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                except Exception:
+                    continue
+
+        # 2) Fallback to explicit merged address text if present and valid for merged chain.
+        if merged_addresses:
+            explicit_merged = merged_addresses.get('dogecoin')
+            if explicit_merged:
+                try:
+                    bitcoin_data.address_to_script2(explicit_merged, merged_addr_net)
+                    return explicit_merged
+                except Exception:
+                    pass
+
+        # 3) Fallback to converting parent-chain user address to merged-chain encoding.
+        base_user = user.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
+        is_convertible, pubkey_hash, _ = is_pubkey_hash_address(base_user, parent_net)
+        if is_convertible and pubkey_hash is not None:
+            try:
+                return bitcoin_data.pubkey_hash_to_address(
+                    pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+            except Exception:
+                return None
+        return None
+
+    def _build_user_specific_merged_work(self, user, merged_addresses):
+        if not self.merged_work.value:
+            return {}
+
+        user_merged_work = {}
+        parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+        v36_active, _ = self.is_v36_active()
+
+        for chainid, aux_work in self.merged_work.value.iteritems():
+            # createauxblock/getauxblock path has no prebuilt merged block template details.
+            if not aux_work.get('multiaddress') or 'template' not in aux_work or 'shareholders' not in aux_work:
+                user_merged_work[chainid] = aux_work
+                continue
+
+            try:
+                merged_addr_net = self._get_merged_address_net(chainid)
+                finder_address = self._derive_merged_finder_address(user, merged_addresses, chainid, merged_addr_net, parent_net)
+                finder_fee_percentage = aux_work.get('finder_fee_percentage', 0.5)
+
+                template = aux_work['template']
+                coinbase_text = template.get('auxpow', {}).get('coinbase_text')
+                doge_coinbase_tx = merged_mining.build_merged_coinbase(
+                    template,
+                    aux_work['shareholders'],
+                    merged_addr_net,
+                    aux_work.get('donation_percentage', self.donation_percentage),
+                    aux_work.get('node_operator_address'),
+                    aux_work.get('worker_fee', self.worker_fee),
+                    parent_net,
+                    coinbase_text,
+                    v36_active=v36_active,
+                    finder_address=finder_address,
+                    finder_fee_percentage=finder_fee_percentage,
+                )
+
+                doge_tx_hashes = [int(tx['hash'], 16) for tx in template.get('transactions', [])]
+                doge_coinbase_hash = bitcoin_data.hash256(bitcoin_data.tx_type.pack(doge_coinbase_tx))
+                all_doge_tx_hashes = [doge_coinbase_hash] + doge_tx_hashes
+                doge_merkle_root = bitcoin_data.merkle_hash(all_doge_tx_hashes)
+
+                if 'doge_header' in aux_work:
+                    doge_header = aux_work['doge_header'].copy()
+                    doge_header['merkle_root'] = doge_merkle_root
+                else:
+                    doge_header = dict(
+                        version=template['version'] | (1 << 8),
+                        previous_block=int(template['previousblockhash'], 16) if template.get('previousblockhash') else 0,
+                        merkle_root=doge_merkle_root,
+                        timestamp=template['curtime'],
+                        bits=bitcoin_data.FloatingIntegerType().unpack(template['bits'].decode('hex')[::-1]),
+                        nonce=0,
+                    )
+
+                doge_block_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(doge_header))
+
+                user_merged_work[chainid] = dict(
+                    aux_work,
+                    hash=doge_block_hash,
+                    doge_header=doge_header,
+                    doge_coinbase=doge_coinbase_tx,
+                    doge_tx_hashes=all_doge_tx_hashes,
+                    finder_address=finder_address,
+                    finder_fee_percentage=finder_fee_percentage,
+                )
+            except Exception:
+                user_merged_work[chainid] = aux_work
+
+        return user_merged_work
+
     def get_work(self, user, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses=None):
         # Debug: Uncomment to trace get_work calls
         #print '[DEBUG] get_work called with user=%r, merged_addresses=%r' % (user, merged_addresses)
@@ -1181,16 +1305,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Removed peer connection check - allow solo mining
         # P2Pool can work standalone even with PERSIST=True
 
-        if self.merged_work.value:
-            tree, size = bitcoin_data.make_auxpow_tree(self.merged_work.value)
-            mm_hashes = [self.merged_work.value.get(tree.get(i), dict(hash=0))['hash'] for i in xrange(size)]
+        # Build user-specific merged templates so finder fee can target the work recipient.
+        effective_merged_work = self._build_user_specific_merged_work(user, merged_addresses)
+
+        if effective_merged_work:
+            tree, size = bitcoin_data.make_auxpow_tree(effective_merged_work)
+            mm_hashes = [effective_merged_work.get(tree.get(i), dict(hash=0))['hash'] for i in xrange(size)]
             mm_data = '\xfa\xbemm' + bitcoin_data.aux_pow_coinbase_type.pack(dict(
                 merkle_root=bitcoin_data.merkle_hash(mm_hashes),
                 size=size,
                 nonce=0,
             ))
             # Include chain_id in mm_later tuple for merged block recording
-            mm_later = [(dict(aux_work, chainid=chain_id), mm_hashes.index(aux_work['hash']), mm_hashes) for chain_id, aux_work in self.merged_work.value.iteritems()]
+            mm_later = [(dict(aux_work, chainid=chain_id), mm_hashes.index(aux_work['hash']), mm_hashes) for chain_id, aux_work in effective_merged_work.iteritems()]
             
             # Debug: Uncomment to trace merged mining data in coinbase (prints frequently)
             # print >>sys.stderr, '[DEBUG] Merged mining data being embedded in Litecoin coinbase:'

@@ -33,13 +33,13 @@ DEBUG_COINBASE = False
 # Kept for fallback if V36 is not active.
 PRIMARY_DONATION_SCRIPT = '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac'.decode('hex')
 
-# COMBINED_DONATION_SCRIPT: 1-of-2 P2MS (bare multisig) for V36+
-# Same raw script as data.py COMBINED_DONATION_SCRIPT
-# Either party can spend independently, solving the "lost key" problem.
-# OP_1 PUSH33 <forrestv_compressed> PUSH33 <our_compressed> OP_2 OP_CHECKMULTISIG
-COMBINED_DONATION_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d12102fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a52ae'.decode('hex')
+# COMBINED_DONATION_REDEEM_SCRIPT: 1-of-2 P2MS redeem script (V36+)
+COMBINED_DONATION_REDEEM_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d12102fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a52ae'.decode('hex')
 
-# Default donation script alias (points to combined P2MS)
+# COMBINED_DONATION_SCRIPT: P2SH-wrapped scriptPubKey for COMBINED_DONATION_REDEEM_SCRIPT
+COMBINED_DONATION_SCRIPT = 'a9148c6272621d89e8fa526dd86acff60c7136be8e8587'.decode('hex')
+
+# Default donation script alias (points to combined P2SH)
 DONATION_SCRIPT = COMBINED_DONATION_SCRIPT
 
 # P2Pool merged mining identifier for OP_RETURN
@@ -67,7 +67,7 @@ def build_coinbase_input_script(height, extradata=''):
     return script_bytes
 
 
-def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, node_operator_address=None, worker_fee=0, parent_net=None, coinbase_text=None, v36_active=False):
+def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, node_operator_address=None, worker_fee=0, parent_net=None, coinbase_text=None, v36_active=False, finder_address=None, finder_fee_percentage=0.5):
     """
     Build coinbase transaction for MERGED CHAIN (Dogecoin) with multiple outputs
     
@@ -129,14 +129,16 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
         donation_amount = dust_threshold
     
     worker_fee_amount = int(total_reward * worker_fee / 100) if worker_fee > 0 and node_operator_address else 0
-    miners_reward = total_reward - donation_amount - worker_fee_amount
+    finder_fee_amount = int(total_reward * finder_fee_percentage / 100) if finder_fee_percentage > 0 and finder_address else 0
+    miners_reward = total_reward - donation_amount - worker_fee_amount - finder_fee_amount
     
     if DEBUG_COINBASE:
         print >>sys.stderr, '[MERGED COINBASE] Total reward: %d satoshis' % total_reward
         print >>sys.stderr, '[MERGED COINBASE] - Donation/marker (%.1f%%): %d (dust_threshold=%d)' % (donation_percentage, donation_amount, dust_threshold)
         print >>sys.stderr, '[MERGED COINBASE] - Node fee (%.1f%%): %d' % (worker_fee, worker_fee_amount)
+        print >>sys.stderr, '[MERGED COINBASE] - Finder fee (%.1f%%): %d' % (finder_fee_percentage, finder_fee_amount)
         print >>sys.stderr, '[MERGED COINBASE] - Miners (%.1f%%): %d' % (
-            100 - donation_percentage - worker_fee, miners_reward)
+            100 - donation_percentage - worker_fee - finder_fee_percentage, miners_reward)
         print >>sys.stderr, '[MERGED COINBASE] Building for %d shareholders' % len(shareholders)
     
     # Build outputs for each shareholder (from miners_reward after fees)
@@ -164,7 +166,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
                 })
                 if DEBUG_COINBASE:
                     print >>sys.stderr, '[MINER PAYOUT] %s: %d satoshis (%.1f%% of %.1f%%)' % (
-                        address[:20] + '...', amount, fraction * 100, 100 - donation_percentage - worker_fee)
+                        address[:20] + '...', amount, fraction * 100, 100 - donation_percentage - worker_fee - finder_fee_percentage)
             except ValueError as e:
                 # Second try: address might be in parent chain format - convert it
                 if parent_net is not None:
@@ -184,7 +186,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
                         })
                         if DEBUG_COINBASE:
                             print >>sys.stderr, '[MINER PAYOUT] %s -> %s: %d satoshis (%.1f%% of %.1f%%) [auto-converted from parent chain]' % (
-                                address[:15] + '...', converted_address[:15] + '...', amount, fraction * 100, 100 - donation_percentage - worker_fee)
+                                address[:15] + '...', converted_address[:15] + '...', amount, fraction * 100, 100 - donation_percentage - worker_fee - finder_fee_percentage)
                     except Exception as conv_e:
                         print >>sys.stderr, 'Warning: Failed to decode/convert address %s: %s (original: %s)' % (address, conv_e, e)
                 else:
@@ -229,6 +231,40 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
             else:
                 print >>sys.stderr, 'Warning: Failed to decode node operator address %s for merged chain: %s' % (node_operator_address, e)
                 print >>sys.stderr, '         Skipping node operator fee. Check --merged-operator-address matches merged chain network.'
+
+    # Add finder fee output (if configured)
+    if finder_fee_amount > 0 and finder_address:
+        try:
+            finder_script = bitcoin_data.address_to_script2(finder_address, net)
+            tx_outs.append({
+                'value': finder_fee_amount,
+                'script': finder_script,
+            })
+            if DEBUG_COINBASE:
+                print >>sys.stderr, '[FINDER FEE] %s: %d satoshis (%.1f%%)' % (
+                    finder_address[:20] + '...', finder_fee_amount, finder_fee_percentage)
+        except ValueError as e:
+            if parent_net is not None:
+                try:
+                    pubkey_hash_info = bitcoin_data.address_to_pubkey_hash(finder_address, parent_net)
+                    pubkey_hash = pubkey_hash_info[0]
+                    converted_address = bitcoin_data.pubkey_hash_to_address(
+                        pubkey_hash, net.ADDRESS_VERSION, -1, net)
+                    finder_script = bitcoin_data.address_to_script2(converted_address, net)
+                    tx_outs.append({
+                        'value': finder_fee_amount,
+                        'script': finder_script,
+                    })
+                    if DEBUG_COINBASE:
+                        print >>sys.stderr, '[FINDER FEE] %s -> %s: %d satoshis (%.1f%%) [auto-converted from parent chain]' % (
+                            finder_address[:15] + '...', converted_address[:15] + '...', finder_fee_amount, finder_fee_percentage)
+                except Exception as conv_e:
+                    print >>sys.stderr, 'Warning: Failed to decode/convert finder address %s: %s (original: %s)' % (
+                        finder_address, conv_e, e)
+                    print >>sys.stderr, '         Skipping finder fee output.'
+            else:
+                print >>sys.stderr, 'Warning: Failed to decode finder address %s for merged chain: %s' % (finder_address, e)
+                print >>sys.stderr, '         Skipping finder fee output.'
     
     # Add OP_RETURN output with pool identifier (0 value, data only)
     # This marks the block as pool-mined on the DOGECOIN blockchain
@@ -253,7 +289,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     # Even if donation_percentage=0, this output marks every block as P2Pool-mined
     # This is equivalent to gentx_before_refhash on parent chain
     #
-    # Always COMBINED_DONATION_SCRIPT (1-of-2 P2MS) — full amount
+    # Always COMBINED_DONATION_SCRIPT (P2SH-wrapped 1-of-2 P2MS) — full amount
     #
     # Collect rounding remainder from miner distribution (like parent chain).
     # Integer truncation in amount = int(miners_reward * fraction) means
@@ -267,7 +303,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     })
     
     if DEBUG_COINBASE:
-        print >>sys.stderr, '[DONATION] P2Pool marker/donation to COMBINED (P2MS): %d satoshis (%.1f%% + %d rounding)' % (
+        print >>sys.stderr, '[DONATION] P2Pool marker/donation to COMBINED (P2SH-wrapped 1-of-2 P2MS): %d satoshis (%.1f%% + %d rounding)' % (
             final_donation, donation_percentage, rounding_remainder)
         print >>sys.stderr, '[MERGED COINBASE] Total outputs: %d (miners) + 1 (OP_RETURN) + 1 (donation marker) = %d' % (
             len(tx_outs) - 2, len(tx_outs))
