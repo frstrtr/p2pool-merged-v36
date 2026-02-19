@@ -373,30 +373,31 @@ The code is **production-ready** based on testnet validation:
 
 ## V36 Donation Script Transition (Feb 2026)
 
-### Three Donation Scripts
+### Donation Scripts and Monitoring
 
-V36 implements a three-script donation system for merged chain coinbase:
+V36 implements a two-era donation marker system for merged chain coinbase:
 
 | Script | Format | Purpose | Era |
 |--------|--------|---------|-----|
-| `PRIMARY_DONATION_SCRIPT` | P2PK (65-byte pubkey) | Original author (forrestv) — **PRIVATE KEY LOST** | Pre-V36 explicit |
-| `SECONDARY_DONATION_SCRIPT` | P2PKH (20-byte hash) | Our project — **WE CONTROL** | Pre-V36 via fake miner |
-| `COMBINED_DONATION_SCRIPT` | 1-of-2 P2MS (bare multisig) | Either party can spend independently | Post-V36 |
+| `PRIMARY_DONATION_SCRIPT` | P2PK (65-byte pubkey) | Original author marker output | Pre-V36 |
+| `COMBINED_DONATION_REDEEM_SCRIPT` | 1-of-2 P2MS redeem script | Spending policy for post-V36 marker | V36+ internals |
+| `COMBINED_DONATION_SCRIPT` | P2SH scriptPubKey wrapping redeem script | Standard/addressable marker output | Post-V36 |
 
-### Pre-V36 Transition Mechanism
+**What to monitor on-chain (parent chain examples):**
+- **Litecoin pre-V36 marker address**: `LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd`
+- **Litecoin post-V36 marker address**: `MLhSmVQxMusLE3pjGFvp4unFckgjeD8LUA`
+- **Bitcoin pre-V36 marker address**: `1Kz5QaUPDtKrj5SqW5tFkn7WZh8LmQaQi4`
+- **Bitcoin post-V36 marker address**: `3EVJTbzzQo1uRYYqANwUFGXrJ46HeaLvze`
 
-During V35→V36 transition, the parent chain's "fake miner" hack is mirrored:
+**What to monitor on-chain (merged Dogecoin examples):**
+- **Dogecoin mainnet pre-V36 marker address**: `DQ8AwqR2XJE9G5dSEfspJYH7Spre85dj6L`
+- **Dogecoin mainnet post-V36 marker address**: `A5EZCT4tUrtoKuvJaWbtVQADzdUKdtsqpr`
+- **Dogecoin testnet/testnet4alpha pre-V36 marker address**: `noBEfr9wTGgs94CdGVXGYwsQghEwBsXw4K`
+- **Dogecoin testnet/testnet4alpha post-V36 marker address**: `2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f`
 
-1. **Explicit donation** (coinbase output) is **halved** and goes to `PRIMARY_DONATION_SCRIPT`
-2. **Secondary donation** goes via PPLNS fake miner shares credited to `SECONDARY_DONATION_PUBKEY_HASH`
-3. The fake miner's parent chain address IS in the shareholders dict → receives merged payout
+### Pre-V36 Mechanism
 
-```python
-# Pre-V36: build_merged_coinbase()
-donation_script = PRIMARY_DONATION_SCRIPT
-donation_amount = int(total_reward * donation_percentage / 200)  # Halved!
-# Other half comes via fake miner PPLNS weight
-```
+Before V36 activation, donation marker output uses `PRIMARY_DONATION_SCRIPT`.
 
 ### Post-V36 Mechanism
 
@@ -404,9 +405,9 @@ When V36 reaches supermajority (95%+ signaling):
 
 ```python
 # Post-V36: build_merged_coinbase()
-donation_script = COMBINED_DONATION_SCRIPT  # 1-of-2 P2MS
+donation_script = COMBINED_DONATION_SCRIPT  # P2SH scriptPubKey
 donation_amount = int(total_reward * donation_percentage / 100)  # Full amount
-# No fake miner needed — single output, either party can spend
+# Single marker output; spending policy is enforced by COMBINED_DONATION_REDEEM_SCRIPT
 ```
 
 ### Donation Marker Dust Minimum

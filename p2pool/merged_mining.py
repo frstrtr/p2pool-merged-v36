@@ -42,6 +42,17 @@ COMBINED_DONATION_SCRIPT = 'a9148c6272621d89e8fa526dd86acff60c7136be8e8587'.deco
 # Default donation script alias (points to combined P2SH)
 DONATION_SCRIPT = COMBINED_DONATION_SCRIPT
 
+# DONATION MARKER MONITORING MEMO (merged chain coinbase):
+# - Pre-V36 monitor output paying PRIMARY_DONATION_SCRIPT address on merged chain
+# - Post-V36 monitor output paying COMBINED_DONATION_SCRIPT-derived P2SH address
+#   (derive with script2_to_address using merged chain ADDRESS_P2SH_VERSION)
+# - Dogecoin mainnet pre-V36  : DQ8AwqR2XJE9G5dSEfspJYH7Spre85dj6L
+# - Dogecoin mainnet post-V36 : A5EZCT4tUrtoKuvJaWbtVQADzdUKdtsqpr
+# - Dogecoin testnet pre-V36  : noBEfr9wTGgs94CdGVXGYwsQghEwBsXw4K
+# - Dogecoin testnet post-V36 : 2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f
+# Parent-chain example for same post-V36 script hash (different version bytes):
+#   Litecoin mainnet post-V36 : MLhSmVQxMusLE3pjGFvp4unFckgjeD8LUA
+
 # P2Pool merged mining identifier for OP_RETURN
 P2POOL_TAG = 'P2Pool merged mining'
 

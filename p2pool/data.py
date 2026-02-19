@@ -118,6 +118,21 @@ COMBINED_DONATION_REDEEM_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9
 # scriptPubKey = OP_HASH160 <hash160(redeem_script)> OP_EQUAL
 COMBINED_DONATION_SCRIPT = 'a9148c6272621d89e8fa526dd86acff60c7136be8e8587'.decode('hex')
 
+# DONATION MARKER MONITORING MEMO (parent chain / share coinbase):
+# - Pre-V36 marker address  : donation_script_to_address(net)
+#   - Litecoin mainnet      : LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd
+#   - Bitcoin mainnet       : 1Kz5QaUPDtKrj5SqW5tFkn7WZh8LmQaQi4
+# - Post-V36 marker address : combined_donation_script_to_address(net)
+#   - Litecoin mainnet      : MLhSmVQxMusLE3pjGFvp4unFckgjeD8LUA
+#   - Bitcoin mainnet       : 3EVJTbzzQo1uRYYqANwUFGXrJ46HeaLvze
+#
+# Merged-chain (Dogecoin) marker monitoring uses script2_to_address(script, doge_net):
+# - Dogecoin mainnet pre-V36  : DQ8AwqR2XJE9G5dSEfspJYH7Spre85dj6L
+# - Dogecoin mainnet post-V36 : A5EZCT4tUrtoKuvJaWbtVQADzdUKdtsqpr
+# - Dogecoin testnet pre-V36  : noBEfr9wTGgs94CdGVXGYwsQghEwBsXw4K
+# - Dogecoin testnet post-V36 : 2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f
+# Use these when monitoring on-chain donation marker outputs across activation.
+
 # Precomputed hash key for COMBINED_DONATION_SCRIPT fast-path.
 #
 # For P2SH-wrapped combined donation script, the key is the embedded script hash
@@ -192,6 +207,15 @@ def combined_donation_script_to_address(net):
     """Get display/key address for the V36 combined donation script.
 
     For P2SH-wrapped combined donation script, return a standard Base58 P2SH address.
+
+    Monitoring note:
+    - Pre-V36 marker monitor: donation_script_to_address(net)
+    - Post-V36 marker monitor: combined_donation_script_to_address(net)
+        - Examples:
+            - Litecoin mainnet: LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd -> MLhSmVQxMusLE3pjGFvp4unFckgjeD8LUA
+            - Bitcoin mainnet:  1Kz5QaUPDtKrj5SqW5tFkn7WZh8LmQaQi4 -> 3EVJTbzzQo1uRYYqANwUFGXrJ46HeaLvze
+            - Dogecoin mainnet (merged): DQ8AwqR2XJE9G5dSEfspJYH7Spre85dj6L -> A5EZCT4tUrtoKuvJaWbtVQADzdUKdtsqpr
+            - Dogecoin testnet (merged): noBEfr9wTGgs94CdGVXGYwsQghEwBsXw4K -> 2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f
     If net is None (tests/utilities), fall back to deterministic synthetic key.
     """
     if net is None:
