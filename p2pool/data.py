@@ -311,7 +311,7 @@ class BaseShare(object):
         return t
 
     @classmethod
-    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False, merged_addresses=None):
+    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False, merged_addresses=None, message_data=None):
         # V36 Donation Switch:
         # - Pre-V36 (<95%): Uses DONATION_SCRIPT (P2PK, original P2Pool author)
         # - Post-V36 (>=95%): Uses COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS redeem script)
@@ -557,6 +557,36 @@ class BaseShare(object):
         #         pass
         #     print >>sys.stderr, '[PAYOUT DEBUG]   Output %d: value=%d, script_len=%d, addr=%s' % (i, payout['value'], len(payout['script']), script_address)
 
+        # Defense-in-depth: validate message_data is encrypted + authority-signed before embedding
+        if message_data is not None and cls.VERSION >= 36:
+            try:
+                from p2pool.share_messages import (
+                    unpack_share_messages as _unpack_msgs,
+                    DONATION_AUTHORITY_PUBKEYS as _AUTH_PUBKEYS,
+                )
+                _msgs, _info = _unpack_msgs(message_data)
+                if not _msgs or _info is None:
+                    import sys as _sys
+                    print >> _sys.stderr, ('[TRANSITION MSG] REJECTED: '
+                        'message_data failed decryption -- not encrypted '
+                        'by any donation authority key')
+                    message_data = None
+                else:
+                    _auth_pk = _info.get('authority_pubkey', b'')
+                    for _m in _msgs:
+                        if not _m.signature or not _m.verify_authority_direct(_auth_pk):
+                            import sys as _sys
+                            print >> _sys.stderr, ('[TRANSITION MSG] REJECTED: '
+                                'message type 0x%02x signature invalid after '
+                                'decryption -- not embedding' % _m.msg_type)
+                            message_data = None
+                            break
+            except Exception as _e:
+                import sys as _sys
+                print >> _sys.stderr, ('[TRANSITION MSG] REJECTED: '
+                    'failed to validate message_data -- %s' % _e)
+                message_data = None
+
         gentx = dict(
             version=1,
             tx_ins=[dict(
@@ -570,7 +600,7 @@ class BaseShare(object):
                                            if segwit_activated else []) \
                     + payouts \
                     + [dict(value=0, script='\x6a\x28' + cls.get_ref_hash(
-                        net, share_info, ref_merkle_link) \
+                        net, share_info, ref_merkle_link, message_data=message_data) \
                                 + pack.IntType(64).pack(last_txout_nonce))],
             lock_time=0,
         )
@@ -614,14 +644,17 @@ class BaseShare(object):
             min_header = dict(header); del min_header['merkle_root']
             packed_for_link = bitcoin_data.tx_id_type.pack(gentx)
             prefix_for_link = packed_for_link[:-32-8-4]
-            share = cls(net, None, dict(
+            share_contents = dict(
                 min_header=min_header,
                 share_info=share_info,
                 ref_merkle_link=dict(branch=[], index=0),
                 last_txout_nonce=last_txout_nonce,
                 hash_link=prefix_to_hash_link(prefix_for_link, cls.gentx_before_refhash),
                 merkle_link=bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0),
-            ))
+            )
+            if cls.VERSION >= 36:
+                share_contents['message_data'] = message_data
+            share = cls(net, None, share_contents)
             assert share.header == header # checks merkle_root
             return share
         t5 = time.time()
@@ -635,13 +668,16 @@ class BaseShare(object):
         return share_info, gentx, other_transaction_hashes, get_share
     
     @classmethod
-    def get_ref_hash(cls, net, share_info, ref_merkle_link):
-        return pack.IntType(256).pack(bitcoin_data.check_merkle_link(bitcoin_data.hash256(cls.get_dynamic_types(net)['ref_type'].pack(dict(
+    def get_ref_hash(cls, net, share_info, ref_merkle_link, message_data=None):
+        ref_dict = dict(
             identifier=net.IDENTIFIER,
             share_info=share_info,
-        ))), ref_merkle_link))
+        )
+        if cls.VERSION >= 36:
+            ref_dict['message_data'] = message_data  # None → PossiblyNoneType packs b''
+        return pack.IntType(256).pack(bitcoin_data.check_merkle_link(bitcoin_data.hash256(cls.get_dynamic_types(net)['ref_type'].pack(ref_dict)), ref_merkle_link))
     
-    __slots__ = 'net peer_addr contents min_header share_info hash_link merkle_link hash share_data max_target target timestamp previous_hash new_script desired_version gentx_hash header pow_hash header_hash new_transaction_hashes time_seen absheight abswork'.split(' ')
+    __slots__ = 'net peer_addr contents min_header share_info hash_link merkle_link hash share_data max_target target timestamp previous_hash new_script desired_version gentx_hash header pow_hash header_hash new_transaction_hashes time_seen absheight abswork _message_data _parsed_messages _signing_key_info'.split(' ')
     
     def __init__(self, net, peer_addr, contents):
         dynamic_types = self.get_dynamic_types(net)
@@ -696,6 +732,14 @@ class BaseShare(object):
             self.merged_addresses = self.share_info.get('merged_addresses', None)
         else:
             self.merged_addresses = None
+        
+        # V36+: Read message_data from ref_type contents (for share-embedded messaging)
+        if self.VERSION >= 36:
+            self._message_data = contents.get('message_data', None)
+        else:
+            self._message_data = None
+        self._parsed_messages = []
+        self._signing_key_info = None
         self.absheight = self.share_info['absheight']
         self.abswork = self.share_info['abswork']
         if net.NAME == 'bitcoin' and self.absheight > 3927800 and self.desired_version == 16:
@@ -716,7 +760,7 @@ class BaseShare(object):
         
         self.gentx_hash = check_hash_link(
             self.hash_link,
-            self.get_ref_hash(net, self.share_info, contents['ref_merkle_link']) + pack.IntType(64).pack(self.contents['last_txout_nonce']) + pack.IntType(32).pack(0),
+            self.get_ref_hash(net, self.share_info, contents['ref_merkle_link'], message_data=self._message_data) + pack.IntType(64).pack(self.contents['last_txout_nonce']) + pack.IntType(32).pack(0),
             self.gentx_before_refhash,
         )
         # Reconstruct merkle_root from gentx_hash and merkle_link
@@ -796,11 +840,65 @@ class BaseShare(object):
             self.contents['ref_merkle_link'], [(h, None) for h in other_tx_hashes], self.net,
             known_txs=None, last_txout_nonce=self.contents['last_txout_nonce'], 
             segwit_data=self.share_info.get('segwit_data', None),
-            v36_active=(self.VERSION >= 36))
+            v36_active=(self.VERSION >= 36),
+            message_data=self._message_data)
         
         assert other_tx_hashes2 == other_tx_hashes
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
             raise ValueError('''gentx doesn't match hash_link''')
+        
+        # V36+: Validate share-embedded messages (transition signals, etc.)
+        #
+        # STRICT POLICY: A share that carries message_data MUST pass both:
+        #   1. Decryption — encrypted by a COMBINED_DONATION_SCRIPT authority key
+        #   2. Signature  — each inner message signed by the same authority key
+        #
+        # If message_data is present but fails either check, THE SHARE IS REJECTED.
+        # This prevents malicious miners from spamming the system with fake
+        # system messages — they waste their PoW and get no reward.
+        #
+        # Shares with NO message_data (None or empty) are always valid.
+        if self.VERSION >= 36 and self._message_data:
+            from p2pool.share_messages import (
+                unpack_share_messages, DONATION_AUTHORITY_PUBKEYS,
+                FLAG_PROTOCOL_AUTHORITY,
+            )
+            messages, signing_key_info = unpack_share_messages(self._message_data)
+            self._signing_key_info = signing_key_info
+
+            if signing_key_info is None:
+                # Decryption failed — not encrypted by any known authority key.
+                # This share is carrying fake/garbage message_data → REJECT.
+                raise p2p.PeerMisbehavingError(
+                    'share carries message_data that failed decryption '
+                    'against all COMBINED_DONATION_SCRIPT authority keys')
+
+            authority_pubkey = signing_key_info.get('authority_pubkey', b'')
+            if authority_pubkey not in DONATION_AUTHORITY_PUBKEYS:
+                raise p2p.PeerMisbehavingError(
+                    'share message_data decrypted but authority_pubkey '
+                    'not in COMBINED_DONATION_SCRIPT')
+
+            if not messages:
+                # Decryption succeeded but no valid messages inside.
+                # Malformed inner envelope → REJECT.
+                raise p2p.PeerMisbehavingError(
+                    'share message_data decrypted but contains no valid messages')
+
+            # Verify each message signature against the authority pubkey
+            for msg in messages:
+                if not msg.signature:
+                    raise p2p.PeerMisbehavingError(
+                        'share contains unsigned message (type 0x%02x) '
+                        'inside encrypted envelope' % msg.msg_type)
+                if not msg.verify_authority_direct(authority_pubkey):
+                    raise p2p.PeerMisbehavingError(
+                        'share contains message (type 0x%02x) with invalid '
+                        'signature — does not match encryption authority key'
+                        % msg.msg_type)
+                msg.flags |= FLAG_PROTOCOL_AUTHORITY
+
+            self._parsed_messages = messages
 
         if self.VERSION < 34:
             # check for excessive fees
@@ -1001,11 +1099,13 @@ class MergedMiningShare(BaseShare):
                 ('branch', pack.ListType(pack.IntType(256))),
                 ('index', pack.IntType(0)),  # always 0
             ])),
+            ('message_data', pack.PossiblyNoneType(b'', pack.VarStrType())),
         ])
         
         t['ref_type'] = pack.ComposedType([
             ('identifier', pack.FixedStrType(64//8)),
             ('share_info', t['share_info_type']),
+            ('message_data', pack.PossiblyNoneType(b'', pack.VarStrType())),
         ])
         
         cls.cached_types = t
@@ -1454,7 +1554,7 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
     majority_desired_version = max(desired_version_counts, key=lambda k: desired_version_counts[k])
     if majority_desired_version not in share_versions and desired_version_counts[majority_desired_version] > sum(desired_version_counts.itervalues())/2:
         res.append('A MAJORITY OF SHARES CONTAIN A VOTE FOR AN UNSUPPORTED SHARE IMPLEMENTATION! (v%i with %i%% support)\n'
-            'An upgrade is likely necessary. Check https://github.com/jtoomim/p2pool/tree/1mb_segwit or https://forum.bitcoin.com/pools/p2pool-decentralized-dos-resistant-trustless-censorship-resistant-pool-t69932-99999.html for more information.' % (
+            'An upgrade is likely necessary. Check https://github.com/mining4people/p2pool-merged-v36/releases for more information.' % (
                 majority_desired_version, 100*desired_version_counts[majority_desired_version]/sum(desired_version_counts.itervalues())))
     
     if bitcoind_getinfo['warnings'] != '':
@@ -1485,6 +1585,53 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
                 res.append('LOST CONTACT WITH %s DAEMON (%s) for %s! Check that mm-adapter or the merged daemon isn\'t frozen or dead!' % (
                     merged_symbol, merged_name,
                     math.format_dt(time.time() - mw['last_update'])))
+    
+    # Scan recent shares for authority-signed transition signals
+    # These are TRANSITION_SIGNAL messages embedded in V36 shares,
+    # signed by one of the COMBINED_DONATION_SCRIPT keys (forrestv or maintainer).
+    try:
+        from p2pool.share_messages import MSG_TRANSITION_SIGNAL, FLAG_PROTOCOL_AUTHORITY
+        scan_depth = min(
+            net.CHAIN_LENGTH,
+            60 * 60 // net.SHARE_PERIOD,
+            tracker.get_height(best_share),
+        )
+        seen_transitions = set()  # dedup by (from, to)
+        for share in tracker.get_chain(best_share, scan_depth):
+            if not hasattr(share, '_parsed_messages') or not share._parsed_messages:
+                continue
+            for msg in share._parsed_messages:
+                if msg.msg_type != MSG_TRANSITION_SIGNAL:
+                    continue
+                if not (msg.flags & FLAG_PROTOCOL_AUTHORITY):
+                    continue
+                try:
+                    import json as _json
+                    data = _json.loads(msg.payload)
+                    key = (data.get('from'), data.get('to'))
+                    if key in seen_transitions:
+                        continue
+                    seen_transitions.add(key)
+                    urgency = data.get('urg', 'info')
+                    prefix = {
+                        'required': 'URGENT UPGRADE REQUIRED',
+                        'recommended': 'Upgrade recommended',
+                        'info': 'Upgrade info',
+                    }.get(urgency, 'Upgrade info')
+                    text = data.get('msg', 'Upgrade available')
+                    url = data.get('url', '')
+                    url_suffix = (' — %s' % url) if url else ''
+                    res.append('[%s] v%s→v%s: %s%s' % (
+                        prefix,
+                        data.get('from', '?'),
+                        data.get('to', '?'),
+                        text,
+                        url_suffix,
+                    ))
+                except (ValueError, TypeError, KeyError):
+                    continue
+    except ImportError:
+        pass
     
     return res
 

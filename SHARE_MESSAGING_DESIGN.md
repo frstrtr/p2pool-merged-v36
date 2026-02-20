@@ -173,12 +173,41 @@ ciphertext = XOR(plaintext, keystream(obfuscation_key, nonce=share_hash))
 This is NOT security — any p2pool node can deobfuscate. It's protection
 against casual wire sniffing.
 
-### Layer 2: Authentication (signed messages)
+### Layer 2: Authority Encryption (transition signals) — IMPLEMENTED
+
+Transition signal messages are encrypted using the authority pubkey as a
+"group key".  Every p2pool node knows the authority pubkeys (hardcoded in
+`DONATION_AUTHORITY_PUBKEYS`), so they can derive the decryption key.
+Non-p2pool observers cannot.
+
+```
+Encrypt (authority, offline — create_transition_message.py):
+  nonce      = random 16 bytes
+  enc_key    = HMAC-SHA256(key=authority_pubkey, msg=nonce)
+  stream     = SHA256(enc_key||0) || SHA256(enc_key||1) || ...
+  ciphertext = XOR(inner_data, stream)
+  mac        = HMAC-SHA256(enc_key, ciphertext)
+  envelope   = [0x01] [nonce:16] [mac:32] [ciphertext:N]
+
+Decrypt (any p2pool node):
+  For each pubkey in DONATION_AUTHORITY_PUBKEYS:
+    enc_key    = HMAC-SHA256(pubkey, nonce)
+    mac_check  = HMAC-SHA256(enc_key, ciphertext)
+    if mac_check == mac → decrypt + verify ECDSA signature inside
+```
+
+This layer provides:
+- Confidentiality from passive observers (ISPs, network monitors)
+- Integrity via HMAC-SHA256 MAC (tampered ciphertext fails check)
+- Key attribution (MAC match identifies WHICH authority encrypted it)
+- Double authentication (encryption key match + ECDSA signature inside)
+
+### Layer 3: Authentication (signed messages)
 
 ECDSA signatures via DerivedSigningKey, as described above. Proves sender
 identity and message integrity.
 
-### Layer 3: Private Encryption (P2P messages)
+### Layer 4: Private Encryption (P2P messages)
 
 For private miner-to-miner messages, ECDH key agreement provides
 end-to-end encryption:
@@ -193,7 +222,7 @@ Only sender and recipient can decrypt. All other nodes relay the opaque
 ciphertext without being able to read it. The `to` field (recipient
 signing_id) is visible so nodes can check if a message is addressed to them.
 
-### Layer 4: (Future) ZK Anonymous Reputation — Phase 3+
+### Layer 5: (Future) ZK Anonymous Reputation — Phase 3+
 
 Zero-Knowledge proofs could enable anonymous messaging with reputation:
 - Prove "I control addresses with combined hashrate weight > X%" without
@@ -342,15 +371,21 @@ DELETE /msg/ban            Unban a sender
 | VERSION_SIGNAL | 0x04 | Optional | No | Extended version signaling with metadata |
 | MERGED_STATUS | 0x05 | Optional | No | Merged mining chain status reports |
 | EMERGENCY | 0x10 | **Required** | Yes | Security alerts, critical upgrade notices |
+| TRANSITION_SIGNAL | 0x20 | **Required** | Yes | Protocol transition alerts (authority only) |
 
 ## Message Flags
 
 ```
-Bit 0 (0x01): FLAG_HAS_SIGNATURE  — Message carries an ECDSA signature
-Bit 1 (0x02): FLAG_BROADCAST      — Relay to peers (vs. local-only)
-Bit 2 (0x04): FLAG_PERSISTENT     — Store in message history (vs. ephemeral)
-Bits 3-7:     Reserved for future use
+Bit 0 (0x01): FLAG_HAS_SIGNATURE      — Message carries an ECDSA signature
+Bit 1 (0x02): FLAG_BROADCAST          — Relay to peers (vs. local-only)
+Bit 2 (0x04): FLAG_PERSISTENT         — Store in message history (vs. ephemeral)
+Bit 3 (0x08): FLAG_PROTOCOL_AUTHORITY — Signed by a COMBINED_DONATION_SCRIPT key
+Bits 4-7:     Reserved for future use
 ```
+
+`FLAG_PROTOCOL_AUTHORITY` is **earned, not set** — it is stripped during
+unpacking and only restored when `verify_authority_direct()` confirms the
+signature matches a `DONATION_AUTHORITY_PUBKEYS` key.
 
 ## Limits
 
@@ -385,6 +420,30 @@ enabling richer negotiation than the existing `desired_version` integer.
 ### 5. Merged Mining Discovery
 Nodes announce which merged chains they support and their block heights,
 enabling automatic peer discovery for new merged mining chains.
+
+### 6. Protocol Transition Coordination (IMPLEMENTED)
+
+Authority key holders (forrestv, mining4people) broadcast signed+encrypted
+transition signals via shares. These are created offline using
+`create_transition_message.py` (Python 3) and distributed as hex strings
+to node operators, who paste them into `--transition-message`.
+
+```
+Authority offline:    create_transition_message.py create --privkey ... → hex string
+Operator startup:     --transition-message <hex>
+Node validates:       decrypt + verify ECDSA → embed in every mined share
+Other nodes:          get_warnings() scans shares → display upgrade notice
+```
+
+Urgency levels control the warning display:
+- `info` → informational notice
+- `recommended` → visible upgrade recommendation
+- `required` → prominent URGENT UPGRADE REQUIRED banner
+
+Transition signals are advisory — they never trigger automatic upgrades.
+Node operators must independently verify through out-of-band channels.
+
+No private key is needed on operator nodes — only the pre-built hex string.
 
 ## Message Weight Units (MWU) — Share-Cost Economics
 
@@ -762,8 +821,9 @@ FREE_MWU_ALLOWANCE = 64           # small messages are free
 MWU_PER_SACRIFICE = 256           # MWU capacity bought per sacrifice share
 
 # Sacrifice shares — miner mines shares for others to pay for messaging
-SACRIFICE_NODE_FRACTION = 0.50    # 50% of sacrifice shares → node operator address
-SACRIFICE_DONATION_FRACTION = 0.50  # 50% of sacrifice shares → donation script
+# Split is dynamic and follows node's --give-author setting:
+#   SACRIFICE_NODE_FRACTION = 1.0 - (give_author_percentage / 100.0)
+#   SACRIFICE_DONATION_FRACTION = give_author_percentage / 100.0
 SACRIFICE_TAG_SIZE = 20           # signing_id embedded in sacrifice share ref_data
 
 MAX_MESSAGE_FRAGMENTS = 8         # max fragments per split message
@@ -816,10 +876,17 @@ validity.
 
 | File | Purpose |
 |------|---------|
-| `p2pool/share_messages.py` | Core module: messages, signing, registry, store |
+| `p2pool/share_messages.py` | Core module: messages, signing, encryption, registry, store |
+| `p2pool/data.py` | V36 ref_type extension, strict validation in check(), transition scanning in get_warnings() |
+| `p2pool/work.py` | Transition message loading (_prepare_transition_message) + embedding |
+| `p2pool/main.py` | `--transition-message` CLI argument |
+| `create_transition_message.py` | Standalone Python 3 authority message tool (create/verify/keystore) |
 | `SHARE_MESSAGING_DESIGN.md` | This document — architecture and rationale |
 | `SHARE_MESSAGING_PROTOCOL.md` | Wire format specification |
-| `SHARE_MESSAGING_INTEGRATION.md` | Integration plan for data.py, work.py, web.py |
+| `SHARE_MESSAGING_INTEGRATION.md` | Integration plan and phase status |
+| `SHARE_MESSAGING_API.md` | HTTP API reference |
+| `SHARE_MESSAGING_QUICKSTART.md` | Operator/miner quick start guide |
+| `SHARE_MESSAGING_SECURITY.md` | Security model and threat analysis |
 
 ## Integration Points (Summary)
 

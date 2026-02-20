@@ -61,11 +61,13 @@ MSG_POOL_ANNOUNCE = 0x03
 MSG_VERSION_SIGNAL = 0x04
 MSG_MERGED_STATUS = 0x05
 MSG_EMERGENCY = 0x10
+MSG_TRANSITION_SIGNAL = 0x20      # Protocol-level version transition alert
 
 # Message flags
 FLAG_HAS_SIGNATURE = 0x01
 FLAG_BROADCAST = 0x02
 FLAG_PERSISTENT = 0x04
+FLAG_PROTOCOL_AUTHORITY = 0x08    # Signed by a donation script key (forrestv or maintainer)
 
 # Limits
 MAX_MESSAGE_PAYLOAD = 220       # bytes per message payload
@@ -115,7 +117,42 @@ MESSAGE_TYPE_NAMES = {
     MSG_VERSION_SIGNAL: 'VERSION_SIGNAL',
     MSG_MERGED_STATUS: 'MERGED_STATUS',
     MSG_EMERGENCY: 'EMERGENCY',
+    MSG_TRANSITION_SIGNAL: 'TRANSITION_SIGNAL',
 }
+
+
+# ============================================================================
+# Protocol Authority — Donation Script Trust Anchor
+# ============================================================================
+#
+# V36 shares mine under COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS).
+# The two keys in the redeem script are the protocol authority signers:
+#   - forrestv (original p2pool author)
+#   - mining4people maintainer  (p2pool-merged-v36)
+#
+# Messages signed by either key carry FLAG_PROTOCOL_AUTHORITY.  These are
+# the only messages that can issue TRANSITION_SIGNAL alerts that nodes will
+# treat as authoritative upgrade/migration guidance.
+#
+# This trust model works because:
+#   1. Every V36 share's coinbase pays to COMBINED_DONATION_SCRIPT.
+#   2. The redeem script is hardcoded — changing it changes gentx_before_refhash
+#      and invalidates all V36 shares.  So the pubkeys cannot be substituted.
+#   3. A message signed by one of these keys + embedded in a valid share =
+#      PoW-protected + authority-signed.  Double trust anchor.
+#
+# The compressed pubkeys are extracted directly from
+# COMBINED_DONATION_REDEEM_SCRIPT in data.py:
+#   OP_1 PUSH33 <forrestv_compressed> PUSH33 <maintainer_compressed> OP_2 OP_CHECKMULTISIG
+# ============================================================================
+
+# Compressed public keys from COMBINED_DONATION_REDEEM_SCRIPT
+# forrestv's key (original p2pool author)
+DONATION_PUBKEY_FORRESTV = '03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1'.decode('hex')
+# mining4people maintainer key
+DONATION_PUBKEY_MAINTAINER = '02fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a'.decode('hex')
+# Set of both for fast lookup
+DONATION_AUTHORITY_PUBKEYS = frozenset([DONATION_PUBKEY_FORRESTV, DONATION_PUBKEY_MAINTAINER])
 
 
 # ============================================================================
@@ -213,6 +250,171 @@ def _hash160(data):
             return hash160(data)
         except ImportError:
             raise NotImplementedError('No RIPEMD-160 available')
+
+
+# ============================================================================
+# Message Encryption Layer
+# ============================================================================
+#
+# V36 system messages are SIGNED (ECDSA) and ENCRYPTED before embedding in
+# shares.  This prevents passive observers from identifying transition
+# messages in raw share data, and provides an additional authenticity layer:
+# successful decryption + signature verification = double proof of authority.
+#
+# Encryption scheme (sign-then-encrypt):
+#
+#   SENDER (authority, has privkey d, pubkey Q):
+#     1. plaintext = message payload (JSON)
+#     2. signature = ECDSA_sign(d, SHA256(plaintext))
+#     3. inner = pack(plaintext, signature)
+#     4. nonce = random 16 bytes
+#     5. enc_key = HMAC-SHA256(Q, nonce)              ← key derivation
+#     6. stream = SHA256(enc_key||0) || SHA256(enc_key||1) || ...
+#     7. ciphertext = inner XOR stream
+#     8. mac = HMAC-SHA256(enc_key, ciphertext)       ← integrity
+#     9. envelope = [version(1)] [nonce(16)] [mac(32)] [ciphertext(N)]
+#
+#   RECEIVER (any node, knows Q_forrestv and Q_maintainer):
+#     For each Q in DONATION_AUTHORITY_PUBKEYS:
+#       1. enc_key = HMAC-SHA256(Q, nonce)
+#       2. mac_check = HMAC-SHA256(enc_key, ciphertext)
+#       3. If mac_check != mac: try next Q
+#       4. stream = SHA256(enc_key||0) || SHA256(enc_key||1) || ...
+#       5. inner = ciphertext XOR stream
+#       6. Unpack plaintext + signature from inner
+#       7. Verify: ECDSA_verify(Q, SHA256(plaintext), signature)
+#       8. If valid → authenticated message from this authority key
+#
+# Why this works for broadcast:
+#   - The encryption key is derived from a KNOWN pubkey + random nonce
+#   - Any p2pool node with the pubkey constants can derive the key
+#   - Non-p2pool observers cannot (they don't know the key derivation formula)
+#   - The MAC ensures ciphertext integrity (tampered data fails MAC check)
+#   - The signature ensures authenticity (only privkey holder could sign)
+#   - Together: encrypted + integrity-protected + authenticated
+#
+# V37+ will extend this with ECIES for private miner-to-miner messages
+# where only the intended recipient (with their privkey) can decrypt.
+# ============================================================================
+
+ENCRYPTED_ENVELOPE_VERSION = 0x01   # V36 authenticated encryption
+ENCRYPTION_NONCE_SIZE = 16
+ENCRYPTION_MAC_SIZE = 32
+ENCRYPTION_HEADER_SIZE = 1 + ENCRYPTION_NONCE_SIZE + ENCRYPTION_MAC_SIZE  # 49 bytes
+
+
+def _derive_encryption_key(authority_pubkey, nonce):
+    """
+    Derive symmetric encryption key from authority pubkey + random nonce.
+
+    The pubkey acts as a "group key" — any node with the same pubkey constant
+    can derive the same encryption key given the nonce.
+
+    Returns 32-byte key.
+    """
+    return hmac.new(authority_pubkey, nonce, hashlib.sha256).digest()
+
+
+def _generate_stream(enc_key, length):
+    """
+    Generate a deterministic byte stream of `length` bytes from enc_key.
+
+    Uses counter-mode SHA256: stream = SHA256(key||0) || SHA256(key||1) || ...
+    """
+    stream = b''
+    counter = 0
+    while len(stream) < length:
+        block = hashlib.sha256(enc_key + struct.pack('<I', counter)).digest()
+        stream += block
+        counter += 1
+    return stream[:length]
+
+
+def _xor_bytes(data, stream):
+    """XOR data with stream of equal or greater length."""
+    return b''.join(chr(ord(a) ^ ord(b)) for a, b in zip(data, stream))
+
+
+def encrypt_message_data(inner_data, authority_pubkey):
+    """
+    Encrypt packed message data for embedding in a share.
+
+    Args:
+        inner_data: packed bytes (messages with signatures)
+        authority_pubkey: 33-byte compressed pubkey used for key derivation
+
+    Returns:
+        encrypted envelope bytes:
+        [version:1] [nonce:16] [mac:32] [ciphertext:N]
+    """
+    import os as _os
+
+    if not inner_data:
+        return b''
+
+    if authority_pubkey not in DONATION_AUTHORITY_PUBKEYS:
+        raise ValueError('encrypt_message_data: pubkey not in DONATION_AUTHORITY_PUBKEYS')
+
+    nonce = _os.urandom(ENCRYPTION_NONCE_SIZE)
+    enc_key = _derive_encryption_key(authority_pubkey, nonce)
+
+    # Encrypt
+    stream = _generate_stream(enc_key, len(inner_data))
+    ciphertext = _xor_bytes(inner_data, stream)
+
+    # MAC over ciphertext (encrypt-then-MAC)
+    mac = hmac.new(enc_key, ciphertext, hashlib.sha256).digest()
+
+    return (chr(ENCRYPTED_ENVELOPE_VERSION) + nonce + mac + ciphertext)
+
+
+def decrypt_message_data(encrypted_envelope):
+    """
+    Try to decrypt an encrypted message envelope using known authority pubkeys.
+
+    Tries each DONATION_AUTHORITY_PUBKEY until MAC verification succeeds.
+
+    Args:
+        encrypted_envelope: bytes from share's message_data field
+
+    Returns:
+        (decrypted_inner_data, authority_pubkey) on success
+        (None, None) if decryption fails for all authority keys
+
+    This provides authentication: if MAC succeeds with a specific pubkey,
+    the message was encrypted by the holder of that pubkey's private key
+    (because only they would use that pubkey for key derivation).
+    """
+    if not encrypted_envelope or len(encrypted_envelope) < ENCRYPTION_HEADER_SIZE + 1:
+        return None, None
+
+    version = ord(encrypted_envelope[0])
+    if version != ENCRYPTED_ENVELOPE_VERSION:
+        return None, None
+
+    nonce = encrypted_envelope[1:1 + ENCRYPTION_NONCE_SIZE]
+    mac_received = encrypted_envelope[1 + ENCRYPTION_NONCE_SIZE:
+                                      1 + ENCRYPTION_NONCE_SIZE + ENCRYPTION_MAC_SIZE]
+    ciphertext = encrypted_envelope[1 + ENCRYPTION_NONCE_SIZE + ENCRYPTION_MAC_SIZE:]
+
+    if not ciphertext:
+        return None, None
+
+    for pubkey in DONATION_AUTHORITY_PUBKEYS:
+        enc_key = _derive_encryption_key(pubkey, nonce)
+
+        # Verify MAC first (fast reject for wrong key)
+        mac_computed = hmac.new(enc_key, ciphertext, hashlib.sha256).digest()
+        if mac_computed != mac_received:
+            continue  # Wrong key — try next
+
+        # MAC matches — decrypt
+        stream = _generate_stream(enc_key, len(ciphertext))
+        inner_data = _xor_bytes(ciphertext, stream)
+
+        return inner_data, pubkey
+
+    return None, None  # No authority key matched
 
 
 # ============================================================================
@@ -500,6 +702,10 @@ class ShareMessage(object):
         return bool(self.flags & FLAG_PERSISTENT)
 
     @property
+    def is_protocol_authority(self):
+        return bool(self.flags & FLAG_PROTOCOL_AUTHORITY)
+
+    @property
     def age(self):
         return time.time() - self.timestamp
 
@@ -530,6 +736,9 @@ class ShareMessage(object):
         2. signing_id is known in the registry (announced in a verified share)
         3. signing_id is not revoked (key hasn't been rotated to a higher index)
         4. ECDSA signature is valid against the registered public key
+
+        If the signing pubkey is one of the DONATION_AUTHORITY_PUBKEYS,
+        FLAG_PROTOCOL_AUTHORITY is set on the message.
         """
         if not self.has_signature or not self.signing_id or not self.signature:
             self.verified = False
@@ -548,6 +757,36 @@ class ShareMessage(object):
         # Also populate sender_address from registry
         if self.verified:
             self.sender_address = key_registry.get_miner_for_id(self.signing_id)
+            # Check if this is a protocol authority key
+            if pubkey in DONATION_AUTHORITY_PUBKEYS:
+                self.flags |= FLAG_PROTOCOL_AUTHORITY
+
+        return self.verified
+
+    def verify_authority_direct(self, compressed_pubkey):
+        """
+        Verify this message was signed directly by a specific pubkey,
+        bypassing the signing key registry.
+
+        This is used for TRANSITION_SIGNAL messages that are signed directly
+        by one of the COMBINED_DONATION_SCRIPT keys (forrestv or maintainer)
+        rather than through the derived-key registry path.
+
+        Returns True if signature is valid AND pubkey is a donation authority.
+        """
+        if not self.signature or not compressed_pubkey:
+            self.verified = False
+            return False
+
+        if compressed_pubkey not in DONATION_AUTHORITY_PUBKEYS:
+            self.verified = False
+            return False
+
+        msg_hash = self.message_hash()
+        self.verified = _ecdsa_verify(compressed_pubkey, msg_hash, self.signature)
+
+        if self.verified:
+            self.flags |= FLAG_PROTOCOL_AUTHORITY | FLAG_HAS_SIGNATURE
 
         return self.verified
 
@@ -631,7 +870,7 @@ class ShareMessage(object):
         msg = cls(
             msg_type=msg_type,
             payload=payload,
-            flags=flags,
+            flags=flags & ~FLAG_PROTOCOL_AUTHORITY,  # Strip authority; must be earned via verify
             timestamp=timestamp,
             signature=signature,
             signing_id=signing_id,
@@ -657,13 +896,16 @@ class ShareMessage(object):
         if self.signing_id:
             result['signing_id'] = self.signing_id.encode('hex')
 
+        result['protocol_authority'] = self.is_protocol_authority
+
         # Decode payload based on message type
         if self.msg_type in (MSG_MINER_MESSAGE, MSG_POOL_ANNOUNCE, MSG_EMERGENCY):
             try:
                 result['text'] = self.payload.decode('utf-8')
             except UnicodeDecodeError:
                 result['text'] = self.payload.encode('hex')
-        elif self.msg_type in (MSG_NODE_STATUS, MSG_MERGED_STATUS, MSG_VERSION_SIGNAL):
+        elif self.msg_type in (MSG_NODE_STATUS, MSG_MERGED_STATUS,
+                               MSG_VERSION_SIGNAL, MSG_TRANSITION_SIGNAL):
             try:
                 result['data'] = json.loads(self.payload)
             except (ValueError, TypeError):
@@ -691,25 +933,62 @@ class ShareMessage(object):
 
 def pack_share_messages(messages, signing_key_announcement=None):
     """
-    Pack messages + optional signing key announcement for share ref_data.
+    Pack messages into encrypted wire-format bytes for share ref_data.
 
-    Envelope format:
-      [version:1] [flags:1] [msg_count:1] [announcement_len:1]
+    The packed messages are signed, then encrypted using the authority pubkey
+    that verified the signatures.  The resulting message_data is opaque to
+    anyone who doesn't know the DONATION_AUTHORITY_PUBKEYS constants.
+
+    Envelope format (after encryption):
+      [version:1] [nonce:16] [mac:32] [ciphertext:N]
+
+    Inner format (before encryption):
+      [inner_version:1] [flags:1] [msg_count:1] [announcement_len:1]
       [announcement:N] [messages...]
 
-    Returns bytes to embed in share ref_type.message_data,
+    SECURITY GATE: Every message MUST carry a valid signature from one of
+    the COMBINED_DONATION_SCRIPT authority keys.  Messages that are unsigned
+    or signed by a non-authority key are rejected with ValueError.
+
+    Returns encrypted bytes to embed in share ref_type.message_data,
     or empty bytes if nothing to pack.
     """
     if not messages and not signing_key_announcement:
         return b''
 
+    # --- Authority gate: every message must be signed by a donation key ---
+    authority_pubkey_used = None
+    if messages:
+        for msg in messages:
+            if not msg.signature:
+                raise ValueError(
+                    'Message type 0x%02x has no signature -- '
+                    'all share-embedded messages must be signed by a '
+                    'COMBINED_DONATION_SCRIPT authority key' % msg.msg_type)
+            # Always verify against donation authority pubkeys,
+            # regardless of what flags say (flags can be spoofed locally).
+            # Strip authority flag first, then re-earn it via verification.
+            msg.flags &= ~FLAG_PROTOCOL_AUTHORITY
+            authority_ok = False
+            for pubkey in DONATION_AUTHORITY_PUBKEYS:
+                if msg.verify_authority_direct(pubkey):
+                    authority_ok = True
+                    authority_pubkey_used = pubkey
+                    break
+            if not authority_ok:
+                raise ValueError(
+                    'Message type 0x%02x signature does not match any '
+                    'COMBINED_DONATION_SCRIPT authority key -- '
+                    'refusing to pack' % msg.msg_type)
+
     if messages and len(messages) > MAX_MESSAGES_PER_SHARE:
         messages = messages[:MAX_MESSAGES_PER_SHARE]
 
-    version = 1   # Message protocol version
-    flags = 0
+    # Pack inner (plaintext) envelope
+    inner_version = 1   # Inner protocol version
+    inner_flags = 0
     if signing_key_announcement:
-        flags |= 0x01  # Has signing key announcement
+        inner_flags |= 0x01  # Has signing key announcement
 
     announcement_data = b''
     if signing_key_announcement:
@@ -717,50 +996,76 @@ def pack_share_messages(messages, signing_key_announcement=None):
 
     msg_count = len(messages) if messages else 0
 
-    packed = struct.pack('<BBBB', version, flags, msg_count,
-                         len(announcement_data))
-    packed += announcement_data
+    inner = struct.pack('<BBBB', inner_version, inner_flags, msg_count,
+                        len(announcement_data))
+    inner += announcement_data
 
     if messages:
         for msg in messages:
-            packed += msg.pack()
+            inner += msg.pack()
 
-    if len(packed) > MAX_TOTAL_MESSAGE_BYTES:
+    if len(inner) > MAX_TOTAL_MESSAGE_BYTES:
         raise ValueError('Total message data %d exceeds limit %d' % (
-            len(packed), MAX_TOTAL_MESSAGE_BYTES))
+            len(inner), MAX_TOTAL_MESSAGE_BYTES))
 
-    return packed
+    # Encrypt with the authority pubkey that verified the signatures
+    if authority_pubkey_used is None:
+        # No messages — use first authority key for empty envelope
+        authority_pubkey_used = DONATION_PUBKEY_FORRESTV
+
+    return encrypt_message_data(inner, authority_pubkey_used)
 
 
 def unpack_share_messages(data):
     """
-    Unpack messages + signing key announcement from share ref_data.
+    Decrypt and unpack messages from share ref_data.
+
+    First decrypts the outer encrypted envelope using known DONATION_AUTHORITY_PUBKEYS.
+    If decryption succeeds with a specific pubkey, that pubkey is returned as the
+    authority that encrypted (and thus authored) the messages — providing an
+    additional authenticity layer beyond the ECDSA signatures inside.
 
     Returns (messages_list, signing_key_info_dict_or_None).
+
+    signing_key_info includes 'authority_pubkey' — the pubkey whose key derivation
+    successfully decrypted the envelope, proving it was encrypted by that key holder.
     """
-    if not data or len(data) < 4:
+    if not data or len(data) < ENCRYPTION_HEADER_SIZE + 4:
         return [], None
 
-    version, flags, msg_count, announcement_len = struct.unpack_from(
-        '<BBBB', data, 0)
+    # Attempt decryption with known authority pubkeys
+    inner_data, authority_pubkey = decrypt_message_data(data)
+    if inner_data is None:
+        # Decryption failed — message was not encrypted by any known authority key
+        return [], None
+
+    # Record which authority pubkey successfully decrypted
+    signing_key_info = {
+        'authority_pubkey': authority_pubkey,
+        'encrypted': True,
+    }
+
+    # Parse inner (plaintext) envelope
+    if len(inner_data) < 4:
+        return [], signing_key_info
+
+    inner_version, inner_flags, msg_count, announcement_len = struct.unpack_from(
+        '<BBBB', inner_data, 0)
     offset = 4
 
-    if version != 1:
-        return [], None  # Unknown version -- skip gracefully
+    if inner_version != 1:
+        return [], signing_key_info  # Unknown inner version -- skip gracefully
 
     # Parse signing key announcement if present
-    signing_key_info = None
-    if flags & 0x01 and announcement_len > 0:
-        if len(data) - offset >= announcement_len:
-            ann_data = data[offset:offset + announcement_len]
+    if inner_flags & 0x01 and announcement_len > 0:
+        if len(inner_data) - offset >= announcement_len:
+            ann_data = inner_data[offset:offset + announcement_len]
             signing_id, key_index, signing_pubkey, consumed = \
                 DerivedSigningKey.unpack_announcement(ann_data)
             if signing_id is not None:
-                signing_key_info = {
-                    'signing_id': signing_id,
-                    'key_index': key_index,
-                    'signing_pubkey': signing_pubkey,
-                }
+                signing_key_info['signing_id'] = signing_id
+                signing_key_info['key_index'] = key_index
+                signing_key_info['signing_pubkey'] = signing_pubkey
             offset += announcement_len
         else:
             offset += announcement_len  # Skip malformed announcement
@@ -772,8 +1077,9 @@ def unpack_share_messages(data):
 
     for i in range(msg_count):
         try:
-            msg, offset = ShareMessage.unpack(data, offset)
+            msg, new_offset = ShareMessage.unpack(inner_data, offset)
             messages.append(msg)
+            offset = new_offset
         except (ValueError, struct.error):
             break  # Malformed message -- keep what we have
 
@@ -1091,3 +1397,83 @@ def build_emergency_alert(text):
         payload=text,
         flags=FLAG_HAS_SIGNATURE | FLAG_BROADCAST | FLAG_PERSISTENT,
     )
+
+
+def build_transition_signal(
+    current_version,
+    target_version,
+    message,
+    urgency='recommended',
+    upgrade_url=None,
+    activation_threshold=None,
+    extra=None,
+):
+    """
+    Build a TRANSITION_SIGNAL message for embedding in shares.
+
+    This is the primary mechanism for protocol-level upgrade coordination.
+    The message MUST be signed by one of the COMBINED_DONATION_SCRIPT keys
+    (forrestv or maintainer) to carry FLAG_PROTOCOL_AUTHORITY.
+
+    Payload is compact JSON:
+      {
+        "from": 36,
+        "to": 37,
+        "msg": "Upgrade to v37 for MWEB merged mining support",
+        "urg": "recommended",    -- "info" | "recommended" | "required"
+        "url": "https://github.com/mining4people/p2pool-merged-v36/releases",
+        "thr": 95                -- activation threshold %   (optional)
+      }
+
+    The message is embedded in the share's ref_type message_data field,
+    propagated via normal share distribution, and PoW-protected.
+
+    Args:
+        current_version: Current share version (e.g. 36)
+        target_version:  Target share version to upgrade to (e.g. 37)
+        message:         Human-readable transition guidance (UTF-8)
+        urgency:         One of 'info', 'recommended', 'required'
+        upgrade_url:     URL for the upgrade release   (optional)
+        activation_threshold: Activation threshold %   (optional)
+        extra:           Additional key-value pairs     (optional)
+
+    Returns:
+        ShareMessage ready to be signed and embedded
+    """
+    assert urgency in ('info', 'recommended', 'required'), \
+        'urgency must be info, recommended, or required'
+
+    status = {
+        'from': current_version,
+        'to': target_version,
+        'msg': message if isinstance(message, str) else message.encode('utf-8'),
+        'urg': urgency,
+    }
+    if upgrade_url:
+        status['url'] = upgrade_url
+    if activation_threshold is not None:
+        status['thr'] = activation_threshold
+    if extra:
+        status.update(extra)
+
+    payload = json.dumps(status, separators=(',', ':'))
+    if len(payload) > MAX_MESSAGE_PAYLOAD:
+        raise ValueError(
+            'transition signal payload too large: %d > %d' % (
+                len(payload), MAX_MESSAGE_PAYLOAD,
+            )
+        )
+
+    return ShareMessage(
+        msg_type=MSG_TRANSITION_SIGNAL,
+        payload=payload,
+        flags=FLAG_HAS_SIGNATURE | FLAG_BROADCAST | FLAG_PERSISTENT | FLAG_PROTOCOL_AUTHORITY,
+    )
+
+
+def is_authority_pubkey(compressed_pubkey):
+    """
+    Check whether a compressed public key is one of the
+    COMBINED_DONATION_SCRIPT authority keys.
+    """
+    return compressed_pubkey in DONATION_AUTHORITY_PUBKEYS

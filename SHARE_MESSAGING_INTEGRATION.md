@@ -9,8 +9,9 @@ touches four files and requires no changes to the P2P protocol.
 ## Integration Status
 
 - [x] **Phase 0**: Core module (`share_messages.py`) — DONE
-- [ ] **Phase 1**: V36 ref_type extension (`data.py`) — adds `message_data` field
-- [ ] **Phase 2**: Work generation (`work.py`) — embeds queued messages in new shares
+- [x] **Phase 1**: V36 ref_type extension (`data.py`) — DONE (message_data field, ref_hash, strict validation)
+- [x] **Phase 1.5**: Transition messaging (`main.py`, `work.py`, `data.py`) — DONE (authority-signed transition signals)
+- [ ] **Phase 2**: General work generation (`work.py`) — embeds queued miner messages in new shares
 - [ ] **Phase 3**: Web API (`web.py`) — endpoints for viewing/sending messages
 - [ ] **Phase 4**: Dashboard BBS UI (`web-static/`) — bulletin board message viewer
 - [ ] **Phase 5**: Key management — offline derivation tool + `--signing-key` flag
@@ -87,56 +88,253 @@ def get_ref_hash(cls, net, share_info, ref_merkle_link, message_data=None):
         ref_merkle_link))
 ```
 
-### 1.3 Process messages during share verification
+### 1.3 Process messages during share verification — STRICT ENFORCEMENT
 
 **File**: `p2pool/data.py`  
-**Location**: `BaseShare.check()`, around line 790
+**Location**: `BaseShare.check()`, after `generate_transaction()` call
 
-After the existing `generate_transaction` call in `check()`, add message
-processing:
+**IMPORTANT**: The actual implementation uses **strict enforcement** — shares
+carrying invalid `message_data` are REJECTED with `PeerMisbehavingError`.
+This prevents malicious miners from embedding fake transition signals.
 
 ```python
 # After gentx verification succeeds:
-# Process any messages embedded in this share
-if self.VERSION >= 36 and hasattr(self, '_message_data') and self._message_data:
-    from p2pool.share_messages import unpack_share_messages
-    try:
-        messages, signing_key_info = unpack_share_messages(self._message_data)
-        # Messages will be processed by the message store in the node
-        self._parsed_messages = messages
-        self._signing_key_info = signing_key_info
-    except Exception:
-        self._parsed_messages = []
-        self._signing_key_info = None
+# V36+: Validate share-embedded messages (transition signals, etc.)
+#
+# STRICT POLICY: A share that carries message_data MUST pass both:
+#   1. Decryption — encrypted by a COMBINED_DONATION_SCRIPT authority key
+#   2. Signature  — each inner message signed by the same authority key
+#
+# If message_data is present but fails either check, THE SHARE IS REJECTED.
+if self.VERSION >= 36 and self._message_data:
+    from p2pool.share_messages import (
+        unpack_share_messages, DONATION_AUTHORITY_PUBKEYS,
+        FLAG_PROTOCOL_AUTHORITY,
+    )
+    messages, signing_key_info = unpack_share_messages(self._message_data)
+    self._signing_key_info = signing_key_info
+
+    if signing_key_info is None:
+        raise p2p.PeerMisbehavingError(
+            'share carries message_data that failed decryption '
+            'against all COMBINED_DONATION_SCRIPT authority keys')
+
+    authority_pubkey = signing_key_info.get('authority_pubkey', b'')
+    if authority_pubkey not in DONATION_AUTHORITY_PUBKEYS:
+        raise p2p.PeerMisbehavingError(
+            'share message_data decrypted but authority_pubkey '
+            'not in COMBINED_DONATION_SCRIPT')
+
+    if not messages:
+        raise p2p.PeerMisbehavingError(
+            'share message_data decrypted but contains no valid messages')
+
+    for msg in messages:
+        if not msg.signature:
+            raise p2p.PeerMisbehavingError(
+                'share contains unsigned message (type 0x%02x) '
+                'inside encrypted envelope' % msg.msg_type)
+        if not msg.verify_authority_direct(authority_pubkey):
+            raise p2p.PeerMisbehavingError(
+                'share contains message (type 0x%02x) with invalid '
+                'signature' % msg.msg_type)
+        msg.flags |= FLAG_PROTOCOL_AUTHORITY
+
+    self._parsed_messages = messages
 ```
+
+**Key differences from the original plan:**
+- Invalid message_data causes share REJECTION (not silent ignore)
+- Only authority-encrypted+signed messages are accepted
+- Each inner message's signature is verified against the decryption key
+- `FLAG_PROTOCOL_AUTHORITY` is earned via verification, never trusted from wire
 
 ### 1.4 Store message_data during share __init__
 
 **File**: `p2pool/data.py`  
-**Location**: `BaseShare.__init__()`, around line 654
+**Location**: `BaseShare.__init__()`, after `merged_addresses` block
 
-Add to the `__init__` method to preserve message_data from the share contents:
+**DONE** — `_message_data`, `_parsed_messages`, and `_signing_key_info`
+are stored during initialization and added to `__slots__`:
 
 ```python
-# After existing field assignments:
+# V36+: Read message_data from ref_type contents (for share-embedded messaging)
 if self.VERSION >= 36:
-    self._message_data = contents.get('message_data', b'')
+    self._message_data = contents.get('message_data', None)
 else:
-    self._message_data = b''
+    self._message_data = None
+self._parsed_messages = []
+self._signing_key_info = None
 ```
 
-This also requires adding `_message_data` to the `__slots__` declaration.
+The `__slots__` declaration now includes:
+```python
+__slots__ = '... _message_data _parsed_messages _signing_key_info'.split(' ')
+```
 
-### 1.5 Clear cached_types
+### 1.5 MergedMiningShare.get_dynamic_types() — message_data in both types
 
-**CRITICAL**: `MergedMiningShare.cached_types` must be `None` for the new
-`ref_type` to take effect. Since this is a code change (not runtime), this
-happens automatically on restart. But if hot-reloading is ever used, the
-cache must be explicitly cleared.
+**DONE** — `message_data` is added to both the share contents type AND the ref_type:
+
+```python
+# In get_dynamic_types():
+# Share contents type:
+t['share_type'] = pack.ComposedType([
+    ...
+    ('ref_merkle_link', pack.ComposedType([...]),
+    ('message_data', pack.PossiblyNoneType(b'', pack.VarStrType())),  # NEW
+])
+
+# ref_type (hashed into ref_hash):
+t['ref_type'] = pack.ComposedType([
+    ('identifier', pack.FixedStrType(64//8)),
+    ('share_info', t['share_info_type']),
+    ('message_data', pack.PossiblyNoneType(b'', pack.VarStrType())),  # NEW
+])
+```
+
+### 1.6 generate_transaction() — defense-in-depth validation
+
+**DONE** — `generate_transaction()` now accepts `message_data=None` parameter
+and performs its own validation before embedding:
+
+```python
+# Before building gentx, re-validate message_data even though work.py already checked
+if message_data is not None and cls.VERSION >= 36:
+    _msgs, _info = _unpack_msgs(message_data)
+    if not _msgs or _info is None:
+        print >> sys.stderr, '[TRANSITION MSG] REJECTED: failed decryption'
+        message_data = None
+    else:
+        _auth_pk = _info.get('authority_pubkey', b'')
+        for _m in _msgs:
+            if not _m.signature or not _m.verify_authority_direct(_auth_pk):
+                print >> sys.stderr, '[TRANSITION MSG] REJECTED: invalid signature'
+                message_data = None
+                break
+```
+
+This defense-in-depth ensures even if `work.py` passes bad data, it won't
+be embedded in a share.
+
+### 1.7 get_warnings() — transition signal scanning
+
+**DONE** — `get_warnings()` now scans recent shares for authority-signed
+transition signals and displays them as warnings:
+
+```python
+# Scan recent shares for authority-signed transition signals
+from p2pool.share_messages import MSG_TRANSITION_SIGNAL, FLAG_PROTOCOL_AUTHORITY
+scan_depth = min(net.CHAIN_LENGTH, 60*60 // net.SHARE_PERIOD, tracker.get_height(best_share))
+for share in tracker.get_chain(best_share, scan_depth):
+    for msg in share._parsed_messages:
+        if msg.msg_type == MSG_TRANSITION_SIGNAL and (msg.flags & FLAG_PROTOCOL_AUTHORITY):
+            data = json.loads(msg.payload)
+            urgency = data.get('urg', 'info')
+            prefix = {
+                'required': 'URGENT UPGRADE REQUIRED',
+                'recommended': 'Upgrade recommended',
+                'info': 'Upgrade info',
+            }.get(urgency, 'Upgrade info')
+            text = data.get('msg', 'Upgrade available')
+            url = data.get('url', '')
+            url_suffix = (' — %s' % url) if url else ''
+            res.append('[%s] v%s→v%s: %s%s' % (
+                prefix, data.get('from', '?'), data.get('to', '?'), text, url_suffix))
+```
+
+Transition signals appear as P2Pool dashboard warnings alongside version
+mismatch and stale share warnings. Urgency levels:
+- `required` → `URGENT UPGRADE REQUIRED`
+- `recommended` → `Upgrade recommended`
+- `info` → `Upgrade info`
+
+### 1.8 get_warnings() — URL update
+
+**DONE** — The upgrade notice URL was updated from jtoomim's repository to
+the current maintainer's release page:
+
+```
+https://github.com/mining4people/p2pool-merged-v36/releases
+```
 
 ---
 
-## Phase 2: Work Generation (work.py)
+## Phase 1.5: Transition Messaging (main.py, work.py) — DONE
+
+Before general messaging (Phase 2), we implemented the transition signal
+pipeline: authority key holders create signed+encrypted messages offline,
+node operators embed them in shares via `--transition-message`.
+
+### 1.5.1 CLI argument (main.py) — DONE
+
+**File**: `p2pool/main.py`
+
+```python
+msg_group = parser.add_argument_group('transition messaging',
+    'Embed protocol transition signals in V36 shares. '
+    'Messages are PoW-protected and propagated via normal share distribution. '
+    'Only messages signed by a COMBINED_DONATION_SCRIPT key (forrestv or maintainer) '
+    'are treated as authoritative by other nodes.')
+msg_group.add_argument('--transition-message',
+    help='Pre-built encrypted message hex string (or path to file containing one). '
+         'Generated by the authority key holder using create_transition_message.py. '
+         'No private key is needed on the operator node.',
+    type=str, action='store', default=None, dest='transition_message')
+```
+
+### 1.5.2 Message preparation (work.py) — DONE
+
+**File**: `p2pool/work.py`  
+**Method**: `WorkerBridge._prepare_transition_message()` (static method)
+
+Called once at startup. Decodes the hex string (or reads from file),
+decrypts against known authority pubkeys, verifies all inner signatures,
+and stores the validated `message_data` bytes:
+
+```python
+self.transition_message_data = self._prepare_transition_message(args)
+```
+
+Validation pipeline:
+1. Accept hex string or file path → decode to bytes
+2. `unpack_share_messages()` → decrypt with authority pubkeys
+3. Verify each message signature with `verify_authority_direct()`
+4. Log transition details (from/to version, urgency, message text)
+5. Store validated bytes or `None` (on failure, node starts without message)
+
+### 1.5.3 Embedding in shares (work.py) — DONE
+
+**File**: `p2pool/work.py`  
+**Location**: `get_work()`, in the `generate_transaction()` call
+
+```python
+share_type.generate_transaction(
+    ...
+    message_data=self.transition_message_data if v36_active else None,
+)
+```
+
+The pre-validated `message_data` is passed to every share the node mines
+while V36 is active. No per-share signing or encryption needed — the
+authority key holder already did that offline.
+
+### 1.5.4 Standalone creation tool — DONE
+
+**NEW FILE**: `create_transition_message.py` (848 lines, Python 3)
+
+Standalone tool for authority key holders. See
+[SHARE_MESSAGING_API.md](SHARE_MESSAGING_API.md#authority-message-creation-tool)
+for full documentation.
+
+Commands: `create`, `verify`, `create-keystore`
+
+---
+
+## Phase 2: General Work Generation (work.py) — TODO
+
+Phase 2 extends the transition-only messaging (Phase 1.5) to support
+general miner messaging (chat, announcements, status, etc.).
 
 ### 2.1 Access pending messages
 
@@ -150,25 +348,17 @@ self.pending_messages = []      # Messages queued for next share
 self.signing_key = None         # DerivedSigningKey, set during startup
 ```
 
-### 2.2 Embed messages in share generation
+### 2.2 Embed general messages in share generation
 
 **File**: `p2pool/work.py`  
 **Location**: Around line 1237, after `generate_transaction()` call
 
-The messages need to be packed and passed to `generate_transaction()` so they
-can be included in `ref_hash`. However, since messages are in `ref_type` (not
-`share_info_type`), they're added at the `get_ref_hash()` level, not inside
-`generate_transaction()`.
-
-**Approach**: After `generate_transaction()` returns `share_info`, compute
-the message_data and include it in `get_share()`:
+Similar to Phase 1.5's transition_message_data, but dynamically packs
+queued miner messages per-share:
 
 ```python
-# After generate_transaction returns:
-share_info, gentx, other_transaction_hashes, get_share = share_type.generate_transaction(...)
-
-# Prepare message data for ref_hash
-message_data = b''
+# Build message_data for this share
+message_data = self.transition_message_data  # Authority transition first
 if share_type.VERSION >= 36 and self.pending_messages:
     from p2pool.share_messages import pack_share_messages
     
@@ -177,12 +367,9 @@ if share_type.VERSION >= 36 and self.pending_messages:
         if msg.has_signature and self.signing_key:
             msg.sign(self.signing_key)
     
-    # Pack announcement + messages
     announcement = self.signing_key.pack_announcement() if self.signing_key else None
     message_data = pack_share_messages(self.pending_messages, announcement)
-    self.pending_messages = []  # Clear queue
-
-# Pass message_data through to get_share for ref_hash computation
+    self.pending_messages = []
 ```
 
 ### 2.3 Auto-generate NODE_STATUS messages
@@ -697,14 +884,27 @@ Step 9: Deploy private messaging (Phase 7)
 - [x] `share_messages.py` unit tests: announcement round-trip
 - [x] `share_messages.py` unit tests: message store (ALL 8 TESTS PASS on PyPy 2.7)
 
-### Phase 1: data.py integration
+### Phase 1: data.py integration — IMPLEMENTED
+- [x] message_data added to MergedMiningShare ref_type and share contents type
+- [x] get_ref_hash() accepts message_data parameter, includes in hash for V36+
+- [x] __init__() stores _message_data, _parsed_messages, _signing_key_info
+- [x] check() performs strict validation — PeerMisbehavingError on invalid message_data
+- [x] generate_transaction() accepts message_data, defense-in-depth validation
+- [x] get_warnings() scans sharechain for transition signals, displays as warnings
 - [ ] Integration test: ref_hash unchanged when message_data is default (b'')
 - [ ] Integration test: ref_hash changes when message_data is non-empty
-- [ ] Integration test: share with messages passes verification
-- [ ] Integration test: share with tampered messages fails verification
+- [ ] Integration test: share with valid authority messages passes verification
+- [ ] Integration test: share with tampered/unsigned messages is REJECTED
 
-### Phase 2: work.py integration
-- [ ] Integration test: messages propagate between two nodes via shares
+### Phase 1.5: Transition messaging — IMPLEMENTED
+- [x] --transition-message CLI argument in main.py
+- [x] WorkerBridge._prepare_transition_message() validates hex at startup
+- [x] message_data passed to generate_transaction() when v36_active
+- [x] create_transition_message.py standalone Python 3 tool (create, verify, create-keystore)
+- [ ] End-to-end test: authority creates message, operator embeds, other nodes see warning
+
+### Phase 2: General work.py integration — TODO
+- [ ] Integration test: miner messages propagate between two nodes via shares
 - [ ] End-to-end test: miner sends message, other node's dashboard shows it
 - [ ] Stress test: MAX_MESSAGES_PER_SHARE messages per share
 - [ ] Stress test: MAX_MESSAGE_HISTORY messages in store

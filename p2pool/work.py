@@ -189,6 +189,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.worker_fee = args.worker_fee
         self.merged_operator_address = getattr(args, 'merged_operator_address', None)
 
+        # V36 transition messaging: pre-packed message_data for embedding in shares
+        self.transition_message_data = self._prepare_transition_message(args)
+
 
         self.net = self.node.net.PARENT
         self.running = True
@@ -934,6 +937,88 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         return v36_active, v36_signaling
 
+    @staticmethod
+    def _prepare_transition_message(args):
+        """
+        Prepare pre-packed message_data for embedding transition signals in V36 shares.
+        
+        Called once at startup from --transition-message CLI arg.
+        Returns packed bytes ready for generate_transaction(), or None if not configured.
+        
+        The operator provides a hex string (or file containing one) that was
+        pre-built and encrypted offline by the authority key holder using
+        create_transition_message.py.  This method simply decodes and validates
+        that the blob decrypts correctly against a known authority pubkey.
+        
+        No private key is needed on the operator node.
+        """
+        transition_msg = getattr(args, 'transition_message', None)
+        
+        if not transition_msg:
+            return None
+        
+        import os
+        
+        # Accept either a file path or an inline hex string
+        raw_hex = transition_msg.strip()
+        if os.path.isfile(raw_hex):
+            with open(raw_hex) as f:
+                raw_hex = f.read().strip()
+        
+        # Decode hex → bytes
+        try:
+            message_data = raw_hex.decode('hex')
+        except (ValueError, TypeError):
+            print >> sys.stderr, '[TRANSITION] ERROR: --transition-message must be a hex string or path to a file containing one'
+            print >> sys.stderr, '[TRANSITION] Get the hex string from the authority key holder (create_transition_message.py)'
+            return None
+        
+        if len(message_data) < 50:  # minimum: header(49) + at least 1 byte
+            print >> sys.stderr, '[TRANSITION] ERROR: message_data too short (%d bytes)' % len(message_data)
+            return None
+        
+        # Validate: must decrypt against a known authority pubkey
+        from p2pool.share_messages import unpack_share_messages, DONATION_AUTHORITY_PUBKEYS
+        try:
+            messages, signing_key_info = unpack_share_messages(message_data)
+        except Exception as e:
+            print >> sys.stderr, '[TRANSITION] ERROR: failed to unpack message_data -- %s' % e
+            return None
+        
+        if signing_key_info is None or not messages:
+            print >> sys.stderr, '[TRANSITION] ERROR: message_data failed decryption -- not a valid authority-encrypted message'
+            print >> sys.stderr, '[TRANSITION] Make sure you got the correct hex string from the authority key holder'
+            return None
+        
+        authority_pubkey = signing_key_info.get('authority_pubkey', b'')
+        if authority_pubkey not in DONATION_AUTHORITY_PUBKEYS:
+            print >> sys.stderr, '[TRANSITION] ERROR: message decrypted but not from a known authority key'
+            return None
+        
+        # Verify signatures
+        for msg in messages:
+            if not msg.signature or not msg.verify_authority_direct(authority_pubkey):
+                print >> sys.stderr, '[TRANSITION] ERROR: message (type 0x%02x) has invalid signature' % msg.msg_type
+                return None
+        
+        # Show what we're embedding
+        import json as _json
+        for msg in messages:
+            try:
+                data = _json.loads(msg.payload)
+                print '[TRANSITION] Validated transition signal: v%s->v%s urg=%s (%d bytes)' % (
+                    data.get('from', '?'), data.get('to', '?'),
+                    data.get('urg', '?'), len(message_data))
+                print '[TRANSITION] Message: %s' % data.get('msg', '')
+            except (ValueError, KeyError):
+                print '[TRANSITION] Validated message type 0x%02x (%d bytes)' % (
+                    msg.msg_type, len(message_data))
+        
+        print '[TRANSITION] Authority key: %s...' % authority_pubkey.encode('hex')[:16]
+        print '[TRANSITION] Will embed in all mined V36 shares'
+        
+        return message_data
+
     def get_user_details(self, username):
         # Debug: Uncomment to trace user details lookup
         #print '[DEBUG] get_user_details called with username:', repr(username)
@@ -1443,6 +1528,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 base_subsidy=self.current_work.value['subsidy'],
                 v36_active=v36_active,  # Pass V36 status for donation script switch
                 merged_addresses=merged_addresses_for_share,  # Validated merged chain addresses
+                message_data=self.transition_message_data if v36_active else None,
             )
 
         packed_gentx = bitcoin_data.tx_type.pack(gentx)

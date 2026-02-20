@@ -43,9 +43,62 @@ The `message_data` field:
 - Included in `ref_hash` computation → PoW-protected
 - NOT included in coinbase/gentx → never written to blockchain
 
-## Message Envelope Format
+**Note**: `message_data` is also added to the share contents type (not just
+ref_type) so it is persisted and transmitted alongside the share. Both
+additions are V36-specific — `MergedMiningShare.get_dynamic_types()` adds
+them only when `cls.VERSION >= 36`. Older share versions are unaffected.
 
-The `message_data` bytes contain a structured envelope:
+## Encrypted Envelope Format
+
+All `message_data` in V36 shares is encrypted using the authority pubkey
+encryption scheme defined in `share_messages.py`. The encryption uses
+`HMAC-SHA256` key derivation + XOR stream cipher + `HMAC-SHA256` MAC.
+
+### Outer Encrypted Envelope
+
+```
+Offset  Size  Field               Description
+------  ----  ------------------  ------------------------------------------
+0       1     version             Encryption version (0x01)
+1       16    nonce               Random 16-byte nonce
+17      32    mac                 HMAC-SHA256(enc_key, ciphertext)
+49      N     ciphertext          Encrypted inner envelope
+```
+
+### Encryption/Decryption
+
+```
+Key derivation:
+  enc_key = HMAC-SHA256(key=authority_pubkey, msg=nonce)    # 32 bytes
+
+Encrypt:
+  stream = SHA256(enc_key||0) || SHA256(enc_key||1) || ...  # counter-mode
+  ciphertext = XOR(inner_data, stream)
+  mac = HMAC-SHA256(enc_key, ciphertext)
+
+Decrypt (receiver):
+  For each pubkey in DONATION_AUTHORITY_PUBKEYS:
+    enc_key = HMAC-SHA256(pubkey, nonce)
+    mac_check = HMAC-SHA256(enc_key, ciphertext)
+    if mac_check == mac:
+      stream = SHA256(enc_key||0) || SHA256(enc_key||1) || ...
+      inner_data = XOR(ciphertext, stream)
+      → decrypted by this authority key
+```
+
+### Authority Pubkeys
+
+The encryption/decryption keys are derived from the hardcoded
+`COMBINED_DONATION_SCRIPT` pubkeys:
+
+| Key Holder | Compressed Pubkey |
+|---|---|
+| forrestv | `03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1` |
+| maintainer | `02fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a` |
+
+## Inner Message Envelope Format
+
+After decryption, the inner `message_data` bytes contain:
 
 ```
 Offset  Size  Field               Description
@@ -130,27 +183,41 @@ Offset  Size  Field            Description
 ### Message Types
 
 ```
-Value  Name            Signed?     Persistent?  Description
------  --------------  ----------  -----------  ---------------------------
-0x01   NODE_STATUS     Optional    No           Node health report
-0x02   MINER_MESSAGE   Required    Yes          Miner-to-miner text
-0x03   POOL_ANNOUNCE   Required    Yes          Operator announcement
-0x04   VERSION_SIGNAL  Optional    No           Extended version info
-0x05   MERGED_STATUS   Optional    No           Merged chain status
-0x10   EMERGENCY       Required    Yes          Security alert
+Value  Name              Signed?     Persistent?  Description
+-----  ----------------  ----------  -----------  ---------------------------
+0x01   NODE_STATUS       Optional    No           Node health report
+0x02   MINER_MESSAGE     Required    Yes          Miner-to-miner text
+0x03   POOL_ANNOUNCE     Required    Yes          Operator announcement
+0x04   VERSION_SIGNAL    Optional    No           Extended version info
+0x05   MERGED_STATUS     Optional    No           Merged chain status
+0x10   EMERGENCY         Required    Yes          Security alert
+0x20   TRANSITION_SIGNAL Required    Yes          Protocol transition alert
 
-0x00, 0x06-0x0F, 0x11-0xFF: Reserved for future use
+0x00, 0x06-0x0F, 0x11-0x1F, 0x21-0xFF: Reserved for future use
 ```
 
 ### Message Flags
 
 ```
-Bit 0 (0x01): FLAG_HAS_SIGNATURE  — Message is signed
-Bit 1 (0x02): FLAG_BROADCAST      — Relay to peers
-Bit 2 (0x04): FLAG_PERSISTENT     — Store in history
-Bit 3 (0x08): FLAG_PRIVATE        — Payload is ECDH-encrypted for a specific recipient
+Bit 0 (0x01): FLAG_HAS_SIGNATURE      — Message is signed
+Bit 1 (0x02): FLAG_BROADCAST          — Relay to peers
+Bit 2 (0x04): FLAG_PERSISTENT         — Store in history
+Bit 3 (0x08): FLAG_PROTOCOL_AUTHORITY — Signed by donation authority key
 Bits 4-7:     Reserved (must be 0)
 ```
+
+**FLAG_PROTOCOL_AUTHORITY (0x08)**: This flag is NEVER trusted from the wire.
+It is stripped during unpacking and re-earned only by passing
+`verify_authority_direct()` against one of the `DONATION_AUTHORITY_PUBKEYS`.
+This prevents spoofing — a malicious sender cannot simply set the flag.
+
+Common flag combinations:
+
+| Flags | Meaning |
+|-------|---------|
+| `0x07` | Signed + Broadcast + Persistent (typical chat message) |
+| `0x0F` | Authority-signed + Broadcast + Persistent (transition signal) |
+| `0x02` | Unsigned + Broadcast (anonymous status report) |
 
 ### Unsigned Messages
 
@@ -298,6 +365,38 @@ UTF-8 encoded text, max 220 bytes.
 CRITICAL: v36 activation bug found. Upgrade to commit abc1234 immediately.
 ```
 
+### TRANSITION_SIGNAL (0x20)
+
+Compact JSON payload, authority-signed. Created offline using
+`create_transition_message.py` by a COMBINED_DONATION_SCRIPT key holder.
+
+```json
+{
+  "from": "36",
+  "to": "37",
+  "msg": "Upgrade to V37 for MWEB merged mining support",
+  "urg": "recommended",
+  "url": "https://github.com/mining4people/p2pool-merged-v36/releases",
+  "thr": 95
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| from | string | Yes | Current share version |
+| to | string | Yes | Target share version |
+| msg | string | Yes | Human-readable upgrade guidance |
+| urg | string | No | Urgency: `info`, `recommended`, `required` |
+| url | string | No | Upgrade download URL |
+| thr | int | No | Activation threshold percentage |
+
+**Workflow**:
+1. Authority key holder runs `create_transition_message.py create` → hex string
+2. Hex string distributed to operators (GitHub release, website, etc.)
+3. Operators paste into `--transition-message <hex>` (no private key needed)
+4. Node validates + embeds in every mined V36 share
+5. Other nodes display as warning via `get_warnings()` transition scanner
+
 ## Wire Obfuscation Layer
 
 All `message_data` bytes in shares are obfuscated before packing into
@@ -411,6 +510,22 @@ only the first received copy is stored.
 Messages older than 24 hours (86400 seconds) are pruned from the in-memory
 store. The store also enforces a maximum of 1000 messages.
 
+## Implementation Files
+
+| File | Purpose |
+|------|---------|
+| `p2pool/share_messages.py` | Core module: messages, signing, encryption, registry, store |
+| `p2pool/data.py` | V36 ref_type extension, strict message validation in check() |
+| `p2pool/work.py` | Transition message loading + embedding in shares |
+| `p2pool/main.py` | `--transition-message` CLI argument |
+| `create_transition_message.py` | Standalone Python 3 authority message creator |
+| `SHARE_MESSAGING_PROTOCOL.md` | This document — wire format specification |
+| `SHARE_MESSAGING_DESIGN.md` | Architecture and design rationale |
+| `SHARE_MESSAGING_INTEGRATION.md` | Code integration plan and status |
+| `SHARE_MESSAGING_API.md` | HTTP API reference |
+| `SHARE_MESSAGING_QUICKSTART.md` | Operator/miner quick start guide |
+| `SHARE_MESSAGING_SECURITY.md` | Security model and threat analysis |
+
 ## Backward Compatibility
 
 ### Old Nodes (V35 and below)
@@ -427,9 +542,9 @@ Old nodes do not understand `message_data` in `ref_type`. The field uses
 The envelope `version` byte enables future protocol upgrades:
 - Version 1 nodes ignore envelopes with `version > 1`
 - Future versions can add new fields after existing ones
-- Message types 0x06-0x0F and 0x11-0xFF are reserved
+- Message types 0x06-0x0F, 0x11-0x1F, and 0x21-0xFF are reserved
 
-## Example: Complete Share with Messages
+## Example: Complete Share with Transition Signal
 
 ```
 Share V36:
@@ -439,31 +554,41 @@ Share V36:
   last_txout_nonce: 42
   hash_link: { state, length, extra_data }
   merkle_link: { branch, index }
+  message_data: <encrypted envelope>               # V36+: stored in share contents
 
 ref_type (hashed into ref_hash, NOT in coinbase):
   identifier: "\xfe\x4f\xe0\x14\x79\x25\x4f\x80"
   share_info: <same as above>
-  message_data: <packed envelope>
-    version: 1
-    envelope_flags: 0x01 (has announcement)
+  message_data: <encrypted envelope>               # Included in ref_hash → PoW-protected
+
+ENCRYPTED ENVELOPE (message_data bytes):
+  version: 0x01 (encryption version)
+  nonce: <16 random bytes>
+  mac: <32 bytes HMAC-SHA256>
+  ciphertext: <N bytes>
+
+  After decryption with authority pubkey:
+
+  INNER ENVELOPE:
+    inner_version: 1
+    inner_flags: 0x00 (no announcement)
     msg_count: 1
-    announcement_len: 57
-    announcement:
-      signing_id: <20 bytes>
-      key_index: 0
-      signing_pubkey: <33 bytes compressed>
+    announcement_len: 0
     message[0]:
-      type: 0x02 (MINER_MESSAGE)
-      flags: 0x07 (signed + broadcast + persistent)
+      type: 0x20 (TRANSITION_SIGNAL)
+      flags: 0x0F (signed + broadcast + persistent + authority)
       timestamp: 1707580800
-      payload_len: 14
-      payload: "Hello, p2pool!"
-      signing_id: <20 bytes>
+      payload_len: 120
+      payload: {"from":"36","to":"37","msg":"Upgrade to V37","urg":"recommended","url":"..."}
+      signing_id: <20 zero bytes> (authority messages use empty signing_id)
       sig_len: 71
       signature: <71 bytes DER ECDSA>
 
-  Total message_data: 4 + 57 + 8 + 14 + 20 + 1 + 71 = 175 bytes
+  Total inner: 4 + 8 + 120 + 20 + 1 + 71 = 224 bytes
+  Total encrypted: 1 + 16 + 32 + 224 = 273 bytes
 
 ref_hash = merkle(SHA256d(ref_type.pack(identifier, share_info, message_data)))
-  └── Includes message → PoW protects "Hello, p2pool!" from tampering
+  └── Includes encrypted envelope → PoW protects transition signal
+  └── Any p2pool node can decrypt (knows authority pubkeys) and verify signature
+  └── Non-p2pool observers see only opaque ciphertext
 ```

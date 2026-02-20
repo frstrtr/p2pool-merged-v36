@@ -124,6 +124,16 @@ This folder contains comprehensive analysis of the P2Pool Litecoin network topol
 
 ## 🔗 Related Files in Workspace
 
+### Share Messaging System
+- `SHARE_MESSAGING_QUICKSTART.md` - **Start here** — operator/miner quick start guide
+- `SHARE_MESSAGING_API.md` - HTTP API endpoint reference
+- `SHARE_MESSAGING_DESIGN.md` - Architecture, crypto, MWU economics
+- `SHARE_MESSAGING_PROTOCOL.md` - Wire format specification
+- `SHARE_MESSAGING_SECURITY.md` - Security model & threat analysis
+- `SHARE_MESSAGING_INTEGRATION.md` - Code integration plan (8 phases)
+- `p2pool/share_messages.py` - Core module implementation
+- `create_transition_message.py` - Standalone Python 3 tool for authority-signed messages
+
 ### Network Files
 - `LIVE_P2POOL_NODES_DISCOVERY.md` - Initial peer discovery
 - `P2POOL_NODES_QUICK_REFERENCE.txt` - Node lookup table
@@ -154,6 +164,12 @@ This folder contains comprehensive analysis of the P2Pool Litecoin network topol
 | "Quick facts for a meeting?" | VERSION_QUICK_REFERENCE.txt | 2 min |
 | "Full network analysis?" | P2POOL_NETWORK_FINAL_SUMMARY.txt | 10 min |
 | "How were nodes discovered?" | LIVE_P2POOL_NODES_DISCOVERY.md | 5 min |
+| "How does share messaging work?" | SHARE_MESSAGING_QUICKSTART.md | 5 min |
+| "What's the messaging API?" | SHARE_MESSAGING_API.md | 8 min |
+| "How is messaging secured?" | SHARE_MESSAGING_SECURITY.md | 10 min |
+| "Wire format for messages?" | SHARE_MESSAGING_PROTOCOL.md | 10 min |
+| "Messaging architecture?" | SHARE_MESSAGING_DESIGN.md | 15 min |
+| "Integration plan for messaging?" | SHARE_MESSAGING_INTEGRATION.md | 12 min |
 
 ---
 
