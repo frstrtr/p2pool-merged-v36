@@ -186,7 +186,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.my_pubkey_hash = my_pubkey_hash
 		
         self.donation_percentage = args.donation_percentage
-        self.worker_fee = args.worker_fee
+        self.node_owner_fee = getattr(args, 'node_owner_fee', worker_fee)
+        self.worker_fee = self.node_owner_fee
         self.merged_operator_address = getattr(args, 'merged_operator_address', None)
 
         # V36 transition messaging: pre-packed message_data for embedding in shares
@@ -415,6 +416,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 total_weight = 0
                                 donation_weight = 0
                                 shareholders = {}
+                                merged_donation_percentage = self.donation_percentage
+                                merged_node_owner_fee = self.node_owner_fee
+                                merged_node_owner_address = None
                                 
                                 # Skip PPLNS when there are no previous shares (bootstrap phase)
                                 # Allow previous_share_hash to be None - get_cumulative_weights handles it
@@ -521,6 +525,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     if skipped_addresses:
                                         # Summary only - suppress verbose per-address output
                                         pass  # Suppressed verbose output: print >>sys.stderr, '[MERGED] WARNING: %d miner address(es) skipped' % len(skipped_addresses)
+
+                                    # In PPLNS mode, merged-chain payouts must mirror sharechain economics.
+                                    # Derive donation ratio from global sharechain weights instead of local
+                                    # node flags, and do not apply per-node block-level node-owner fee.
+                                    if total_weight > 0 and shareholders:
+                                        merged_donation_percentage = 100.0 * float(donation_weight) / float(total_weight)
+                                        merged_node_owner_fee = 0
                                     
                                     pass  # Suppressed: print >>sys.stderr, '[MERGED] Using PPLNS distribution with %d shareholders from share chain' % len(shareholders)
                                 except (KeyError, AttributeError, TypeError) as e:
@@ -577,19 +588,23 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 
                                 # Determine node operator address for merged chain
                                 # Priority: 1) --merged-operator-address, 2) convert parent pubkey_hash to merged chain
-                                node_operator_address = None
-                                if self.my_pubkey_hash and self.worker_fee > 0:
+                                # NOTE: In PPLNS mode merged_node_owner_fee is forced to 0 to avoid node-local
+                                # block-level distortion; node economics come from sharechain weights.
+                                node_owner_address = None
+                                if self.my_pubkey_hash and merged_node_owner_fee > 0:
                                     if self.merged_operator_address:
                                         # Use explicitly provided merged chain address
-                                        node_operator_address = self.merged_operator_address
-                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] Using provided node operator address: %s' % node_operator_address
+                                        node_owner_address = self.merged_operator_address
+                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] Using provided node owner address: %s' % node_owner_address
                                     else:
                                         # Convert pubkey_hash to merged chain address format (NOT parent chain!)
-                                        node_operator_address = bitcoin_data.pubkey_hash_to_address(
+                                        node_owner_address = bitcoin_data.pubkey_hash_to_address(
                                             self.my_pubkey_hash, merged_addr_net.ADDRESS_VERSION,
                                             -1, merged_addr_net)
-                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] Converted node operator address to merged chain: %s' % node_operator_address
+                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] Converted node owner address to merged chain: %s' % node_owner_address
                                 
+                                merged_node_owner_address = node_owner_address
+
                                 # Build coinbase with P2Pool donation and node fee
                                 # Pass parent_net for automatic address conversion (LTC -> DOGE)
                                 # Pass coinbase_text from adapter template (if provided)
@@ -599,8 +614,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 v36_active, _ = self.is_v36_active()
                                 pass  # Suppressed: print >>sys.stderr, '[MERGED] Calling build_merged_coinbase with net=%s (ADDRESS_VERSION=%d), parent_net=%s' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION, parent_net.SYMBOL)
                                 doge_coinbase_tx = merged_mining.build_merged_coinbase(
-                                    template, shareholders, merged_addr_net, self.donation_percentage,
-                                    node_operator_address, self.worker_fee, parent_net, coinbase_text,
+                                    template, shareholders, merged_addr_net, merged_donation_percentage,
+                                    merged_node_owner_address, merged_node_owner_fee, parent_net, coinbase_text,
                                     v36_active=v36_active)
                                 
                                 doge_coinbase_hash = bitcoin_data.hash256(bitcoin_data.tx_type.pack(doge_coinbase_tx))
@@ -656,9 +671,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 merged_net_name=merged_net_name,  # Store network name for block found message
                                 merged_net_symbol=merged_net_symbol,  # Store network symbol for block found message
                                 shareholders=shareholders,  # PPLNS distribution for miner payout calculation
-                                donation_percentage=self.donation_percentage,
-                                worker_fee=self.worker_fee,
-                                node_operator_address=node_operator_address,
+                                    donation_percentage=merged_donation_percentage,
+                                    node_owner_fee=merged_node_owner_fee,
+                                    worker_fee=merged_node_owner_fee,
+                                    node_owner_address=merged_node_owner_address,
+                                    node_operator_address=merged_node_owner_address,
                                 finder_fee_percentage=0.5,
                                 daemon_warnings=merged_daemon_warnings,
                                 last_update=time.time(),
@@ -1118,7 +1135,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
             if (c - self.pubkeys.stamp) > self.args.timeaddresses:
                 self.freshen_addresses(c)
 
-        if random.uniform(0, 100) < self.worker_fee:
+        if random.uniform(0, 100) < self.node_owner_fee:
             pubkey_hash = self.my_pubkey_hash
         # Resolve miner address to pubkey_hash for share creation.
         # V36 uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS) in coinbase for donations.
@@ -1333,8 +1350,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     aux_work['shareholders'],
                     merged_addr_net,
                     aux_work.get('donation_percentage', self.donation_percentage),
-                    aux_work.get('node_operator_address'),
-                    aux_work.get('worker_fee', self.worker_fee),
+                    aux_work.get('node_owner_address', aux_work.get('node_operator_address')),
+                    aux_work.get('node_owner_fee', aux_work.get('worker_fee', self.node_owner_fee)),
                     parent_net,
                     coinbase_text,
                     v36_active=v36_active,
@@ -2183,8 +2200,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         try:
                                             sh = aux_work.get('shareholders', {})
                                             don_pct = aux_work.get('donation_percentage', 1.0)
-                                            wfee = aux_work.get('worker_fee', 0)
-                                            miners_reward = total_reward - int(total_reward * don_pct / 100) - (int(total_reward * wfee / 100) if wfee > 0 else 0)
+                                            node_owner_fee = aux_work.get('node_owner_fee', aux_work.get('worker_fee', 0))
+                                            miners_reward = total_reward - int(total_reward * don_pct / 100) - (int(total_reward * node_owner_fee / 100) if node_owner_fee > 0 else 0)
                                             # Match miner address (strip worker suffix) to shareholder
                                             base_user = user.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
                                             for addr, val in sh.iteritems():
@@ -2325,8 +2342,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # In single-address mode, miner gets full reward minus fees
                                         sa_coinbasevalue = aux_work.get('coinbasevalue', 0)
                                         sa_don_pct = getattr(self, 'donation_percentage', 1.0)
-                                        sa_wfee = getattr(self, 'worker_fee', 0)
-                                        sa_miner_payout = sa_coinbasevalue - int(sa_coinbasevalue * sa_don_pct / 100) - (int(sa_coinbasevalue * sa_wfee / 100) if sa_wfee > 0 else 0)
+                                        sa_node_owner_fee = getattr(self, 'node_owner_fee', getattr(self, 'worker_fee', 0))
+                                        sa_miner_payout = sa_coinbasevalue - int(sa_coinbasevalue * sa_don_pct / 100) - (int(sa_coinbasevalue * sa_node_owner_fee / 100) if sa_node_owner_fee > 0 else 0)
                                         
                                         # Create block record
                                         block_record = dict(
