@@ -87,7 +87,6 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     
     Includes:
     - Miner outputs (proportional to shares, after fees)
-    - Node owner fee (if node_owner_fee > 0 and node_owner_address provided)
     - OP_RETURN tag (identifies merged P2Pool blocks on Dogecoin chain)
     - P2Pool donation (configurable %, always present as blockchain marker)
     
@@ -101,14 +100,17 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     converted to the merged chain address by extracting the pubkey_hash and
     re-encoding with the merged chain's ADDRESS_VERSION.
     
+    Note: node_owner_address and node_owner_fee are accepted for backward
+    compatibility but are ignored — merged chain payouts always use PPLNS
+    distribution. Node operator economics come from the -f probabilistic
+    address replacement in share_data, which flows through PPLNS weights.
+    
     Args:
         template: Block template from getblocktemplate (with auxpow)
         shareholders: Dict of {address: fraction} OR {address: (fraction, net_obj)}
                      Addresses can be in parent chain format - will be auto-converted
         net: Merged chain network object (e.g., Dogecoin testnet)
         donation_percentage: Donation percentage (0-100, default 1.0 for 1%)
-        node_owner_address: Address of P2Pool node owner (for node_owner_fee)
-        node_owner_fee: Node operator fee percentage (0-100, default 0)
         parent_net: Parent chain network object (e.g., Litecoin testnet) for address conversion
         coinbase_text: Custom text for OP_RETURN (default: P2POOL_TAG constant)
         v36_active: Whether V36 share version is active (95%+ signaling)
@@ -116,14 +118,14 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     Returns:
         Dict representing the coinbase transaction
     """
-    legacy_worker_fee = kwargs.pop('worker_fee', None)
+    # node_owner_address and node_owner_fee are forced to zero/None — merged
+    # chain always relies on PPLNS distribution, never per-block node fees.
+    node_owner_address = None
+    node_owner_fee = 0
     legacy_node_operator_address = kwargs.pop('node_operator_address', None)
+    legacy_worker_fee = kwargs.pop('worker_fee', None)
     if kwargs:
         raise TypeError('Unexpected keyword argument(s): %s' % ', '.join(sorted(kwargs.keys())))
-    if legacy_worker_fee is not None:
-        node_owner_fee = legacy_worker_fee
-    if node_owner_address is None and legacy_node_operator_address is not None:
-        node_owner_address = legacy_node_operator_address
 
     total_reward = template['coinbasevalue']
     height = template['height']
@@ -148,17 +150,16 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
     if donation_amount < dust_threshold and total_reward > dust_threshold:
         donation_amount = dust_threshold
     
-    node_owner_fee_amount = int(total_reward * node_owner_fee / 100) if node_owner_fee > 0 and node_owner_address else 0
+    node_owner_fee_amount = 0  # Always 0: merged chain relies on PPLNS distribution
     finder_fee_amount = int(total_reward * finder_fee_percentage / 100) if finder_fee_percentage > 0 and finder_address else 0
-    miners_reward = total_reward - donation_amount - node_owner_fee_amount - finder_fee_amount
+    miners_reward = total_reward - donation_amount - finder_fee_amount
     
     if DEBUG_COINBASE:
         print >>sys.stderr, '[MERGED COINBASE] Total reward: %d satoshis' % total_reward
         print >>sys.stderr, '[MERGED COINBASE] - Donation/marker (%.1f%%): %d (dust_threshold=%d)' % (donation_percentage, donation_amount, dust_threshold)
-        print >>sys.stderr, '[MERGED COINBASE] - Node-owner fee (%.1f%%): %d' % (node_owner_fee, node_owner_fee_amount)
         print >>sys.stderr, '[MERGED COINBASE] - Finder fee (%.1f%%): %d' % (finder_fee_percentage, finder_fee_amount)
         print >>sys.stderr, '[MERGED COINBASE] - Miners (%.1f%%): %d' % (
-            100 - donation_percentage - node_owner_fee - finder_fee_percentage, miners_reward)
+            100 - donation_percentage - finder_fee_percentage, miners_reward)
         print >>sys.stderr, '[MERGED COINBASE] Building for %d shareholders' % len(shareholders)
     
     # Build outputs for each shareholder (from miners_reward after fees)
@@ -197,7 +198,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
                 append_or_coalesce_output(script2, amount)
                 if DEBUG_COINBASE:
                     print >>sys.stderr, '[MINER PAYOUT] %s: %d satoshis (%.1f%% of %.1f%%)' % (
-                        address[:20] + '...', amount, fraction * 100, 100 - donation_percentage - node_owner_fee - finder_fee_percentage)
+                        address[:20] + '...', amount, fraction * 100, 100 - donation_percentage - finder_fee_percentage)
             except ValueError as e:
                 # Second try: address might be in parent chain format - convert it
                 if parent_net is not None:
@@ -214,46 +215,12 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
                         append_or_coalesce_output(script2, amount)
                         if DEBUG_COINBASE:
                             print >>sys.stderr, '[MINER PAYOUT] %s -> %s: %d satoshis (%.1f%% of %.1f%%) [auto-converted from parent chain]' % (
-                                address[:15] + '...', converted_address[:15] + '...', amount, fraction * 100, 100 - donation_percentage - node_owner_fee - finder_fee_percentage)
+                                address[:15] + '...', converted_address[:15] + '...', amount, fraction * 100, 100 - donation_percentage - finder_fee_percentage)
                     except Exception as conv_e:
                         print >>sys.stderr, 'Warning: Failed to decode/convert address %s: %s (original: %s)' % (address, conv_e, e)
                 else:
                     print >>sys.stderr, 'Warning: Failed to decode address %s: %s (no parent_net for conversion)' % (address, e)
     
-    # Add node owner fee output (if configured)
-    if node_owner_fee_amount > 0 and node_owner_address:
-        try:
-            # First try: address is already in merged chain format
-            node_script = bitcoin_data.address_to_script2(node_owner_address, net)
-            append_or_coalesce_output(node_script, node_owner_fee_amount)
-            if DEBUG_COINBASE:
-                print >>sys.stderr, '[NODE FEE] %s: %d satoshis (%.1f%%)' % (
-                    node_owner_address[:20] + '...', node_owner_fee_amount, node_owner_fee)
-        except ValueError as e:
-            # Second try: address might be in parent chain format - convert it
-            if parent_net is not None:
-                try:
-                    # Extract pubkey_hash from parent chain address
-                    pubkey_hash_info = bitcoin_data.address_to_pubkey_hash(node_owner_address, parent_net)
-                    pubkey_hash = pubkey_hash_info[0]
-                    
-                    # Re-encode with merged chain address version
-                    converted_address = bitcoin_data.pubkey_hash_to_address(
-                        pubkey_hash, net.ADDRESS_VERSION, -1, net)
-                    
-                    node_script = bitcoin_data.address_to_script2(converted_address, net)
-                    append_or_coalesce_output(node_script, node_owner_fee_amount)
-                    if DEBUG_COINBASE:
-                        print >>sys.stderr, '[NODE FEE] %s -> %s: %d satoshis (%.1f%%) [auto-converted from parent chain]' % (
-                            node_owner_address[:15] + '...', converted_address[:15] + '...', node_owner_fee_amount, node_owner_fee)
-                except Exception as conv_e:
-                    print >>sys.stderr, 'Warning: Failed to decode/convert node owner address %s: %s (original: %s)' % (
-                        node_owner_address, conv_e, e)
-                    print >>sys.stderr, '         Skipping node operator fee.'
-            else:
-                print >>sys.stderr, 'Warning: Failed to decode node owner address %s for merged chain: %s' % (node_owner_address, e)
-                print >>sys.stderr, '         Skipping node operator fee. Check --merged-operator-address matches merged chain network.'
-
     # Add finder fee output (if configured)
     if finder_fee_amount > 0 and finder_address:
         try:

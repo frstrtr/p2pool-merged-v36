@@ -417,8 +417,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 donation_weight = 0
                                 shareholders = {}
                                 merged_donation_percentage = self.donation_percentage
-                                merged_node_owner_fee = self.node_owner_fee
-                                merged_node_owner_address = None
                                 
                                 # Skip PPLNS when there are no previous shares (bootstrap phase)
                                 # Allow previous_share_hash to be None - get_cumulative_weights handles it
@@ -535,10 +533,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
                                     # In PPLNS mode, merged-chain payouts must mirror sharechain economics.
                                     # Derive donation ratio from global sharechain weights instead of local
-                                    # node flags, and do not apply per-node block-level node-owner fee.
+                                    # node flags. Node operator economics come from the -f probabilistic
+                                    # address replacement in share_data, not from a per-block fee.
                                     if total_weight > 0 and shareholders:
                                         merged_donation_percentage = 100.0 * float(donation_weight) / float(total_weight)
-                                        merged_node_owner_fee = 0
                                     
                                     pass  # Suppressed: print >>sys.stderr, '[MERGED] Using PPLNS distribution with %d shareholders from share chain' % len(shareholders)
                                 except (KeyError, AttributeError, TypeError) as e:
@@ -593,26 +591,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 else:
                                     merged_addr_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
                                 
-                                # Determine node operator address for merged chain
-                                # Priority: 1) --merged-operator-address, 2) convert parent pubkey_hash to merged chain
-                                # NOTE: In PPLNS mode merged_node_owner_fee is forced to 0 to avoid node-local
-                                # block-level distortion; node economics come from sharechain weights.
-                                node_owner_address = None
-                                if self.my_pubkey_hash and merged_node_owner_fee > 0:
-                                    if self.merged_operator_address:
-                                        # Use explicitly provided merged chain address
-                                        node_owner_address = self.merged_operator_address
-                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] Using provided node owner address: %s' % node_owner_address
-                                    else:
-                                        # Convert pubkey_hash to merged chain address format (NOT parent chain!)
-                                        node_owner_address = bitcoin_data.pubkey_hash_to_address(
-                                            self.my_pubkey_hash, merged_addr_net.ADDRESS_VERSION,
-                                            -1, merged_addr_net)
-                                        pass  # Suppressed: print >>sys.stderr, '[MERGED] Converted node owner address to merged chain: %s' % node_owner_address
-                                
-                                merged_node_owner_address = node_owner_address
-
-                                # Build coinbase with P2Pool donation and node fee
+                                # Build coinbase with P2Pool donation (no per-block node owner fee)
+                                # Node operator economics come entirely from the -f probabilistic
+                                # address replacement in share_data, which flows through PPLNS weights.
                                 # Pass parent_net for automatic address conversion (LTC -> DOGE)
                                 # Pass coinbase_text from adapter template (if provided)
                                 # Pass v36_active for donation script selection (pre-V36 vs post-V36)
@@ -622,7 +603,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 pass  # Suppressed: print >>sys.stderr, '[MERGED] Calling build_merged_coinbase with net=%s (ADDRESS_VERSION=%d), parent_net=%s' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION, parent_net.SYMBOL)
                                 doge_coinbase_tx = merged_mining.build_merged_coinbase(
                                     template, shareholders, merged_addr_net, merged_donation_percentage,
-                                    merged_node_owner_address, merged_node_owner_fee, parent_net, coinbase_text,
+                                    parent_net=parent_net, coinbase_text=coinbase_text,
                                     v36_active=v36_active)
                                 
                                 doge_coinbase_hash = bitcoin_data.hash256(bitcoin_data.tx_type.pack(doge_coinbase_tx))
@@ -679,10 +660,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 merged_net_symbol=merged_net_symbol,  # Store network symbol for block found message
                                 shareholders=shareholders,  # PPLNS distribution for miner payout calculation
                                     donation_percentage=merged_donation_percentage,
-                                    node_owner_fee=merged_node_owner_fee,
-                                    worker_fee=merged_node_owner_fee,
-                                    node_owner_address=merged_node_owner_address,
-                                    node_operator_address=merged_node_owner_address,
                                 finder_fee_percentage=0.5,
                                 daemon_warnings=merged_daemon_warnings,
                                 last_update=time.time(),
@@ -1357,8 +1334,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     aux_work['shareholders'],
                     merged_addr_net,
                     aux_work.get('donation_percentage', self.donation_percentage),
-                    aux_work.get('node_owner_address', aux_work.get('node_operator_address')),
-                    aux_work.get('node_owner_fee', aux_work.get('worker_fee', self.node_owner_fee)),
+                    None,  # node_owner_address: always None for merged chain (PPLNS only)
+                    0,  # node_owner_fee: always 0 for merged chain (PPLNS only)
                     parent_net,
                     coinbase_text,
                     v36_active=v36_active,
