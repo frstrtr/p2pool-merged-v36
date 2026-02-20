@@ -549,6 +549,14 @@ class BaseShare(object):
         if cls.VERSION >= 36:
             share_info['merged_addresses'] = merged_addresses  # None or list of validated entries
         
+        # V36+: Commit merged PPLNS weight distribution hash for consensus enforcement.
+        # This ensures the share creator cannot manipulate merged chain (e.g. DOGE) payouts
+        # without being detected by all validating peers.
+        # Uses same PPLNS window as parent chain (starting at previous_share_hash).
+        if cls.VERSION >= 36:
+            share_info['merged_payout_hash'] = compute_merged_payout_hash(
+                tracker, share_data['previous_share_hash'], block_target, net)
+        
         # Build payouts list - IMPORTANT: donation script must be LAST for gentx_before_refhash compatibility
         # Pre-V36: DONATION_SCRIPT (P2PK, 67 bytes) as last output
         # V36+:    COMBINED_DONATION_SCRIPT (P2SH scriptPubKey) as last output
@@ -1122,6 +1130,11 @@ class MergedMiningShare(BaseShare):
             ('timestamp', pack.IntType(32)),
             ('absheight', pack.IntType(32)),
             ('abswork', pack.VarIntType()),  # V36: variable-length (saves ~7-15 bytes vs IntType(128))
+            # Consensus commitment for merged mining reward distribution.
+            # Hash of the expected PPLNS weight distribution (from get_v36_merged_weights).
+            # Peers recompute this from their own share chain state and reject if mismatch.
+            # 0 = no merged mining active or no V36 shares in PPLNS window.
+            ('merged_payout_hash', pack.PossiblyNoneType(0, pack.IntType(256))),
         ])
         
         t['share_type'] = pack.ComposedType([
@@ -1530,11 +1543,12 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
         # Respect weight cap — stop when window is full
         if total_weight + donation_weight + share_weight + share_donation > max_weight:
             # Proportional truncation for boundary share (matches WeightsSkipList)
+            # Uses integer arithmetic for cross-platform determinism (consensus-critical)
             remaining = max_weight - total_weight - donation_weight
-            if remaining > 0 and (share_weight + share_donation) > 0:
-                ratio = remaining / float(share_weight + share_donation)
-                share_weight = int(share_weight * ratio)
-                share_donation = int(share_donation * ratio)
+            total_share = share_weight + share_donation
+            if remaining > 0 and total_share > 0:
+                share_weight = remaining * share_weight // total_share
+                share_donation = remaining * share_donation // total_share
             else:
                 break
         
@@ -1579,6 +1593,56 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
         print msg
     
     return weights, grand_total, donation_weight
+
+def compute_merged_payout_hash(tracker, previous_share_hash, block_target, net):
+    """Compute deterministic hash of expected merged PPLNS weight distribution.
+    
+    This hash is committed into V36 shares so peers can verify that the
+    share creator's merged mining payouts match the expected distribution.
+    
+    Without this, merged chain rewards are honor-system only — a malicious
+    node could build correct parent chain payouts (consensus-enforced) but
+    pay 100% of merged rewards to themselves (undetectable by peers).
+    
+    The hash covers sorted (address_key, weight) pairs plus total/donation
+    weights — all deterministic from share chain state.
+    
+    Uses the same PPLNS window parameters as generate_transaction:
+    - Starts at previous_share_hash (the parent share tip)
+    - Chain length = min(height, REAL_CHAIN_LENGTH)
+    - max_weight = 65535 * SPREAD * target_to_average_attempts(block_target)
+    
+    Returns:
+        int or None: 256-bit hash, or None if no V36 shares in window / no share history.
+        None is serialized as 0 by PossiblyNoneType in the wire format.
+    """
+    if previous_share_hash is None:
+        return None
+    
+    height = tracker.get_height(previous_share_hash)
+    if height == 0:
+        return None
+    
+    max_weight = 65535 * net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
+    chain_length = min(height, net.REAL_CHAIN_LENGTH)
+    
+    weights, total_weight, donation_weight = get_v36_merged_weights(
+        tracker, previous_share_hash, chain_length, max_weight)
+    
+    if not weights or total_weight == 0:
+        return None  # No V36 shares in window
+    
+    # Deterministic serialization: sorted by address key
+    # Format: "addr1:weight1|addr2:weight2|...|T:total|D:donation"
+    parts = []
+    for addr_key in sorted(weights.keys()):
+        parts.append('%s:%d' % (addr_key, weights[addr_key]))
+    parts.append('T:%d' % total_weight)
+    parts.append('D:%d' % donation_weight)
+    
+    payload = '|'.join(parts)
+    return bitcoin_data.hash256(payload)
+
 
 def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value, merged_work=None):
     res = []
