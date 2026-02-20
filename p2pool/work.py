@@ -1523,8 +1523,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 desired_version=(share_type.SUCCESSOR if share_type.SUCCESSOR is not None else share_type).VOTING_VERSION,
             )
             
-            if share_type.VERSION >= 34:
-                # Newer share versions use 'address' as a string
+            if share_type.VERSION >= 36:
+                # V36: store pubkey_hash as IntType(160) — compact binary (saves ~15 bytes)
+                share_data_base['pubkey_hash'] = pubkey_hash
+            elif share_type.VERSION >= 34:
+                # V34-V35: use 'address' as a string
                 share_data_base['address'] = bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT)
             else:
                 # Older share versions use 'pubkey_hash' as an integer  

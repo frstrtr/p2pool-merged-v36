@@ -29,6 +29,15 @@ hash_link_type = pack.ComposedType([
     ('length', pack.VarIntType()),
 ])
 
+# V36: extra_data can be non-empty because COMBINED_DONATION_SCRIPT (P2SH, 23 bytes)
+# makes gentx_before_refhash only 35 bytes (< 64-byte SHA-256 block boundary).
+# VarStrType() stores the actual extra bytes instead of requiring padding.
+v36_hash_link_type = pack.ComposedType([
+    ('state', pack.FixedStrType(32)),
+    ('extra_data', pack.VarStrType()),  # variable-length: no padding output needed
+    ('length', pack.VarIntType()),
+])
+
 def prefix_to_hash_link(prefix, const_ending=''):
     import sys
     # Debug: Uncomment to trace hash_link SHA256 internals (confirmed working)
@@ -118,18 +127,9 @@ COMBINED_DONATION_REDEEM_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9
 # scriptPubKey = OP_HASH160 <hash160(redeem_script)> OP_EQUAL
 COMBINED_DONATION_SCRIPT = 'a9148c6272621d89e8fa526dd86acff60c7136be8e8587'.decode('hex')
 
-# V36_HASHLINK_PAD_SCRIPT: Constant OP_RETURN output placed between the donation
-# output and the ref-hash OP_RETURN in V36 coinbase transactions.
-#
-# PURPOSE: The hash_link mechanism requires gentx_before_refhash (const_ending)
-# to be >= 64 bytes so that SHA256 intermediate buffer data is always covered by
-# the constant suffix (FixedStrType(0) wire format demands extra_data is empty).
-# BaseShare's P2PK DONATION_SCRIPT (67 bytes) naturally gives 79 bytes — enough.
-# V36's P2SH COMBINED_DONATION_SCRIPT (23 bytes) only gives 35 bytes — too short.
-# Adding this 31-byte padding output brings the total to 66 bytes (>= 64).  OK.
-#
-# FORMAT: OP_RETURN (0x6a) + PUSH20 (0x14) + 20 bytes constant marker
-V36_HASHLINK_PAD_SCRIPT = '\x6a\x14' + 'p2pool-v36-pad\x00\x00\x00\x00\x00\x00'
+# V36_HASHLINK_PAD_SCRIPT removed: v36_hash_link_type uses VarStrType() for
+# extra_data, so gentx_before_refhash no longer needs to be >= 64 bytes.
+# This saves 31 bytes per coinbase transaction on-chain.
 
 # DONATION MARKER MONITORING MEMO (parent chain / share coinbase):
 # - Pre-V36 marker address  : donation_script_to_address(net)
@@ -474,6 +474,13 @@ class BaseShare(object):
                     this_address, net.PARENT)
             del(share_data['address'])
         
+        # V36: store pubkey_hash (IntType(160)) instead of address string (saves ~15 bytes)
+        if cls.VERSION >= 36 and 'pubkey_hash' not in share_data:
+            share_data['pubkey_hash'], _, _ = bitcoin_data.address_to_pubkey_hash(
+                    this_address, net.PARENT)
+            if 'address' in share_data:
+                del share_data['address']
+        
         if sum(amounts.itervalues()) != share_data['subsidy'] or any(x < 0 for x in amounts.itervalues()):
             raise ValueError()
 
@@ -553,11 +560,8 @@ class BaseShare(object):
         
         if v36_active:
             # V36 (95%+): Single P2SH-wrapped combined donation output (COMBINED_DONATION_SCRIPT)
-            # MUST BE LAST payout output before the hashlink padding and OP_RETURN
+            # MUST BE LAST payout output before the OP_RETURN
             payouts.append({'script': COMBINED_DONATION_SCRIPT, 'value': amounts[combined_donation_addr]})
-            # V36 hashlink padding: zero-value OP_RETURN output that extends gentx_before_refhash
-            # to >= 64 bytes, ensuring hash_link extra_data is always empty (required by wire format).
-            payouts.append({'script': V36_HASHLINK_PAD_SCRIPT, 'value': 0})
         else:
             # Pre-V36: Only primary donation script (MUST BE LAST!)
             payouts.append({'script': DONATION_SCRIPT, 'value': amounts[primary_donation_address]})
@@ -724,14 +728,24 @@ class BaseShare(object):
         if not (2 <= len(self.share_info['share_data']['coinbase']) <= 100):
             raise ValueError('''bad coinbase size! %i bytes''' % (len(self.share_info['share_data']['coinbase']),))
         
-        assert not self.hash_link['extra_data'], repr(self.hash_link['extra_data'])
+        # V36 uses VarStrType for extra_data (gentx_before_refhash < 64 bytes)
+        if self.VERSION < 36:
+            assert not self.hash_link['extra_data'], repr(self.hash_link['extra_data'])
         
         self.share_data = self.share_info['share_data']
         self.max_target = self.share_info['max_bits'].target
         self.target = self.share_info['bits'].target
         self.timestamp = self.share_info['timestamp']
         self.previous_hash = self.share_data['previous_share_hash']
-        if self.VERSION >= 34:
+        if self.VERSION >= 36:
+            # V36: pubkey_hash stored as IntType(160) — compact binary
+            self.new_script = bitcoin_data.pubkey_hash_to_script2(
+                    self.share_data['pubkey_hash'],
+                    net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+            self.address = bitcoin_data.pubkey_hash_to_address(
+                    self.share_data['pubkey_hash'],
+                    net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+        elif self.VERSION >= 34:
             self.new_script = bitcoin_data.address_to_script2(
                     self.share_data['address'], net.PARENT)
             self.address = self.share_data['address']
@@ -1040,16 +1054,13 @@ class MergedMiningShare(BaseShare):
     #
     # gentx_before_refhash encodes the constant suffix of the packed coinbase tx
     # (everything after the variable donation value, before the ref hash):
-    #   donation_scriptPubKey(24) + pad_value(8) + pad_script(23) + opreturn_value(8) + opreturn_start(3) = 66 bytes
-    # The padding output (V36_HASHLINK_PAD_SCRIPT) ensures this is >= 64 bytes,
-    # which guarantees hash_link extra_data is always empty (required by wire format).
+    #   donation_scriptPubKey(24) + opreturn_value(8) + opreturn_start(3) = 35 bytes
+    # With v36_hash_link_type (VarStrType for extra_data), no padding needed.
     gentx_before_refhash = (
         pack.VarStrType().pack(COMBINED_DONATION_SCRIPT) +                                                       # 24 bytes: donation scriptPubKey
-        pack.IntType(64).pack(0) +                                                                                # 8 bytes: padding output value (always 0)
-        pack.VarStrType().pack(V36_HASHLINK_PAD_SCRIPT) +                                                        # 23 bytes: padding output scriptPubKey
         pack.IntType(64).pack(0) +                                                                                # 8 bytes: OP_RETURN value (always 0)
         pack.VarStrType().pack('\x6a\x28' + pack.IntType(256).pack(0) + pack.IntType(64).pack(0))[:3]            # 3 bytes: OP_RETURN script start
-    )  # Total: 66 bytes >= 64 -> hash_link extra_data always empty
+    )  # Total: 35 bytes — v36_hash_link_type stores extra_data via VarStrType
     
     cached_types = None
     
@@ -1097,8 +1108,8 @@ class MergedMiningShare(BaseShare):
                 ('previous_share_hash', pack.PossiblyNoneType(0, pack.IntType(256))),
                 ('coinbase', pack.VarStrType()),
                 ('nonce', pack.IntType(32)),
-                ('address', pack.VarStrType()),  # V34+ uses string address
-                ('subsidy', pack.IntType(64)),
+                ('pubkey_hash', pack.IntType(160)),  # V36: compact binary pubkey_hash (saves ~15 bytes vs VarStrType address)
+                ('subsidy', pack.VarIntType()),      # V36: variable-length (saves ~3-7 bytes vs IntType(64))
                 ('donation', pack.IntType(16)),
                 ('stale_info', pack.EnumType(pack.IntType(8), dict((k, {0: None, 253: 'orphan', 254: 'doa'}.get(k, 'unk%i' % (k,))) for k in xrange(256)))),
                 ('desired_version', pack.VarIntType()),
@@ -1110,7 +1121,7 @@ class MergedMiningShare(BaseShare):
             ('bits', bitcoin_data.FloatingIntegerType()),
             ('timestamp', pack.IntType(32)),
             ('absheight', pack.IntType(32)),
-            ('abswork', pack.IntType(128)),
+            ('abswork', pack.VarIntType()),  # V36: variable-length (saves ~7-15 bytes vs IntType(128))
         ])
         
         t['share_type'] = pack.ComposedType([
@@ -1121,7 +1132,7 @@ class MergedMiningShare(BaseShare):
                 ('index', pack.IntType(0)),
             ])),
             ('last_txout_nonce', pack.IntType(64)),
-            ('hash_link', hash_link_type),
+            ('hash_link', v36_hash_link_type),  # V36: VarStrType for extra_data (no padding needed)
             ('merkle_link', pack.ComposedType([
                 ('branch', pack.ListType(pack.IntType(256))),
                 ('index', pack.IntType(0)),  # always 0
