@@ -429,14 +429,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # Pre-V36 shares are excluded from merged mining distribution
                                         # because V35 nodes don't build merged blocks. Their weight
                                         # is naturally redistributed to V36 miners (smaller denominator).
-                                        target = int(target_hex, 16)
+                                        #
+                                        # CRITICAL: Use the PARENT chain's block target for max_weight,
+                                        # NOT the child chain's target. The PPLNS window must match the
+                                        # parent chain's window exactly so merged payouts mirror parent
+                                        # economics (including node owner fee via share address replacement).
+                                        # Using the child target would create a different-sized window,
+                                        # causing distribution misalignment between parent and child.
+                                        parent_block_target = self.current_work.value['bits'].target
                                         best_share_hash = self.node.best_share_var.value
                                         share_height = self.node.tracker.get_height(best_share_hash)
                                         weights, total_weight, donation_weight = p2pool_data.get_v36_merged_weights(
                                             self.node.tracker,
                                             best_share_hash,
                                             max(0, min(share_height, self.node.net.REAL_CHAIN_LENGTH)),
-                                            65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(target),
+                                            65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(parent_block_target),
                                             chain_id=chainid,
                                         )
                                     
