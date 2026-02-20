@@ -118,6 +118,19 @@ COMBINED_DONATION_REDEEM_SCRIPT = '512103ffd03de44a6e11b9917f3a29f9443283d9871c9
 # scriptPubKey = OP_HASH160 <hash160(redeem_script)> OP_EQUAL
 COMBINED_DONATION_SCRIPT = 'a9148c6272621d89e8fa526dd86acff60c7136be8e8587'.decode('hex')
 
+# V36_HASHLINK_PAD_SCRIPT: Constant OP_RETURN output placed between the donation
+# output and the ref-hash OP_RETURN in V36 coinbase transactions.
+#
+# PURPOSE: The hash_link mechanism requires gentx_before_refhash (const_ending)
+# to be >= 64 bytes so that SHA256 intermediate buffer data is always covered by
+# the constant suffix (FixedStrType(0) wire format demands extra_data is empty).
+# BaseShare's P2PK DONATION_SCRIPT (67 bytes) naturally gives 79 bytes — enough.
+# V36's P2SH COMBINED_DONATION_SCRIPT (23 bytes) only gives 35 bytes — too short.
+# Adding this 31-byte padding output brings the total to 66 bytes (>= 64).  OK.
+#
+# FORMAT: OP_RETURN (0x6a) + PUSH20 (0x14) + 20 bytes constant marker
+V36_HASHLINK_PAD_SCRIPT = '\x6a\x14' + 'p2pool-v36-pad\x00\x00\x00\x00\x00\x00'
+
 # DONATION MARKER MONITORING MEMO (parent chain / share coinbase):
 # - Pre-V36 marker address  : donation_script_to_address(net)
 #   - Litecoin mainnet      : LeD2fnnDJYZuyt8zgDsZ2oBGmuVcxGKCLd
@@ -540,8 +553,11 @@ class BaseShare(object):
         
         if v36_active:
             # V36 (95%+): Single P2SH-wrapped combined donation output (COMBINED_DONATION_SCRIPT)
-            # MUST BE LAST output before OP_RETURN (matches V36 gentx_before_refhash)
+            # MUST BE LAST payout output before the hashlink padding and OP_RETURN
             payouts.append({'script': COMBINED_DONATION_SCRIPT, 'value': amounts[combined_donation_addr]})
+            # V36 hashlink padding: zero-value OP_RETURN output that extends gentx_before_refhash
+            # to >= 64 bytes, ensuring hash_link extra_data is always empty (required by wire format).
+            payouts.append({'script': V36_HASHLINK_PAD_SCRIPT, 'value': 0})
         else:
             # Pre-V36: Only primary donation script (MUST BE LAST!)
             payouts.append({'script': DONATION_SCRIPT, 'value': amounts[primary_donation_address]})
@@ -1021,8 +1037,19 @@ class MergedMiningShare(BaseShare):
     # V36 uses COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS redeem script) instead of DONATION_SCRIPT (P2PK)
     # This replaces two separate donation outputs with one combined output.
     # Either forrestv or we can spend independently (1-of-2 multisig via redeem script).
-    # gentx_before_refhash MUST match the last output pattern before OP_RETURN.
-    gentx_before_refhash = pack.VarStrType().pack(COMBINED_DONATION_SCRIPT) + pack.IntType(64).pack(0) + pack.VarStrType().pack('\x6a\x28' + pack.IntType(256).pack(0) + pack.IntType(64).pack(0))[:3]
+    #
+    # gentx_before_refhash encodes the constant suffix of the packed coinbase tx
+    # (everything after the variable donation value, before the ref hash):
+    #   donation_scriptPubKey(24) + pad_value(8) + pad_script(23) + opreturn_value(8) + opreturn_start(3) = 66 bytes
+    # The padding output (V36_HASHLINK_PAD_SCRIPT) ensures this is >= 64 bytes,
+    # which guarantees hash_link extra_data is always empty (required by wire format).
+    gentx_before_refhash = (
+        pack.VarStrType().pack(COMBINED_DONATION_SCRIPT) +                                                       # 24 bytes: donation scriptPubKey
+        pack.IntType(64).pack(0) +                                                                                # 8 bytes: padding output value (always 0)
+        pack.VarStrType().pack(V36_HASHLINK_PAD_SCRIPT) +                                                        # 23 bytes: padding output scriptPubKey
+        pack.IntType(64).pack(0) +                                                                                # 8 bytes: OP_RETURN value (always 0)
+        pack.VarStrType().pack('\x6a\x28' + pack.IntType(256).pack(0) + pack.IntType(64).pack(0))[:3]            # 3 bytes: OP_RETURN script start
+    )  # Total: 66 bytes >= 64 -> hash_link extra_data always empty
     
     cached_types = None
     
