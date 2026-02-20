@@ -220,18 +220,23 @@ def _ecdsa_verify(pubkey_compressed, message_hash, signature):
 
     try:
         import ecdsa
-        if pubkey_compressed[0:1] in (b'\x02', b'\x03'):
-            vk = ecdsa.VerifyingKey.from_string(
-                pubkey_compressed, curve=ecdsa.SECP256k1)
-        else:
-            vk = ecdsa.VerifyingKey.from_string(
-                pubkey_compressed[1:], curve=ecdsa.SECP256k1)
-        return vk.verify_digest(signature, message_hash,
-                                sigdecode=ecdsa.util.sigdecode_der)
-    except (ImportError, ecdsa.BadSignatureError):
-        pass
-    except Exception:
-        pass
+    except ImportError:
+        ecdsa = None
+
+    if ecdsa is not None:
+        try:
+            if pubkey_compressed[0:1] in (b'\x02', b'\x03'):
+                vk = ecdsa.VerifyingKey.from_string(
+                    pubkey_compressed, curve=ecdsa.SECP256k1)
+            else:
+                vk = ecdsa.VerifyingKey.from_string(
+                    pubkey_compressed[1:], curve=ecdsa.SECP256k1)
+            return vk.verify_digest(signature, message_hash,
+                                    sigdecode=ecdsa.util.sigdecode_der)
+        except ecdsa.BadSignatureError:
+            pass
+        except Exception:
+            pass
 
     return False
 

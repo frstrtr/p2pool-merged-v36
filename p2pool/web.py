@@ -439,7 +439,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             donation_proportion=wb.donation_percentage/100,
             version=p2pool.__version__,
             protocol_version=p2p.Protocol.VERSION,
-            fee=wb.worker_fee,
+            fee=getattr(wb, 'node_owner_fee', wb.worker_fee),
         )
     
     class WebInterface(deferred_resource.DeferredResource):
@@ -465,7 +465,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root.putChild('user_stales', WebInterface(lambda:
         p2pool_data.get_user_stale_props(node.tracker, node.best_share_var.value,
             node.tracker.get_height(node.best_share_var.value), node.net.PARENT)))
-    web_root.putChild('fee', WebInterface(lambda: wb.worker_fee))
+    web_root.putChild('fee', WebInterface(lambda: getattr(wb, 'node_owner_fee', wb.worker_fee)))
     web_root.putChild('current_payouts', WebInterface(lambda: dict(
         (address, value/1e8) for address, value
             in node.get_current_txouts().iteritems())))
@@ -1114,8 +1114,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         coinbasevalue = chain['coinbasevalue']
                     
                     don_pct = chain.get('donation_percentage', 1.0)
-                    wfee = chain.get('worker_fee', 0)
-                    miners_reward = coinbasevalue - int(coinbasevalue * don_pct / 100) - (int(coinbasevalue * wfee / 100) if wfee > 0 else 0)
+                    node_owner_fee = chain.get('node_owner_fee', chain.get('worker_fee', 0))
+                    miners_reward = coinbasevalue - int(coinbasevalue * don_pct / 100) - (int(coinbasevalue * node_owner_fee / 100) if node_owner_fee > 0 else 0)
                     
                     merged_payout_symbol = chain.get('merged_net_symbol', 'DOGE' if chain_id == 98 else 'AUX')
                     

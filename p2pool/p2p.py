@@ -548,9 +548,14 @@ class Protocol(p2protocol.Protocol):
     ])
     def handle_forget_tx(self, tx_hashes):
         for tx_hash in tx_hashes:
-            self.remembered_txs_size -= 100 + get_tx_packed_size(self.remembered_txs[tx_hash])
-            assert self.remembered_txs_size >= 0
-            del self.remembered_txs[tx_hash]
+            tx = self.remembered_txs.pop(tx_hash, None)
+            if tx is None:
+                if p2pool.DEBUG:
+                    print >>sys.stderr, '[P2P] forget_tx: Unknown transaction %064x - ignoring' % (tx_hash,)
+                continue
+            self.remembered_txs_size -= 100 + get_tx_packed_size(tx)
+            if self.remembered_txs_size < 0:
+                self.remembered_txs_size = 0
     
     
     def connectionLost(self, reason):

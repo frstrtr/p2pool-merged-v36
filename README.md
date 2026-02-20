@@ -12,10 +12,29 @@ Branch: `feature/scrypt-litecoin-dogecoin`
 - ✅ Litecoin scrypt mining with Dogecoin AuxPoW merged mining
 - ✅ Multiaddress coinbase - miners specify both LTC and DOGE addresses
 - ✅ Automatic address conversion (same pubkey_hash, correct network format)
-- ✅ Modern P2PKH donation script (saves 42 bytes vs old P2PK)
-- ✅ Node operator fees for merged mining infrastructure
+- ✅ V36 combined donation marker (P2SH scriptPubKey over 1-of-2 redeem policy)
+- ✅ Node-owner fees are sharechain-weighted on both parent and merged chains
 - ✅ Real-time monitoring dashboard
 - ✅ MM-Adapter bridge for standard Dogecoin daemon compatibility
+
+### Combined Donation Addresses (Mainnet + Testnet)
+
+Current V36 combined marker script (both chains):
+
+- `a9148c6272621d89e8fa526dd86acff60c7136be8e8587`
+
+Mainnet addresses derived from this script:
+
+- **Litecoin mainnet (parent chain):** `MLhSmVQxMusLE3pjGFvp4unFckgjeD8LUA`
+- **Dogecoin mainnet (merged chain):** `A5EZCT4tUrtoKuvJaWbtVQADzdUKdtsqpr`
+
+Testnet addresses derived from the same script:
+
+- **Litecoin testnet (parent chain):** `QZQGeMoG3MaLmWwRTcbMwuxYenkHE2zhUN`
+- **Dogecoin testnet/testnet4alpha (merged chain):** `2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f`
+
+For pre-V36 vs post-V36 address history (LTC/BTC/DOGE mainnet+testnet), see
+[MERGED_MINING_DONATION.md#v36-donation-script-transition-feb-2026](MERGED_MINING_DONATION.md#v36-donation-script-transition-feb-2026).
 
 ### Architecture
 
@@ -175,6 +194,11 @@ pypy run_p2pool.py \
     --disable-upnp \
     litecoinrpc YOUR_LTC_RPC_PASSWORD
 ```
+
+  Notes on payout semantics:
+  - `-f/--fee` and `--give-author` influence sharechain weights (PPLNS), so per-block percentages are probabilistic and can vary block-to-block.
+  - A separate merged-chain node-fee output may be `0` in normal PPLNS mode; node-owner value is represented through weighted payout addresses.
+  - As more shares/blocks are observed (especially with substantial window turnover), measured averages converge toward configured percentages.
 
 ### Step 6: Connect Miners
 

@@ -418,7 +418,7 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
             print
         
         wb = work.WorkerBridge(node, my_pubkey_hash, args.donation_percentage,
-                               merged_urls, args.worker_fee, args, pubkeys,
+                       merged_urls, args.node_owner_fee, args, pubkeys,
                                bitcoind, args.share_rate)
         web_root = web.get_web_root(wb, datadir_path, bitcoind_getinfo_var, static_dir=args.web_static)
         caching_wb = worker_interface.CachingWorkerBridge(wb)
@@ -715,7 +715,7 @@ def run():
         help='listen on PORT on interface with ADDR for RPC connections from miners (default: all interfaces, %s)' % ', '.join('%s:%i' % (name, net.WORKER_PORT) for name, net in sorted(realnets.items())),
         type=str, action='store', default=None, dest='worker_endpoint')
     worker_group.add_argument('-f', '--fee', metavar='FEE_PERCENTAGE',
-        help='''charge workers mining to their own bitcoin address (by setting their miner's username to a bitcoin address) this percentage fee to mine on your p2pool instance. Amount displayed at http://127.0.0.1:WORKER_PORT/fee (default: 0)''',
+        help='''set node-owner fee percentage used in share weighting when miners mine to their own address. Per-block results are probabilistic under PPLNS and converge over enough shares. Amount displayed at http://127.0.0.1:WORKER_PORT/fee (default: 0)''',
         type=float, action='store', default=0, dest='worker_fee')
     worker_group.add_argument('-s', '--share-rate', metavar='SECONDS_PER_SHARE',
         help='Auto-adjust mining difficulty on each connection to target this many seconds per pseudoshare (default: %3.0f)' % 3.,
@@ -757,6 +757,7 @@ def run():
         type=str, action='store', default=None, dest='transition_message')
     
     args = parser.parse_args()
+    args.node_owner_fee = args.worker_fee
     
     if args.debug:
         p2pool.DEBUG = True

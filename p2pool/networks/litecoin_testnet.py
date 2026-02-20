@@ -30,7 +30,6 @@ BOOTSTRAP_ADDRS = [
     '192.168.86.30',  # node30 - canonical v35 test node
     '192.168.86.33',  # node33 - canonical v35 test node
     '192.168.86.29',  # node29 - v36 experimental node
-    'forre.st',       # legacy bootstrap
 ]
 ANNOUNCE_CHANNEL = '#p2pool-alt'
 VERSION_CHECK = lambda v: True  # Accept any version (testnet is permissive)
