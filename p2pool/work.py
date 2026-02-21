@@ -193,6 +193,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # V36 transition messaging: pre-packed message_data for embedding in shares
         self.transition_message_data = self._prepare_transition_message(args)
 
+        # AutoRatchet: automated V35->V36 share version management
+        # Persists activation state to disk so restarts don't regress
+        net_name = self.node.net.NAME
+        if hasattr(args, 'datadir') and args.datadir:
+            ratchet_datadir = os.path.join(args.datadir, net_name)
+        else:
+            ratchet_datadir = os.path.join(os.path.dirname(sys.argv[0]), 'data', net_name)
+        self.auto_ratchet = p2pool_data.AutoRatchet(ratchet_datadir)
+        print '[WorkerBridge] AutoRatchet initialized: %s' % self.auto_ratchet
 
         self.net = self.node.net.PARENT
         self.running = True
@@ -1432,28 +1441,27 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         tx_hashes = self.current_work.value['transaction_hashes']
         tx_map = dict(zip(tx_hashes, transactions))
-        if previous_share is None:
-            # Bootstrap with most recent share type (PaddingBugfixShare V35)
-            # Not Share (V17) which is ancient
-            share_type = p2pool_data.PaddingBugfixShare
-        else:
+        # AutoRatchet determines share version from network state + persisted state.
+        # This replaces the manual share_type selection with a fully automated,
+        # network-aware ratchet that persists across restarts.
+        share_type, desired_ver = self.auto_ratchet.get_share_version(
+            self.node.tracker,
+            self.node.best_share_var.value,
+            self.node.net,
+        )
+        
+        # Still run the original voting check for switchover logging and protocol version update.
+        # The AutoRatchet already handles the actual share_type decision, but this keeps
+        # the "Switchover imminent" progress messages and update_min_protocol_version calls.
+        if previous_share is not None:
             previous_share_type = type(previous_share)
-
-            if previous_share_type.SUCCESSOR is None or self.node.tracker.get_height(previous_share.hash) < self.node.net.CHAIN_LENGTH:
-                share_type = previous_share_type
-            else:
+            if previous_share_type.SUCCESSOR is not None and self.node.tracker.get_height(previous_share.hash) >= self.node.net.CHAIN_LENGTH:
                 successor_type = previous_share_type.SUCCESSOR
-
                 counts = p2pool_data.get_desired_version_counts(self.node.tracker,
                     self.node.tracker.get_nth_parent_hash(previous_share.hash, self.node.net.CHAIN_LENGTH*9//10), self.node.net.CHAIN_LENGTH//10)
                 upgraded = counts.get(successor_type.VERSION, 0)/sum(counts.itervalues())
                 if upgraded > .65:
                     print 'Switchover imminent. Upgraded: %.3f%% Threshold: %.3f%%' % (upgraded*100, 95)
-                # Share -> NewShare only valid if 95% of hashes in [net.CHAIN_LENGTH*9//10, net.CHAIN_LENGTH] for new version
-                if counts.get(successor_type.VERSION, 0) > sum(counts.itervalues())*95//100:
-                    share_type = successor_type
-                else:
-                    share_type = previous_share_type
         local_addr_rates = self.get_local_addr_rates()
 
         if desired_share_target is None:
@@ -1497,7 +1505,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     'doa' if doas > doas_recorded_in_chain else
                     None
                 )(*self.get_stale_counts()),
-                desired_version=(share_type.SUCCESSOR if share_type.SUCCESSOR is not None else share_type).VOTING_VERSION,
+                desired_version=desired_ver,  # From AutoRatchet: always 36 (signals V36 capability)
             )
             
             if share_type.VERSION >= 36:

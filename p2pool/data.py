@@ -1420,6 +1420,187 @@ def update_min_protocol_version(counts, share):
                 share.net.MINIMUM_PROTOCOL_VERSION = newminpver
                 print 'Setting MINIMUM_PROTOCOL_VERSION = %d' % (newminpver)
 
+
+class AutoRatchet(object):
+    """Fully automated, network-aware share version ratchet.
+    
+    Manages V35 -> V36 share version transitions without any manual
+    configuration changes.  Persists state to disk so restarts (even
+    with cleared share stores) don't regress to V35 once the network
+    has confirmed V36.
+    
+    Window sizes adapt to the network config:
+      Testnet:  REAL_CHAIN_LENGTH=400,  SHARE_PERIOD=4s   (~27 min)
+      Mainnet:  REAL_CHAIN_LENGTH=8640, SHARE_PERIOD=15s  (~36 hours)
+    
+    State machine:
+    
+      VOTING --------(95% desired_version>=36)--------> ACTIVATED
+        ^                                                   |
+        |----(<50% desired_version>=36)-----<               |
+                                                            |
+        (sustained 2*REAL_CHAIN_LENGTH at 95% V36 shares)   |
+                                                            v
+      VOTING <--(follows V35 network, keeps voting)--- CONFIRMED
+        ^                                                   |
+        |---( <50% votes, network genuinely V35)---<        |
+                                                            |
+                          (permanent on restart)            |
+                          CONFIRMED <-----------------------+
+    
+    VOTING:    Creates V35 shares, votes desired_version=36
+    ACTIVATED: Creates V36 shares; reverts if network is <50% V36
+    CONFIRMED: Creates V36 shares; persisted to disk, survives restart
+               Still follows V35 network if <50% votes (consensus wins)
+    """
+    
+    ACTIVATION_THRESHOLD = 95     # % of window voting V36 to activate
+    DEACTIVATION_THRESHOLD = 50   # % below which to revert
+    CONFIRMATION_MULTIPLIER = 2   # confirm after 2x REAL_CHAIN_LENGTH of V36 majority
+    
+    STATE_VOTING = 'voting'
+    STATE_ACTIVATED = 'activated'
+    STATE_CONFIRMED = 'confirmed'
+    
+    def __init__(self, datadir_path):
+        self._state_file = os.path.join(datadir_path, 'v36_ratchet.json') if datadir_path else None
+        self._state = self.STATE_VOTING
+        self._activated_at = None       # timestamp
+        self._activated_height = None   # share chain height at activation
+        self._confirmed_at = None       # timestamp
+        self._load()
+    
+    def _load(self):
+        if self._state_file is None:
+            return
+        try:
+            if os.path.exists(self._state_file):
+                import json
+                with open(self._state_file, 'r') as f:
+                    data = json.load(f)
+                self._state = data.get('state', self.STATE_VOTING)
+                self._activated_at = data.get('activated_at')
+                self._activated_height = data.get('activated_height')
+                self._confirmed_at = data.get('confirmed_at')
+                print '[AutoRatchet] Loaded state: %s (activated_at=%s, height=%s, confirmed_at=%s)' % (
+                    self._state, self._activated_at, self._activated_height, self._confirmed_at)
+        except (IOError, ValueError, KeyError) as e:
+            print '[AutoRatchet] Warning: could not load state file: %s' % e
+    
+    def _save(self):
+        if self._state_file is None:
+            return
+        try:
+            import json
+            data = {
+                'state': self._state,
+                'activated_at': self._activated_at,
+                'activated_height': self._activated_height,
+                'confirmed_at': self._confirmed_at,
+            }
+            with open(self._state_file, 'w') as f:
+                json.dump(data, f)
+        except IOError as e:
+            print '[AutoRatchet] Warning: could not save state file: %s' % e
+    
+    @property
+    def state(self):
+        return self._state
+    
+    def get_share_version(self, tracker, best_share_hash, net):
+        """Determine share version based on network state + ratchet state.
+        
+        Uses net.REAL_CHAIN_LENGTH for window sizing (400 testnet, 8640 mainnet).
+        Confirmation requires 2 * REAL_CHAIN_LENGTH shares of sustained V36 majority.
+        
+        Returns:
+            (share_class, desired_version) tuple
+            share_class: MergedMiningShare or PaddingBugfixShare
+            desired_version: always 36 (vote for V36)
+        """
+        confirmation_window = net.REAL_CHAIN_LENGTH * self.CONFIRMATION_MULTIPLIER
+        
+        # No chain at all — use persisted ratchet state for bootstrap
+        if best_share_hash is None or tracker.get_height(best_share_hash) < 1:
+            if self._state == self.STATE_CONFIRMED:
+                return (MergedMiningShare, 36)
+            else:
+                # ACTIVATED but not confirmed → not safe to assume V36 on empty chain
+                # VOTING → V35 is correct
+                return (PaddingBugfixShare, 36)
+        
+        # Count version votes in available window
+        height = tracker.get_height(best_share_hash)
+        sample = min(height, net.REAL_CHAIN_LENGTH)
+        v36_votes = 0
+        v36_shares = 0  # actual V36 format shares (not just votes)
+        total = 0
+        
+        for share in tracker.get_chain(best_share_hash, sample):
+            total += 1
+            desired_ver = getattr(share, 'desired_version', share.VERSION)
+            if desired_ver >= 36:
+                v36_votes += 1
+            if share.VERSION >= 36:
+                v36_shares += 1
+        
+        if total == 0:
+            if self._state == self.STATE_CONFIRMED:
+                return (MergedMiningShare, 36)
+            return (PaddingBugfixShare, 36)
+        
+        vote_pct = (v36_votes * 100) // total
+        share_pct = (v36_shares * 100) // total
+        full_window = (total >= net.REAL_CHAIN_LENGTH)
+        
+        old_state = self._state
+        
+        # --- State transitions ---
+        if self._state == self.STATE_VOTING:
+            # Only activate with a full window of data
+            if full_window and vote_pct >= self.ACTIVATION_THRESHOLD:
+                self._state = self.STATE_ACTIVATED
+                self._activated_at = int(time.time())
+                self._activated_height = height
+                print '[AutoRatchet] VOTING -> ACTIVATED (%d%% of %d shares vote V36, window=%d)' % (
+                    vote_pct, total, net.REAL_CHAIN_LENGTH)
+                self._save()
+        
+        elif self._state == self.STATE_ACTIVATED:
+            if full_window and vote_pct < self.DEACTIVATION_THRESHOLD:
+                # Network has genuinely reverted to V35 majority
+                self._state = self.STATE_VOTING
+                self._activated_at = None
+                self._activated_height = None
+                print '[AutoRatchet] ACTIVATED -> VOTING (%d%% votes < %d%% threshold)' % (
+                    vote_pct, self.DEACTIVATION_THRESHOLD)
+                self._save()
+            elif self._activated_height is not None:
+                shares_since = height - self._activated_height
+                if shares_since >= confirmation_window and share_pct >= self.ACTIVATION_THRESHOLD:
+                    self._state = self.STATE_CONFIRMED
+                    self._confirmed_at = int(time.time())
+                    print '[AutoRatchet] ACTIVATED -> CONFIRMED (%d shares since activation, %d%% V36, window=%d)' % (
+                        shares_since, share_pct, confirmation_window)
+                    self._save()
+        
+        elif self._state == self.STATE_CONFIRMED:
+            # CONFIRMED is permanent for bootstrap, but still respects network consensus
+            if full_window and vote_pct < self.DEACTIVATION_THRESHOLD:
+                print '[AutoRatchet] WARNING: CONFIRMED but network is %d%% V35 - following network consensus' % (100 - vote_pct)
+                return (PaddingBugfixShare, 36)
+        
+        # --- Output ---
+        if self._state in (self.STATE_ACTIVATED, self.STATE_CONFIRMED):
+            return (MergedMiningShare, 36)
+        else:
+            return (PaddingBugfixShare, 36)
+    
+    def __repr__(self):
+        return 'AutoRatchet(state=%s, activated=%s, height=%s, confirmed=%s)' % (
+            self._state, self._activated_at, self._activated_height, self._confirmed_at)
+
+
 def get_pool_attempts_per_second(tracker, previous_share_hash, dist, min_work=False, integer=False):
     assert dist >= 2
     near = tracker.items[previous_share_hash]
