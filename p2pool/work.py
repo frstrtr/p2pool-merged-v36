@@ -2555,12 +2555,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 try:
                     share = get_share(header, last_txout_nonce)
                 except Exception as e:
-                    # print >>sys.stderr, '[DEBUG] get_share failed: %s' % e
-                    # print >>sys.stderr, '[DEBUG] Recalculating pow_hash with header:'
-                    # recalc_pow = self.node.net.PARENT.POW_FUNC(bitcoin_data.block_header_type.pack(header))
-                    # print >>sys.stderr, '  Recalc pow_hash: %064x' % recalc_pow
-                    # print >>sys.stderr, '  Original pow_hash: %064x' % pow_hash
-                    # print >>sys.stderr, '  Match: %s' % (recalc_pow == pow_hash)
                     raise
 
                 print 'GOT SHARE! %s %s prev %s age %.2fs%s' % (

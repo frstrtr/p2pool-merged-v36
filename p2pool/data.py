@@ -1219,10 +1219,6 @@ class BaseShare(object):
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
             raise ValueError('''gentx doesn't match hash_link''')
         
-        # Parent chain gentx is verified — log it for consensus audit
-        if self.VERSION >= 36:
-            print >>sys.stderr, '[CONSENSUS] Parent chain gentx PASSED for share %064x (miner=%s)' % (self.hash, self.address)
-        
         # V36+: Verify merged coinbase consensus enforcement.
         # Re-derive the canonical merged chain coinbase from PPLNS weights and
         # committed parameters, then verify it matches what's committed in mm_data.
@@ -1231,11 +1227,7 @@ class BaseShare(object):
             try:
                 parent_net = self.net.PARENT
                 merged_info = self.share_info.get('merged_coinbase_info')
-                if merged_info:
-                    print >>sys.stderr, '[CONSENSUS] Verifying merged coinbase for share %064x (%d chain(s))' % (self.hash, len(merged_info))
                 verify_merged_coinbase_commitment(self, tracker, self.net, parent_net)
-                if merged_info:
-                    print >>sys.stderr, '[CONSENSUS] Merged coinbase PASSED for share %064x' % self.hash
             except ValueError as e:
                 raise ValueError('merged coinbase verification failed: %s' % (e,))
         
@@ -2004,14 +1996,12 @@ def get_stale_counts(tracker, share_hash, lookbehind, rates=False):
 def get_user_stale_props(tracker, share_hash, lookbehind, net):
     res = {}
     for share in tracker.get_chain(share_hash, lookbehind - 1):
-        if share.VERSION < 34:
-            stale, total = res.get(share.share_data['pubkey_hash'], (0, 0))
-            key = bitcoin_data.pubkey_hash_to_address(
-                    share.share_data['pubkey_hash'], net.ADDRESS_VERSION, -1,
-                    net)
-        else:
-            key = share.share_data['address']
-            stale, total = res.get(key, (0, 0))
+        # Use share.address which is always set correctly for all versions:
+        # V36: computed from share_data['pubkey_hash'] via pubkey_hash_to_address()
+        # V34/V35: stored as share_data['address']
+        # <V34: computed from share_data['pubkey_hash'] via pubkey_hash_to_address()
+        key = share.address
+        stale, total = res.get(key, (0, 0))
         total += 1
         if share.share_data['stale_info'] is not None:
             stale += 1
