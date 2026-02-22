@@ -209,8 +209,10 @@ def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
     
     # Resolve weight keys to merged chain scripts, accumulate amounts
     # Keys from get_v36_merged_weights():
-    #   'MERGED:<hex_script>' = explicit merged chain script (use directly)
-    #   parent_address_string  = needs auto-conversion (P2PKH only)
+    #   'MERGED:<hex_script>' = explicit/auto-generated merged chain script (tier 1)
+    #   parent_address_string  = needs auto-conversion (tier 2: P2PKH, P2SH, bech32)
+    # Unconvertible addresses are skipped — their weight is redistributed
+    # proportionally to all convertible miners (tier 3: pool distribution).
     script_weights = {}   # {script_bytes: accumulated_weight}
     accepted_total_weight = 0
     
@@ -285,21 +287,30 @@ def get_canonical_merged_finder_script(share_pubkey_hash, merged_addresses, chai
     
     Deterministic from share data — used by both get_work() and check().
     
-    Priority:
-      1. Explicit merged_addresses entry for this chain_id → that script
-      2. Auto-convert share creator's pubkey_hash → merged chain P2PKH script
+    Three-tier priority (consensus-enforced):
+      1. Explicit merged address from miner (stratum comma-separated) → that script.
+         Also covers auto-generated merged addresses stored in the share.
+         This tier handles ALL address types (P2PKH, P2SH, bech32 P2WPKH).
+      2. Auto-convert share creator's pubkey_hash → merged chain P2PKH script.
+         Only for P2PKH and bech32 P2WPKH (same pubkey_hash). P2SH must use
+         tier 1 (auto-generated P2SH entries stored in merged_addresses).
+      3. Return None → pool distribution fallback.
+         Finder fee is zero; finder's portion is redistributed proportionally
+         to all PPLNS participants. This handles unconvertible address types.
     
-    Returns: script bytes, or None if not convertible
+    Returns: script bytes, or None (pool distribution — no finder fee)
     """
+    # Tier 1: Explicit or auto-generated merged address for this chain
     if merged_addresses:
         for entry in merged_addresses:
             if entry.get('chain_id') == chain_id:
                 return entry['script']
     
-    # Auto-convert from parent chain pubkey_hash
+    # Tier 2: Auto-convert from parent chain pubkey_hash (P2PKH/bech32 only)
     if share_pubkey_hash is not None:
         return '\x76\xa9\x14' + pack.IntType(160).pack(share_pubkey_hash) + '\x88\xac'
     
+    # Tier 3: Pool distribution fallback — unconvertible address
     return None
 
 

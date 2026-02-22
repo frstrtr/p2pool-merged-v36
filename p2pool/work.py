@@ -1145,16 +1145,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
                     if is_convertible:
                         pubkey_hash = validated_pubkey_hash
-                        # P2SH addresses: auto-generate merged chain P2SH address.
-                        # The script_hash is re-encoded with the merged chain's P2SH version.
-                        # This is stored in merged_addresses so it flows through the
-                        # MERGED: prefix path in get_v36_merged_weights/canonical builder.
-                        if addr_type == 'p2sh' and not merged_addresses.get('_validated'):
-                            p2sh_merged_entries = self._auto_generate_p2sh_merged_addresses(pubkey_hash)
-                            if p2sh_merged_entries:
-                                merged_addresses['_validated'] = p2sh_merged_entries
-                                print >>sys.stderr, '[MERGED] Auto-generated P2SH merged address for %s (script_hash=%040x)' % (
-                                    user[:30] + '...' if len(user) > 30 else user, pubkey_hash)
+                        # Auto-generate merged chain address when miner provides
+                        # no explicit merged address via stratum.
+                        # Priority: explicit (already in _validated) > auto-convert > pool distribution
+                        if not merged_addresses.get('_validated'):
+                            auto_entries = self._auto_generate_merged_addresses(pubkey_hash, addr_type)
+                            if auto_entries:
+                                merged_addresses['_validated'] = auto_entries
+                                print >>sys.stderr, '[MERGED] Auto-converted %s address %s to merged chain %s' % (
+                                    addr_type.upper(),
+                                    user[:30] + '...' if len(user) > 30 else user,
+                                    'P2SH' if addr_type == 'p2sh' else 'P2PKH')
+                            else:
+                                # Tier 3: unconvertible — merged rewards go to pool distribution
+                                print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain — pool distribution' % (
+                                    user[:30] + '...' if len(user) > 30 else user, addr_type)
                     else:
                         print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
                         pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
@@ -1289,19 +1294,23 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         return result
 
-    def _auto_generate_p2sh_merged_addresses(self, script_hash):
-        """Auto-generate P2SH merged chain addresses for a miner using a P2SH parent address.
+    def _auto_generate_merged_addresses(self, pubkey_hash, addr_type):
+        """Auto-generate merged chain addresses from parent chain address (FALLBACK only).
         
-        When a miner connects with a P2SH LTC address and provides no explicit
-        --merged-address-doge, we auto-generate a DOGE P2SH address from the same
-        script_hash. This is stored in merged_addresses so it flows through the
-        MERGED: prefix path in get_v36_merged_weights and build_canonical_merged_coinbase.
+        Three-tier merged address priority:
+          1. Explicit miner-supplied merged address (stratum comma-separated) — HIGHEST
+          2. Auto-conversion from parent chain address (this method) — FALLBACK
+          3. Pool distribution (no merged address possible) — LAST RESORT
         
-        Caveat: the redeem script must use opcodes supported by the merged chain.
-        P2SH-P2WPKH (SegWit wrapped in P2SH) will be unspendable on chains without
-        SegWit support (e.g., Dogecoin). The miner is trusted to know their setup.
+        This method implements tier 2. It is ONLY called when the miner did NOT
+        supply an explicit merged address via stratum.
         
-        Returns: list of {chain_id, script} entries, or None if no merged chains configured
+        For P2PKH/bech32: pubkey_hash → P2PKH script on merged chain
+        For P2SH: script_hash → P2SH script on merged chain
+           Caveat: P2SH-P2WPKH redeem scripts are unspendable on chains without
+           SegWit (e.g., Dogecoin). The miner is trusted to know their setup.
+        
+        Returns: list of {chain_id, script} entries, or None (tier 3 — pool distribution)
         """
         entries = []
         # Generate for all known merged chains (currently just Dogecoin, chain_id 98)
@@ -1310,15 +1319,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 merged_net = self._get_merged_address_net(chain_id)
                 if merged_net is None:
                     continue
-                p2sh_version = getattr(merged_net, 'ADDRESS_P2SH_VERSION', None)
-                if p2sh_version is None:
-                    continue
-                # Build P2SH scriptPubKey: OP_HASH160 <20-byte-hash> OP_EQUAL
                 from p2pool.bitcoin.data import pack
-                p2sh_script = '\xa9\x14' + pack.IntType(160).pack(script_hash) + '\x87'
-                entries.append({'chain_id': chain_id, 'script': p2sh_script})
+                if addr_type == 'p2sh':
+                    p2sh_version = getattr(merged_net, 'ADDRESS_P2SH_VERSION', None)
+                    if p2sh_version is None:
+                        continue
+                    # P2SH scriptPubKey: OP_HASH160 <20-byte-hash> OP_EQUAL
+                    script = '\xa9\x14' + pack.IntType(160).pack(pubkey_hash) + '\x87'
+                elif addr_type in ('p2pkh', 'bech32'):
+                    # P2PKH scriptPubKey: OP_DUP OP_HASH160 <20-byte-hash> OP_EQUALVERIFY OP_CHECKSIG
+                    script = '\x76\xa9\x14' + pack.IntType(160).pack(pubkey_hash) + '\x88\xac'
+                else:
+                    # Unconvertible address type — tier 3: pool distribution
+                    continue
+                entries.append({'chain_id': chain_id, 'script': script})
             except Exception as e:
-                print >>sys.stderr, '[MERGED] Failed to auto-generate P2SH for chain %d: %s' % (chain_id, e)
+                print >>sys.stderr, '[MERGED] Failed to auto-convert %s for chain %d: %s' % (addr_type, chain_id, e)
         return entries if entries else None
 
     def _get_merged_address_net(self, chainid):
@@ -1414,10 +1430,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
                     if weights and total_weight > 0:
                         # Determine finder script from parent-chain user address
+                        # Three-tier priority: explicit merged addr > auto-convert > pool distribution
                         base_user = user.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
                         try:
-                            pubkey_hash_int, version, _ = bitcoin_data.address_to_pubkey_hash(base_user, parent_net)
-                            share_pubkey_hash = pubkey_hash_int if version == parent_net.ADDRESS_VERSION else None
+                            pubkey_hash_int, version, witver = bitcoin_data.address_to_pubkey_hash(base_user, parent_net)
+                            if version == parent_net.ADDRESS_VERSION:
+                                share_pubkey_hash = pubkey_hash_int  # P2PKH
+                            elif version == -1 and witver == 0 and pubkey_hash_int <= (1 << 160) - 1:
+                                share_pubkey_hash = pubkey_hash_int  # bech32 P2WPKH — same pubkey_hash
+                            else:
+                                share_pubkey_hash = None  # P2SH etc. — rely on merged_addresses
                         except Exception:
                             share_pubkey_hash = None
 
