@@ -1135,7 +1135,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         else:
             try:
                 if not user or not user.strip():
-                    pubkey_hash = self.my_pubkey_hash
+                    # No address provided — redistribute rewards to all miners
+                    pubkey_hash = p2pool_data.POOL_REDISTRIBUTION_PUBKEY_HASH
+                    pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
                 else:
                     addr_result = is_pubkey_hash_address(user, self.node.net.PARENT)
                     is_convertible = addr_result[0]
@@ -1190,9 +1192,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
                         pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                         pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
-            except: # XXX blah
-                pubkey_hash = self.my_pubkey_hash
-                pubkey_type = self.my_pubkey_type
+            except: # Invalid/unparseable address — redistribute to all miners
+                pubkey_hash = p2pool_data.POOL_REDISTRIBUTION_PUBKEY_HASH
+                pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
+                print >>sys.stderr, '[POOL] Invalid miner address %s — rewards redistributed to all miners proportionally' % (
+                    user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)')
         
         # Append worker name to user for identification
         if worker:

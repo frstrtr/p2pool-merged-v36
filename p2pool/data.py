@@ -593,6 +593,39 @@ PUBKEY_TYPE_P2PKH  = 0
 PUBKEY_TYPE_P2WPKH = 1
 PUBKEY_TYPE_P2SH   = 2
 
+# Special pubkey_hash for pool redistribution — rewards from shares with this
+# hash are distributed proportionally to all other miners in the PPLNS window.
+# Used when a miner provides a missing or invalid address.
+POOL_REDISTRIBUTION_PUBKEY_HASH = '\x00' * 20
+
+def _redistribute_pool_amount(amounts, pool_addr, donation_addrs=None):
+    """Redistribute pool redistribution address rewards proportionally to all other miners.
+    
+    When miners provide invalid/missing addresses, their PPLNS weight goes to a
+    special redistribution address. This function takes that weight and spreads it
+    proportionally among all valid miners (excluding donation addresses).
+    Uses deterministic integer arithmetic for consensus compatibility.
+    """
+    if pool_addr not in amounts:
+        return
+    _pool_amount = amounts.pop(pool_addr)
+    if _pool_amount <= 0:
+        return
+    _exclude = donation_addrs or set()
+    _valid = {a: v for a, v in amounts.items() if a not in _exclude and v > 0}
+    if not _valid:
+        return  # No valid miners — amount falls to donation via remainder
+    _total = sum(_valid.values())
+    _given = 0
+    _items = sorted(_valid.items())  # deterministic sort by address
+    for i, (a, v) in enumerate(_items):
+        if i == len(_items) - 1:
+            amounts[a] += _pool_amount - _given  # last miner gets remainder (no rounding loss)
+        else:
+            _portion = _pool_amount * v // _total
+            amounts[a] += _portion
+            _given += _portion
+
 def pubkey_type_to_version_witver(pubkey_type, net):
     """Map V36 pubkey_type integer to (version, witver) for script/address construction."""
     if pubkey_type == PUBKEY_TYPE_P2WPKH:
@@ -830,6 +863,16 @@ class BaseShare(object):
         # 0.5% goes to block finder
         amounts[this_address] = amounts.get(this_address, 0) \
                                 + share_data['subsidy']//200
+        
+        # V36: Pool redistribution — invalid/missing miner rewards distributed
+        # proportionally to all other miners in the PPLNS window.
+        # If no valid miners exist, the amount falls to donation via remainder.
+        if v36_active:
+            _pool_addr = bitcoin_data.pubkey_hash_to_address(
+                POOL_REDISTRIBUTION_PUBKEY_HASH, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+            _redistribute_pool_amount(amounts, _pool_addr,
+                {primary_donation_address, combined_donation_addr})
+        
         # all that's left over is the donation weight and some extra
         # satoshis due to rounding
         total_donation = share_data['subsidy'] - sum(amounts.itervalues())
@@ -2064,10 +2107,18 @@ def get_user_stale_props(tracker, share_hash, lookbehind, net):
 def get_expected_payouts(tracker, best_share_hash, block_target, subsidy, net):
     weights, total_weight, donation_weight = tracker.get_cumulative_weights(best_share_hash, min(tracker.get_height(best_share_hash), net.REAL_CHAIN_LENGTH), 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target))
     res = dict((script, subsidy*weight//total_weight) for script, weight in weights.iteritems())
+    
+    # V36: Pool redistribution — invalid/missing miner rewards distributed
+    # proportionally to all other miners in the PPLNS window.
+    best_share = tracker.items[best_share_hash]
+    if best_share.VERSION >= 36:
+        _pool_addr = bitcoin_data.pubkey_hash_to_address(
+            POOL_REDISTRIBUTION_PUBKEY_HASH, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+        _redistribute_pool_amount(res, _pool_addr)
+    
     # Use correct donation address based on whether V36 is active:
     # V36+: COMBINED_DONATION_SCRIPT (P2SH) → combined_donation_script_to_address()
     # Pre-V36: DONATION_SCRIPT (P2PK) → donation_script_to_address()
-    best_share = tracker.items[best_share_hash]
     if best_share.VERSION >= 36:
         donation_addr = combined_donation_script_to_address(net)
     else:
