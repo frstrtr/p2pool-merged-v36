@@ -480,39 +480,34 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     
     def get_current_merged_payouts():
         """
-        Get current payouts with derived merged chain addresses.
+        Get current payouts with merged chain addresses from V36 PPLNS weights.
         
-        IMPORTANT: For addresses that cannot be converted to the merged chain
-        (P2SH, P2WSH, P2TR), their share of the merged block reward is
-        redistributed proportionally to all convertible addresses.
-        This ensures 100% of the merged block reward is distributed.
+        Uses get_v36_merged_weights() to compute the actual sharechain-derived
+        payout distribution. Two types of merged address keys:
+          - 'MERGED:<hex_script>': Explicit merged chain address from V36 share's
+            merged_addresses field. Decoded and displayed directly.
+          - Parent chain address string: Auto-converted from LTC to DOGE format.
+            P2SH/P2WSH/P2TR addresses cannot be converted — their weight is
+            redistributed proportionally to convertible/explicit addresses.
         
-        The primary donation (author fee) does NOT receive redistributed rewards -
-        only the secondary donation, node fee, and regular miners benefit.
-        
-        Returns dict: {parent_address: {amount: X, merged: [{network: Y, symbol: Z, address: A, amount: B}, ...]}}
+        Returns dict: {parent_address: {amount: X, merged: [{network, symbol, address, amount, source}, ...]}}
         """
         from p2pool.work import is_pubkey_hash_address
         
-        # Get main chain payouts (in satoshis for proportion calculation)
-        main_payouts_satoshis = dict((address, value) for address, value in node.get_current_txouts().iteritems())
-        main_payouts = dict((address, value/1e8) for address, value in main_payouts_satoshis.iteritems())
-        
-        # Calculate total main chain payout for proportion calculation
-        total_main_satoshis = sum(main_payouts_satoshis.values())
+        # Get main chain payouts for display
+        main_payouts = dict((address, value/1e8) for address, value
+                            in node.get_current_txouts().iteritems())
         
         # Check if we have merged work active
         merged_chains = []
         if hasattr(wb, 'merged_work') and wb.merged_work.value:
             for chainid, aux_work in wb.merged_work.value.iteritems():
-                # Get merged chain block reward - try coinbasevalue first, then template
                 merged_reward = aux_work.get('coinbasevalue', 0)
                 if merged_reward == 0:
                     template = aux_work.get('template')
                     if template and 'coinbasevalue' in template:
                         merged_reward = template['coinbasevalue']
                 
-                # Determine network name and symbol based on chainid
                 if chainid == 98:  # Dogecoin
                     merged_net_name = 'Dogecoin'
                     merged_net_symbol = 'DOGE'
@@ -538,77 +533,165 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         'reward': merged_reward,
                     })
         
-        # Build result with merged addresses for each parent address
+        # Build result — start with main chain payouts
         result = {}
+        for parent_address, amount in main_payouts.iteritems():
+            result[parent_address] = {'amount': amount, 'merged': []}
+        
+        best = node.best_share_var.value
         parent_net = node.net.PARENT if hasattr(node.net, 'PARENT') else node.net
         
-        # Identify primary donation address (should NOT receive redistributed rewards)
-        # The primary donation is typically the first/smallest output that goes to author
-        primary_donation_address = None
-        if hasattr(wb, 'donation_percentage') and wb.donation_percentage > 0:
-            # Primary donation is the author donation - identify it by being in the payout list
-            # It's typically a hardcoded address, but we'll exclude it from redistribution
-            # by checking if it's the donation script
-            pass  # We'll handle this by checking converted addresses
-        
-        # For each merged chain, calculate payouts with redistribution
         for chain in merged_chains:
-            # First pass: identify convertible vs non-convertible addresses
-            convertible_addresses = {}  # {parent_addr: (pubkey_hash, main_satoshis)}
-            unconvertible_satoshis = 0
+            if best is None or chain['reward'] <= 0:
+                continue
             
-            for parent_address, main_sats in main_payouts_satoshis.iteritems():
+            # Get V36 PPLNS weights for this merged chain
+            try:
+                share_height = node.tracker.get_height(best)
+                parent_block_target = node.bitcoind_work.value['bits'].target
+                weights, total_weight, donation_weight = p2pool_data.get_v36_merged_weights(
+                    node.tracker,
+                    best,
+                    max(0, min(share_height, node.net.REAL_CHAIN_LENGTH)),
+                    65535 * node.net.SPREAD * bitcoin_data.target_to_average_attempts(parent_block_target),
+                    chain_id=chain['chainid'],
+                )
+            except Exception:
+                continue
+            
+            if total_weight <= 0:
+                continue
+            
+            # Build MERGED_script → parent_address mapping by walking shares.
+            # get_v36_merged_weights loses this association. We need it to nest
+            # explicit DOGE payouts under their parent LTC address in the result.
+            merged_key_to_parent = {}  # {'MERGED:<script_hex>': parent_address}
+            try:
+                chain_len = max(0, min(share_height, node.net.REAL_CHAIN_LENGTH))
+                for share in node.tracker.get_chain(best, chain_len):
+                    if share.VERSION >= 36:
+                        merged_addrs = getattr(share, 'merged_addresses', None)
+                        if merged_addrs is None and hasattr(share, 'share_info') and isinstance(share.share_info, dict):
+                            merged_addrs = share.share_info.get('merged_addresses', None)
+                        if merged_addrs:
+                            for entry in merged_addrs:
+                                if entry['chain_id'] == chain['chainid']:
+                                    mkey = 'MERGED:' + entry['script'].encode('hex')
+                                    if mkey not in merged_key_to_parent:
+                                        merged_key_to_parent[mkey] = share.address
+                                    break
+            except Exception:
+                pass
+            
+            # Resolve weight keys to merged chain addresses.
+            # Two key types from get_v36_merged_weights():
+            #   'MERGED:<hex_script>' = explicit merged chain script
+            #   parent_address_string = needs auto-conversion
+            resolved = {}       # {merged_address: weight}
+            key_to_parent = {}  # {merged_address: parent_address}
+            accepted_weight = 0
+            
+            for key, weight in weights.iteritems():
                 try:
-                    is_convertible, pubkey_hash, error_msg = is_pubkey_hash_address(parent_address, parent_net)
-                    if is_convertible and pubkey_hash is not None:
-                        convertible_addresses[parent_address] = (pubkey_hash, main_sats)
+                    if key.startswith('MERGED:'):
+                        # Explicit merged chain script from V36 share
+                        merged_script = key[7:].decode('hex')
+                        try:
+                            merged_address = bitcoin_data.script2_to_address(
+                                merged_script, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
+                        except Exception:
+                            merged_address = 'script:' + key[7:]  # Fallback for non-P2PKH scripts
+                        resolved[merged_address] = resolved.get(merged_address, 0) + weight
+                        # Use the share chain mapping to find the parent LTC address
+                        parent_addr = merged_key_to_parent.get(key, None)
+                        if parent_addr:
+                            key_to_parent[merged_address] = parent_addr
+                        accepted_weight += weight
                     else:
-                        # This address cannot be converted - its merged reward will be redistributed
-                        unconvertible_satoshis += main_sats
+                        # Parent chain address — try auto-conversion
+                        is_convertible, pubkey_hash, _ = is_pubkey_hash_address(key, parent_net)
+                        if is_convertible and pubkey_hash is not None:
+                            merged_address = bitcoin_data.pubkey_hash_to_address(
+                                pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
+                            resolved[merged_address] = resolved.get(merged_address, 0) + weight
+                            key_to_parent[merged_address] = key
+                            accepted_weight += weight
+                        # else: unconvertible — weight redistributed via smaller denominator
                 except Exception:
-                    unconvertible_satoshis += main_sats
+                    pass
             
-            # Calculate the redistribution factor
-            # Total convertible satoshis (for redistribution proportions)
-            convertible_total_satoshis = sum(sats for _, sats in convertible_addresses.values())
+            if accepted_weight <= 0:
+                continue
             
-            # Redistribution: unconvertible share gets divided among convertible addresses
-            # proportionally to their share of the convertible pool
-            # BUT exclude primary donation from receiving extra redistribution
-            if convertible_total_satoshis > 0 and chain['reward'] > 0:
-                for parent_address in main_payouts_satoshis:
-                    if parent_address not in result:
-                        result[parent_address] = {'amount': main_payouts[parent_address], 'merged': []}
-                    
-                    if parent_address in convertible_addresses:
-                        pubkey_hash, main_sats = convertible_addresses[parent_address]
-                        
-                        # Base proportion of merged reward (same as main chain)
-                        base_proportion = main_sats / float(total_main_satoshis)
-                        base_merged_amount = chain['reward'] * base_proportion
-                        
-                        # Additional redistribution from unconvertible addresses
-                        # Proportional to this address's share of convertible pool
-                        redistribution_proportion = main_sats / float(convertible_total_satoshis)
-                        redistribution_amount = (chain['reward'] * (unconvertible_satoshis / float(total_main_satoshis))) * redistribution_proportion
-                        
-                        total_merged_amount = (base_merged_amount + redistribution_amount) / 1e8
-                        
-                        merged_address = bitcoin_data.pubkey_hash_to_address(
-                            pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
-                        
-                        result[parent_address]['merged'].append({
-                            'network': chain['network'],
-                            'symbol': chain['symbol'],
-                            'address': merged_address,
-                            'amount': total_merged_amount,
-                        })
-                    # Non-convertible addresses get no merged payout (their share is redistributed)
-        
-        # Handle case where no merged chains are active - still build result from main payouts
-        for parent_address, amount in main_payouts.iteritems():
-            if parent_address not in result:
-                result[parent_address] = {'amount': amount, 'merged': []}
+            # Distributable merged reward = total reward minus donation portion
+            # Donation ratio comes from sharechain weights (same as parent PPLNS)
+            grand_total = total_weight + donation_weight
+            miner_reward = chain['reward'] * float(total_weight) / float(grand_total) if grand_total > 0 else chain['reward']
+            donation_reward = chain['reward'] - miner_reward
+            
+            # Assign merged payouts to parent addresses
+            for merged_address, weight in resolved.iteritems():
+                fraction = float(weight) / float(accepted_weight)
+                merged_amount = miner_reward * fraction / 1e8
+                
+                parent_addr = key_to_parent.get(merged_address, None)
+                source = 'auto-convert' if parent_addr and merged_address not in merged_key_to_parent.values() else 'explicit'
+                # Determine source: if merged_address came from a MERGED: key, it's explicit
+                has_explicit_key = any(merged_key_to_parent.get(k) == parent_addr 
+                                       for k in weights if k.startswith('MERGED:')) if parent_addr else False
+                if has_explicit_key:
+                    source = 'explicit'
+                elif parent_addr:
+                    source = 'auto-convert'
+                else:
+                    source = 'explicit'
+                
+                entry = {
+                    'network': chain['network'],
+                    'symbol': chain['symbol'],
+                    'address': merged_address,
+                    'amount': merged_amount,
+                    'source': source,
+                }
+                
+                if parent_addr and parent_addr in result:
+                    result[parent_addr]['merged'].append(entry)
+                elif merged_address not in result:
+                    result[merged_address] = {'amount': 0, 'merged': []}
+                    result[merged_address]['merged'].append(entry)
+                else:
+                    result[merged_address]['merged'].append(entry)
+            
+            # Add donation info — use precomputed DOGE P2SH address and nest
+            # under the LTC donation address that already exists in main payouts.
+            # All addresses are hardcoded constants to avoid per-request crypto
+            # (DDoS on web API must not starve the mining reactor loop).
+            if donation_reward > 0:
+                from p2pool import data as p2pool_data_mod
+                ltc_donation_addr = p2pool_data_mod.donation_script_to_address(node.net)
+                
+                # Precomputed DOGE P2SH addresses for COMBINED_DONATION_SCRIPT
+                if chain['chainid'] == 98:  # Dogecoin
+                    parent_symbol = getattr(node.net.PARENT, 'SYMBOL', '') if hasattr(node.net, 'PARENT') else ''
+                    is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
+                    doge_donation_addr = p2pool_data_mod.COMBINED_DONATION_DOGE_TESTNET if is_testnet else p2pool_data_mod.COMBINED_DONATION_DOGE_MAINNET
+                else:
+                    doge_donation_addr = '(donation)'
+                
+                donation_entry = {
+                    'network': chain['network'],
+                    'symbol': chain['symbol'],
+                    'address': doge_donation_addr,
+                    'amount': donation_reward / 1e8,
+                    'source': 'donation',
+                }
+                # Attach to the LTC donation address entry
+                if ltc_donation_addr and ltc_donation_addr in result:
+                    result[ltc_donation_addr]['merged'].append(donation_entry)
+                else:
+                    # Fallback: create the entry if main payouts didn't include it
+                    result.setdefault(ltc_donation_addr or '_donation', {'amount': 0, 'merged': []})
+                    result[ltc_donation_addr or '_donation']['merged'].append(donation_entry)
         
         return result
     
@@ -2084,7 +2167,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             return None
         share = node.tracker.items[int(share_hash_str, 16)]
         
-        return dict(
+        result = dict(
             parent='%064x' % share.previous_hash if share.previous_hash else "None",
             far_parent='%064x' % share.share_info['far_share_hash'] if share.share_info['far_share_hash'] else "None",
             children=['%064x' % x for x in sorted(node.tracker.reverse.get(share.hash, set()), key=lambda sh: -len(node.tracker.reverse.get(sh, set())))], # sorted from most children to least children
@@ -2130,6 +2213,61 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 other_transaction_hashes=['%064x' % x for x in share.get_other_tx_hashes(node.tracker)],
             ),
         )
+        
+        # Add V36 metadata if available
+        if share.VERSION >= 36:
+            v36_meta = {}
+            
+            # merged_addresses: per-chain payment scripts provided by miner via stratum
+            merged_addrs = getattr(share, 'merged_addresses', None)
+            if merged_addrs:
+                v36_meta['merged_addresses'] = []
+                for entry in merged_addrs:
+                    addr_info = {'chain_id': entry['chain_id'], 'script_hex': entry['script'].encode('hex')}
+                    # Try to resolve to human-readable address
+                    try:
+                        chain_id = entry['chain_id']
+                        if chain_id == 98:  # Dogecoin
+                            try:
+                                from p2pool.bitcoin.networks import dogecoin_testnet4alpha as dtn4a
+                                addr_info['address'] = bitcoin_data.script2_to_address(entry['script'], dtn4a.ADDRESS_VERSION, dtn4a)
+                            except Exception:
+                                try:
+                                    from p2pool.bitcoin.networks import dogecoin_testnet as dtn
+                                    addr_info['address'] = bitcoin_data.script2_to_address(entry['script'], dtn.ADDRESS_VERSION, dtn)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    v36_meta['merged_addresses'].append(addr_info)
+            else:
+                v36_meta['merged_addresses'] = None  # auto-conversion fallback
+            
+            # merged_payout_hash: consensus commitment for PPLNS distribution
+            mph = share.share_info.get('merged_payout_hash', None)
+            v36_meta['merged_payout_hash'] = '%064x' % mph if mph else None
+            
+            # message_data: share messaging payload
+            msg_data = getattr(share, '_message_data', None)
+            if msg_data:
+                v36_meta['message_data_hex'] = msg_data.encode('hex')
+                v36_meta['message_data_size'] = len(msg_data)
+                # Try to parse message types
+                try:
+                    from p2pool.share_messages import unpack_share_messages
+                    parsed = unpack_share_messages(msg_data)
+                    v36_meta['messages'] = [{'type': m.msg_type, 'flags': m.flags} for m in parsed]
+                except Exception:
+                    v36_meta['messages'] = None
+            else:
+                v36_meta['message_data_hex'] = None
+                v36_meta['message_data_size'] = 0
+                v36_meta['messages'] = None
+            
+            result['v36_metadata'] = v36_meta
+        
+        result['version'] = share.VERSION
+        return result
 
     def get_share_address(share_hash_str):
         if int(share_hash_str, 16) not in node.tracker.items:
@@ -2144,6 +2282,96 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
 
     new_root.putChild('payout_address', WebInterface(lambda share_hash_str: get_share_address(share_hash_str)))
     new_root.putChild('share', WebInterface(lambda share_hash_str: get_share(share_hash_str)))
+    
+    def get_v36_status():
+        """Diagnostic endpoint for V36 share metadata, AutoRatchet state, and merged address tracking."""
+        status = {}
+        
+        # AutoRatchet state
+        ratchet = getattr(wb, 'auto_ratchet', None)
+        if ratchet:
+            status['auto_ratchet'] = {
+                'state': ratchet.state,
+                'activated_at': ratchet._activated_at,
+                'activated_height': ratchet._activated_height,
+                'confirmed_at': ratchet._confirmed_at,
+            }
+        else:
+            status['auto_ratchet'] = None
+        
+        # Share version stats from recent chain
+        best = node.best_share_var.value
+        if best is not None:
+            height = node.tracker.get_height(best)
+            sample = min(height, node.net.REAL_CHAIN_LENGTH)
+            v35_count = 0
+            v36_count = 0
+            v36_with_merged_addr = 0
+            v36_with_message = 0
+            v36_with_payout_hash = 0
+            
+            for share in node.tracker.get_chain(best, sample):
+                if share.VERSION >= 36:
+                    v36_count += 1
+                    if getattr(share, 'merged_addresses', None):
+                        v36_with_merged_addr += 1
+                    if getattr(share, '_message_data', None):
+                        v36_with_message += 1
+                    if share.share_info.get('merged_payout_hash', None):
+                        v36_with_payout_hash += 1
+                else:
+                    v35_count += 1
+            
+            status['share_chain'] = {
+                'height': height,
+                'sample_size': sample,
+                'v35_shares': v35_count,
+                'v36_shares': v36_count,
+                'v36_with_explicit_merged_addr': v36_with_merged_addr,
+                'v36_with_message_data': v36_with_message,
+                'v36_with_payout_hash': v36_with_payout_hash,
+                'v36_percentage': round(v36_count * 100.0 / sample, 2) if sample > 0 else 0,
+            }
+        else:
+            status['share_chain'] = None
+        
+        # Current merged mining info
+        current_merged = getattr(wb, '_current_merged_addresses', {})
+        if current_merged:
+            status['current_miner_merged_addresses'] = {
+                'dogecoin': current_merged.get('dogecoin', None),
+                'has_validated': current_merged.get('_validated') is not None,
+            }
+        else:
+            status['current_miner_merged_addresses'] = None
+        
+        # Merged PPLNS weights summary  
+        if best is not None and hasattr(wb, 'merged_work') and wb.merged_work.value:
+            for chain_id in wb.merged_work.value:
+                try:
+                    share_height = node.tracker.get_height(best)
+                    parent_block_target = node.bitcoind_work.value['bits'].target
+                    weights, total_weight, donation_weight = p2pool_data.get_v36_merged_weights(
+                        node.tracker, best,
+                        max(0, min(share_height, node.net.REAL_CHAIN_LENGTH)),
+                        65535 * node.net.SPREAD * bitcoin_data.target_to_average_attempts(parent_block_target),
+                        chain_id)
+                    explicit_count = sum(1 for k in weights if k.startswith('MERGED:'))
+                    fallback_count = sum(1 for k in weights if not k.startswith('MERGED:'))
+                    status['merged_pplns_chain_%d' % chain_id] = {
+                        'total_miners': len(weights),
+                        'explicit_merged_addr_miners': explicit_count,
+                        'auto_convert_miners': fallback_count,
+                        'total_weight': total_weight,
+                        'donation_weight': donation_weight,
+                    }
+                except Exception as e:
+                    status['merged_pplns_chain_%d' % chain_id] = {'error': str(e)}
+        
+        return status
+    
+    new_root.putChild('v36_status', WebInterface(get_v36_status))
+    web_root.putChild('v36_status', WebInterface(get_v36_status))
     new_root.putChild('heads', WebInterface(lambda: ['%064x' % x for x in node.tracker.heads]))
     new_root.putChild('verified_heads', WebInterface(lambda: ['%064x' % x for x in node.tracker.verified.heads]))
     new_root.putChild('tails', WebInterface(lambda: ['%064x' % x for t in node.tracker.tails for x in node.tracker.reverse.get(t, set())]))

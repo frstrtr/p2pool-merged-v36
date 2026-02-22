@@ -146,6 +146,17 @@ COMBINED_DONATION_SCRIPT = 'a9148c6272621d89e8fa526dd86acff60c7136be8e8587'.deco
 # - Dogecoin testnet post-V36 : 2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f
 # Use these when monitoring on-chain donation marker outputs across activation.
 
+# Precomputed merged-chain donation addresses.
+# Used by web API endpoints to avoid per-request script2_to_address() / hash160() calls.
+#
+# Pre-V36 (from DONATION_SCRIPT P2PK — requires hash160(pubkey) to derive):
+DONATION_DOGE_MAINNET = 'DQ8AwqR2XJE9G5dSEfspJYH7Spre85dj6L'
+DONATION_DOGE_TESTNET = 'noBEfr9wTGgs94CdGVXGYwsQghEwBsXw4K'
+#
+# Post-V36 (from COMBINED_DONATION_SCRIPT P2SH — hash already embedded in script):
+COMBINED_DONATION_DOGE_MAINNET = 'A5EZCT4tUrtoKuvJaWbtVQADzdUKdtsqpr'
+COMBINED_DONATION_DOGE_TESTNET = '2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f'
+
 # Precomputed hash key for COMBINED_DONATION_SCRIPT fast-path.
 #
 # For P2SH-wrapped combined donation script, the key is the embedded script hash
@@ -208,14 +219,25 @@ def script_to_pubkey_hash(script):
     
     raise ValueError('Unsupported script format (length=%d)' % len(script))
 
+_donation_addr_cache = {}  # {id(net): address} — zero-crypto cached lookup
 def donation_script_to_address(net):
-    try:
-        return bitcoin_data.script2_to_address(
-                DONATION_SCRIPT, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
-    except ValueError:
-        return bitcoin_data.script2_to_address(
-                DONATION_SCRIPT, net.PARENT.ADDRESS_P2SH_VERSION, -1, net.PARENT)
+    """Get address for pre-V36 DONATION_SCRIPT (P2PK).
+    
+    Uses precomputed DONATION_PUBKEY_HASH to skip hash160(pubkey) entirely.
+    Result is cached per net — O(1) after first call, and first call itself
+    is just base58check encoding (no cryptographic hashing).
+    """
+    cached = _donation_addr_cache.get(id(net))
+    if cached is not None:
+        return cached
+    # Use precomputed DONATION_PUBKEY_HASH — avoids hash160(65-byte pubkey)
+    # pubkey_hash_to_address is just base58check encoding, zero crypto.
+    addr = bitcoin_data.pubkey_hash_to_address(
+            DONATION_PUBKEY_HASH, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+    _donation_addr_cache[id(net)] = addr
+    return addr
 
+_combined_donation_addr_cache = {}  # {net: address}
 def combined_donation_script_to_address(net):
     """Get display/key address for the V36 combined donation script.
 
@@ -233,12 +255,17 @@ def combined_donation_script_to_address(net):
     """
     if net is None:
         return 'P2SH:combined_donation'
-    try:
-        return bitcoin_data.script2_to_address(
-                COMBINED_DONATION_SCRIPT, net.PARENT.ADDRESS_P2SH_VERSION, -1, net.PARENT)
-    except ValueError:
-        return bitcoin_data.script2_to_address(
-                COMBINED_DONATION_SCRIPT, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+    cached = _combined_donation_addr_cache.get(id(net))
+    if cached is not None:
+        return cached
+    # Use precomputed COMBINED_DONATION_PUBKEY_HASH — skips script2_to_address
+    # parsing. For P2SH the hash is embedded in the script (byte slice), but
+    # using the precomputed int is even faster — just base58check.
+    addr = bitcoin_data.pubkey_hash_to_address(
+            COMBINED_DONATION_PUBKEY_HASH,
+            net.PARENT.ADDRESS_P2SH_VERSION, -1, net.PARENT)
+    _combined_donation_addr_cache[id(net)] = addr
+    return addr
 
 class BaseShare(object):
     VERSION = 0
@@ -879,6 +906,7 @@ class BaseShare(object):
             known_txs=None, last_txout_nonce=self.contents['last_txout_nonce'], 
             segwit_data=self.share_info.get('segwit_data', None),
             v36_active=(self.VERSION >= 36),
+            merged_addresses=self.share_info.get('merged_addresses', None),
             message_data=self._message_data)
         
         assert other_tx_hashes2 == other_tx_hashes

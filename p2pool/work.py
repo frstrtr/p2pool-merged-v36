@@ -1080,6 +1080,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         # chain_id 98 = Dogecoin (0x62)
                         merged_addresses['_validated'] = [{'chain_id': 98, 'script': script}]
                         validated = True
+                        print >>sys.stderr, '[MERGED] Validated explicit DOGE address: %s (chain: %s, script: %s)' % (merged_addr, chain_name, script.encode('hex'))
                         break
                     except (ValueError, Exception):
                         continue
