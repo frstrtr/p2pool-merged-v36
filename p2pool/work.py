@@ -1334,27 +1334,82 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
             try:
                 merged_addr_net = self._get_merged_address_net(chainid)
-                finder_address = self._derive_merged_finder_address(user, merged_addresses, chainid, merged_addr_net, parent_net)
-                finder_fee_percentage = aux_work.get('finder_fee_percentage', 0.5)
-
                 template = aux_work['template']
-                coinbase_text = template.get('auxpow', {}).get('coinbase_text')
-                doge_coinbase_tx = merged_mining.build_merged_coinbase(
-                    template,
-                    aux_work['shareholders'],
-                    merged_addr_net,
-                    aux_work.get('donation_percentage', self.donation_percentage),
-                    None,  # node_owner_address: always None for merged chain (PPLNS only)
-                    0,  # node_owner_fee: always 0 for merged chain (PPLNS only)
-                    parent_net,
-                    coinbase_text,
-                    v36_active=v36_active,
-                    finder_address=finder_address,
-                    finder_fee_percentage=finder_fee_percentage,
-                )
+                use_canonical = False
 
+                if v36_active:
+                    # === CANONICAL PATH (V36+) ===
+                    # Use deterministic canonical coinbase builder for consensus enforcement.
+                    # Peers re-derive this exact coinbase in check() and verify it matches
+                    # what's committed in mm_data → DOGE block hash → DOGE header → merkle root.
+                    from p2pool.data import (get_v36_merged_weights,
+                                             build_canonical_merged_coinbase,
+                                             get_canonical_merged_finder_script)
+
+                    best_share_hash = self.node.best_share_var.value
+                    block_target = self.current_work.value['bits'].target
+                    tracker = self.node.tracker
+
+                    height = tracker.get_height(best_share_hash) if best_share_hash is not None else 0
+                    max_weight = 65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
+                    chain_length = min(height, self.node.net.REAL_CHAIN_LENGTH) if height > 0 else 0
+
+                    if chain_length > 0 and best_share_hash is not None:
+                        weights, total_weight, donation_weight = get_v36_merged_weights(
+                            tracker, best_share_hash, chain_length, max_weight, chain_id=chainid)
+                    else:
+                        weights, total_weight, donation_weight = {}, 0, 0
+
+                    if weights and total_weight > 0:
+                        # Determine finder script from parent-chain user address
+                        base_user = user.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
+                        try:
+                            pubkey_hash_int, version, _ = bitcoin_data.address_to_pubkey_hash(base_user, parent_net)
+                            share_pubkey_hash = pubkey_hash_int if version == parent_net.ADDRESS_VERSION else None
+                        except Exception:
+                            share_pubkey_hash = None
+
+                        # Get validated merged addresses for this chain
+                        merged_addrs_list = None
+                        if merged_addresses and merged_addresses.get('_validated'):
+                            merged_addrs_list = merged_addresses['_validated']
+
+                        finder_script = get_canonical_merged_finder_script(
+                            share_pubkey_hash, merged_addrs_list, chainid, merged_addr_net)
+
+                        coinbase_value = template['coinbasevalue']
+                        block_height_merged = template['height']
+
+                        doge_coinbase_tx = build_canonical_merged_coinbase(
+                            weights, total_weight, donation_weight,
+                            coinbase_value, block_height_merged,
+                            finder_script, merged_addr_net, parent_net)
+                        use_canonical = True
+
+                if not use_canonical:
+                    # === LEGACY/FALLBACK PATH ===
+                    # Pre-V36 or no V36 shares in window yet — use old float-based builder.
+                    finder_address = self._derive_merged_finder_address(
+                        user, merged_addresses, chainid, merged_addr_net, parent_net)
+                    finder_fee_percentage = aux_work.get('finder_fee_percentage', 0.5)
+                    coinbase_text = template.get('auxpow', {}).get('coinbase_text')
+                    doge_coinbase_tx = merged_mining.build_merged_coinbase(
+                        template,
+                        aux_work['shareholders'],
+                        merged_addr_net,
+                        aux_work.get('donation_percentage', self.donation_percentage),
+                        None,  # node_owner_address
+                        0,     # node_owner_fee
+                        parent_net,
+                        coinbase_text,
+                        v36_active=v36_active,
+                        finder_address=finder_address,
+                        finder_fee_percentage=finder_fee_percentage,
+                    )
+
+                # Compute DOGE block hash from per-user coinbase
                 doge_tx_hashes = [int(tx['hash'], 16) for tx in template.get('transactions', [])]
-                doge_coinbase_hash = bitcoin_data.hash256(bitcoin_data.tx_type.pack(doge_coinbase_tx))
+                doge_coinbase_hash = bitcoin_data.hash256(bitcoin_data.tx_id_type.pack(doge_coinbase_tx))
                 all_doge_tx_hashes = [doge_coinbase_hash] + doge_tx_hashes
                 doge_merkle_root = bitcoin_data.merkle_hash(all_doge_tx_hashes)
 
@@ -1373,16 +1428,32 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
                 doge_block_hash = bitcoin_data.hash256(bitcoin_data.block_header_type.pack(doge_header))
 
-                user_merged_work[chainid] = dict(
+                # Compute coinbase merkle link (proof: coinbase → merkle root)
+                coinbase_merkle_link = bitcoin_data.calculate_merkle_link(all_doge_tx_hashes, 0)
+
+                result = dict(
                     aux_work,
                     hash=doge_block_hash,
                     doge_header=doge_header,
                     doge_coinbase=doge_coinbase_tx,
                     doge_tx_hashes=all_doge_tx_hashes,
-                    finder_address=finder_address,
-                    finder_fee_percentage=finder_fee_percentage,
+                    coinbase_merkle_link=coinbase_merkle_link,
                 )
+
+                # V36 canonical path: attach verification data for share_info
+                if use_canonical:
+                    result['merged_coinbase_info_entry'] = {
+                        'chain_id': chainid,
+                        'coinbase_value': coinbase_value,
+                        'block_height': block_height_merged,
+                        'block_header_bytes': bitcoin_data.block_header_type.pack(doge_header),
+                        'coinbase_merkle_link': coinbase_merkle_link,
+                    }
+
+                user_merged_work[chainid] = result
             except Exception:
+                import traceback
+                traceback.print_exc()
                 user_merged_work[chainid] = aux_work
 
         return user_merged_work
@@ -1528,6 +1599,18 @@ class WorkerBridge(worker_interface.WorkerBridge):
             if current_merged and current_merged.get('_validated'):
                 merged_addresses_for_share = current_merged['_validated']
             
+            # V36+: Collect merged coinbase verification data from effective_merged_work.
+            # Each chain with canonical coinbase enforcement contributes one entry.
+            merged_coinbase_info_for_share = None
+            if v36_active and effective_merged_work:
+                mci_entries = []
+                for chain_id, emw in effective_merged_work.iteritems():
+                    entry = emw.get('merged_coinbase_info_entry')
+                    if entry:
+                        mci_entries.append(entry)
+                if mci_entries:
+                    merged_coinbase_info_for_share = mci_entries
+            
             share_info, gentx, other_transaction_hashes, get_share = share_type.generate_transaction(
                 tracker=self.node.tracker,
                 share_data=share_data_base,
@@ -1542,6 +1625,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 v36_active=v36_active,  # Pass V36 status for donation script switch
                 merged_addresses=merged_addresses_for_share,  # Validated merged chain addresses
                 message_data=self.transition_message_data if v36_active else None,
+                merged_coinbase_info=merged_coinbase_info_for_share,  # Merged coinbase verification data
             )
 
         packed_gentx = bitcoin_data.tx_type.pack(gentx)

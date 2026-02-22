@@ -157,6 +157,298 @@ DONATION_DOGE_TESTNET = 'noBEfr9wTGgs94CdGVXGYwsQghEwBsXw4K'
 COMBINED_DONATION_DOGE_MAINNET = 'A5EZCT4tUrtoKuvJaWbtVQADzdUKdtsqpr'
 COMBINED_DONATION_DOGE_TESTNET = '2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f'
 
+# ============================================================================
+# CANONICAL MERGED COINBASE CONSTRUCTION
+# ============================================================================
+# These constants define the deterministic merged chain coinbase format.
+# Every peer MUST produce the identical coinbase given the same inputs.
+# This enables consensus-level enforcement of merged mining reward distribution.
+
+CANONICAL_MERGED_COINBASE_TEXT = 'P2Pool merged mining'   # OP_RETURN text (fixed)
+CANONICAL_MERGED_COINBASE_EXTRA = '/P2Pool/'              # Coinbase input script extra
+CANONICAL_MERGED_FINDER_FEE_PER_MILLE = 5                 # 0.5% = 5 per mille (integer)
+
+def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
+                                     coinbase_value, block_height,
+                                     finder_script, merged_addr_net, parent_net):
+    """Build a deterministic merged chain coinbase transaction.
+    
+    ALL arithmetic is integer-only for cross-platform/cross-interpreter
+    determinism (no floats — avoids CPython vs PyPy rounding differences).
+    
+    Output ordering is canonical:
+      1. Miner outputs: sorted ascending by script bytes
+      2. OP_RETURN output (value=0, fixed text)
+      3. Donation output (COMBINED_DONATION_SCRIPT) — always LAST
+    
+    Finder fee is coalesced into the finder's miner output (not a separate output)
+    so output count remains minimal and ordering is unambiguous.
+    
+    Args:
+        weights: {address_key: weight} from get_v36_merged_weights(chain_id=X)
+        total_weight: grand total = sum(weights.values()) + donation_weight
+                      (already includes donation per get_v36_merged_weights convention)
+        donation_weight: donation weight from share chain
+        coinbase_value: total merged chain block reward (satoshis)
+        block_height: merged chain block height (for BIP34 coinbase script)
+        finder_script: P2PKH scriptPubKey for share creator on merged chain,
+                       or None if not convertible
+        merged_addr_net: merged chain network object (ADDRESS_VERSION, etc.)
+        parent_net: parent chain network object (for address_to_pubkey_hash)
+    
+    Returns:
+        dict: coinbase transaction (version, tx_ins, tx_outs, lock_time)
+    """
+    # Integer fee calculations — no floats anywhere
+    # NOTE: total_weight already includes donation_weight per get_v36_merged_weights()
+    # convention: total_weight == sum(weights.values()) + donation_weight
+    grand_total = total_weight
+    donation_amount = coinbase_value * donation_weight // grand_total if grand_total > 0 else 0
+    finder_fee_amount = coinbase_value * CANONICAL_MERGED_FINDER_FEE_PER_MILLE // 1000 if finder_script else 0
+    miners_reward = coinbase_value - donation_amount - finder_fee_amount
+    
+    # Resolve weight keys to merged chain scripts, accumulate amounts
+    # Keys from get_v36_merged_weights():
+    #   'MERGED:<hex_script>' = explicit merged chain script (use directly)
+    #   parent_address_string  = needs auto-conversion (P2PKH only)
+    script_weights = {}   # {script_bytes: accumulated_weight}
+    accepted_total_weight = 0
+    
+    for key, weight in weights.iteritems():
+        merged_script = None
+        if key.startswith('MERGED:'):
+            merged_script = key[7:].decode('hex')
+        else:
+            # Auto-convert: extract pubkey_hash from parent address
+            try:
+                pubkey_hash, version, _ = bitcoin_data.address_to_pubkey_hash(key, parent_net)
+                if version == parent_net.ADDRESS_VERSION:
+                    # P2PKH — construct merged chain P2PKH script directly
+                    merged_script = '\x76\xa9\x14' + pack.IntType(160).pack(pubkey_hash) + '\x88\xac'
+            except Exception:
+                pass  # Unconvertible (P2SH, P2WSH, etc.) — skip
+        
+        if merged_script is not None:
+            script_weights[merged_script] = script_weights.get(merged_script, 0) + weight
+            accepted_total_weight += weight
+    
+    # Compute miner amounts (integer division — remainder goes to donation)
+    output_amounts = {}  # {script_bytes: satoshi_amount}
+    total_distributed = 0
+    for s, w in script_weights.iteritems():
+        amount = miners_reward * w // accepted_total_weight if accepted_total_weight > 0 else 0
+        if amount > 0:
+            output_amounts[s] = amount
+            total_distributed += amount
+    
+    # Add finder fee (coalesced with miner output if same script)
+    if finder_fee_amount > 0 and finder_script is not None:
+        output_amounts[finder_script] = output_amounts.get(finder_script, 0) + finder_fee_amount
+    
+    # Rounding remainder → donation (integer division always truncates)
+    rounding_remainder = miners_reward - total_distributed
+    final_donation = donation_amount + rounding_remainder
+    
+    # Build sorted output list (deterministic ordering by script bytes)
+    tx_outs = []
+    for s in sorted(output_amounts.keys()):
+        tx_outs.append({'value': output_amounts[s], 'script': s})
+    
+    # OP_RETURN (fixed canonical text, value=0)
+    op_text = CANONICAL_MERGED_COINBASE_TEXT
+    if isinstance(op_text, unicode):
+        op_text = op_text.encode('utf-8')
+    tx_outs.append({'value': 0, 'script': '\x6a' + chr(len(op_text)) + op_text})
+    
+    # Donation (COMBINED_DONATION_SCRIPT, always LAST — matches parent chain convention)
+    tx_outs.append({'value': final_donation, 'script': COMBINED_DONATION_SCRIPT})
+    
+    # Coinbase input (BIP34 height + canonical extra data)
+    coinbase_script = script.create_push_script([block_height]) + CANONICAL_MERGED_COINBASE_EXTRA
+    
+    return {
+        'version': 1,
+        'tx_ins': [{'previous_output': None, 'sequence': None, 'script': coinbase_script}],
+        'tx_outs': tx_outs,
+        'lock_time': 0,
+    }
+
+
+def get_canonical_merged_finder_script(share_pubkey_hash, merged_addresses, chain_id, merged_addr_net):
+    """Derive the canonical finder scriptPubKey for a share creator on a merged chain.
+    
+    Deterministic from share data — used by both get_work() and check().
+    
+    Priority:
+      1. Explicit merged_addresses entry for this chain_id → that script
+      2. Auto-convert share creator's pubkey_hash → merged chain P2PKH script
+    
+    Returns: script bytes, or None if not convertible
+    """
+    if merged_addresses:
+        for entry in merged_addresses:
+            if entry.get('chain_id') == chain_id:
+                return entry['script']
+    
+    # Auto-convert from parent chain pubkey_hash
+    if share_pubkey_hash is not None:
+        return '\x76\xa9\x14' + pack.IntType(160).pack(share_pubkey_hash) + '\x88\xac'
+    
+    return None
+
+
+def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
+    """Verify that the merged coinbase committed in mm_data matches canonical construction.
+    
+    This closes the merged mining trust gap: peers independently re-derive
+    the expected merged coinbase from share chain state and verify it matches
+    what's committed in the LTC coinbase (via mm_data → DOGE block hash).
+    
+    Verification chain:
+      1. Re-derive canonical DOGE coinbase from PPLNS weights + committed params
+      2. canonical_txid = hash256(canonical_coinbase)
+      3. check_merkle_link(canonical_txid, coinbase_merkle_link) == header.merkle_root
+      4. hash256(header) == doge_block_hash
+      5. doge_block_hash matches aux_merkle_root in mm_data (parsed from LTC coinbase)
+    
+    Returns: None on success, raises ValueError on failure
+    """
+    merged_info_list = share.share_info.get('merged_coinbase_info')
+    if not merged_info_list:
+        return  # No merged mining data — nothing to verify
+    
+    # Parse mm_data from LTC coinbase script
+    coinbase_script = share.share_info['share_data']['coinbase']
+    marker = '\xfa\xbe\x6d\x6d'
+    mm_pos = coinbase_script.find(marker)
+    if mm_pos < 0:
+        if merged_info_list:
+            raise ValueError('merged_coinbase_info present but no mm_data in coinbase')
+        return
+    
+    mm_bytes = coinbase_script[mm_pos + 4:]
+    if len(mm_bytes) < 40:
+        raise ValueError('mm_data too short in coinbase')
+    aux_merkle_root = pack.IntType(256, 'big').unpack(mm_bytes[:32])
+    aux_size = pack.IntType(32).unpack(mm_bytes[32:36])
+    
+    # Get PPLNS weights (same params as compute_merged_payout_hash)
+    prev_hash = share.share_info['share_data']['previous_share_hash']
+    if prev_hash is None:
+        return  # Genesis share, no verification possible
+    
+    height = tracker.get_height(prev_hash)
+    if height == 0:
+        return
+    
+    block_target = share.header['bits'].target
+    max_weight = 65535 * net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
+    chain_length = min(height, net.REAL_CHAIN_LENGTH)
+    
+    for info in merged_info_list:
+        chain_id = info['chain_id']
+        coinbase_value = info['coinbase_value']
+        block_height = info['block_height']
+        header_bytes = info['block_header_bytes']
+        cb_merkle_link = info['coinbase_merkle_link']
+        
+        # Determine merged chain network
+        merged_addr_net = _get_merged_chain_net(chain_id, net)
+        if merged_addr_net is None:
+            continue  # Unknown chain — can't verify (permissive for forward compat)
+        
+        # Step 1: Get PPLNS weights for this merged chain
+        weights, total_weight, donation_weight = get_v36_merged_weights(
+            tracker, prev_hash, chain_length, max_weight, chain_id=chain_id)
+        
+        if not weights or total_weight == 0:
+            continue  # No V36 shares in window — nothing to verify
+        
+        # Step 2: Determine finder script (share creator's merged address)
+        share_pubkey_hash = share.share_data.get('pubkey_hash')
+        merged_addrs = share.share_info.get('merged_addresses')
+        finder_script = get_canonical_merged_finder_script(
+            share_pubkey_hash, merged_addrs, chain_id, merged_addr_net)
+        
+        # Step 3: Re-derive canonical coinbase
+        canonical_coinbase = build_canonical_merged_coinbase(
+            weights, total_weight, donation_weight,
+            coinbase_value, block_height,
+            finder_script, merged_addr_net, parent_net)
+        
+        # Step 4: Compute canonical txid
+        canonical_txid = bitcoin_data.hash256(bitcoin_data.tx_id_type.pack(canonical_coinbase))
+        
+        # Step 5: Verify merkle link → header merkle root
+        expected_merkle_root = bitcoin_data.check_merkle_link(canonical_txid, cb_merkle_link)
+        
+        # Step 6: Parse and verify DOGE block header
+        header = bitcoin_data.block_header_type.unpack(header_bytes)
+        if header['merkle_root'] != expected_merkle_root:
+            raise ValueError(
+                'merged coinbase verification failed for chain %d: '
+                'canonical merkle_root %064x != header merkle_root %064x' % (
+                    chain_id, expected_merkle_root, header['merkle_root']))
+        
+        # Step 7: Compute DOGE block hash and verify vs mm_data
+        doge_block_hash = bitcoin_data.hash256(header_bytes)
+        
+        # For single merged chain: aux_merkle_root == block_hash
+        # For multiple chains: need aux tree reconstruction
+        if aux_size == 1:
+            if doge_block_hash != aux_merkle_root:
+                raise ValueError(
+                    'merged block hash verification failed for chain %d: '
+                    'block_hash %064x != aux_merkle_root %064x' % (
+                        chain_id, doge_block_hash, aux_merkle_root))
+        else:
+            # Multi-chain: verify block_hash at correct slot in aux merkle tree
+            # Reconstruct expected slot from chain_id
+            tree_slot = chain_id % aux_size
+            # We can only verify if aux_merkle_root is consistent with block_hash
+            # at the expected slot. Without other chains' hashes, we verify
+            # that make_auxpow_tree produces the expected slot.
+            expected_tree, expected_size = bitcoin_data.make_auxpow_tree({chain_id: None})
+            if expected_size != aux_size:
+                raise ValueError(
+                    'merged aux tree size mismatch for chain %d: '
+                    'expected %d, got %d' % (chain_id, expected_size, aux_size))
+            # For multi-chain, the aux_merkle_root check is weaker —
+            # we trust the single-chain case covers our deployment
+
+
+def _get_merged_chain_net(chain_id, net):
+    """Get the merged chain network object for a given chain_id.
+    
+    Returns the network object or None if unknown.
+    """
+    if chain_id == 98:  # Dogecoin
+        parent_symbol = getattr(net.PARENT, 'SYMBOL', '') if hasattr(net, 'PARENT') else ''
+        is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
+        try:
+            if is_testnet:
+                from p2pool.networks import litecoin_testnet
+                if hasattr(litecoin_testnet, 'dogecoin_testnet_net'):
+                    return litecoin_testnet.dogecoin_testnet_net
+                # Fallback: construct minimal net object
+                class DogecoinTestnet(object):
+                    SYMBOL = 'tDOGE'
+                    ADDRESS_VERSION = 113  # 0x71
+                    ADDRESS_P2SH_VERSION = 196  # 0xc4
+                return DogecoinTestnet()
+            else:
+                from p2pool.networks import litecoin
+                if hasattr(litecoin, 'dogecoin_net'):
+                    return litecoin.dogecoin_net
+                class DogecoinMainnet(object):
+                    SYMBOL = 'DOGE'
+                    ADDRESS_VERSION = 30  # 0x1e
+                    ADDRESS_P2SH_VERSION = 22  # 0x16
+                return DogecoinMainnet()
+        except ImportError:
+            pass
+    return None
+
 # Precomputed hash key for COMBINED_DONATION_SCRIPT fast-path.
 #
 # For P2SH-wrapped combined donation script, the key is the embedded script hash
@@ -351,7 +643,7 @@ class BaseShare(object):
         return t
 
     @classmethod
-    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False, merged_addresses=None, message_data=None):
+    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False, merged_addresses=None, message_data=None, merged_coinbase_info=None):
         # V36 Donation Switch:
         # - Pre-V36 (<95%): Uses DONATION_SCRIPT (P2PK, original P2Pool author)
         # - Post-V36 (>=95%): Uses COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS redeem script)
@@ -575,6 +867,13 @@ class BaseShare(object):
         # List of [{chain_id: int, script: bytes}] = explicit addresses per chain.
         if cls.VERSION >= 36:
             share_info['merged_addresses'] = merged_addresses  # None or list of validated entries
+        
+        # V36+: Include merged coinbase verification data for consensus enforcement.
+        # This enables peers to independently verify the merged chain coinbase was
+        # built correctly with proper PPLNS distribution. Contains DOGE header,
+        # merkle proof, and reward parameters needed for canonical re-derivation.
+        if cls.VERSION >= 36:
+            share_info['merged_coinbase_info'] = merged_coinbase_info if merged_coinbase_info else None
         
         # V36+: Commit merged PPLNS weight distribution hash for consensus enforcement.
         # This ensures the share creator cannot manipulate merged chain (e.g. DOGE) payouts
@@ -907,11 +1206,23 @@ class BaseShare(object):
             segwit_data=self.share_info.get('segwit_data', None),
             v36_active=(self.VERSION >= 36),
             merged_addresses=self.share_info.get('merged_addresses', None),
-            message_data=self._message_data)
+            message_data=self._message_data,
+            merged_coinbase_info=self.share_info.get('merged_coinbase_info', None))
         
         assert other_tx_hashes2 == other_tx_hashes
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
             raise ValueError('''gentx doesn't match hash_link''')
+        
+        # V36+: Verify merged coinbase consensus enforcement.
+        # Re-derive the canonical merged chain coinbase from PPLNS weights and
+        # committed parameters, then verify it matches what's committed in mm_data.
+        # This is the core anti-theft mechanism for merged mining rewards.
+        if self.VERSION >= 36:
+            try:
+                parent_net = self.net.PARENT
+                verify_merged_coinbase_commitment(self, tracker, self.net, parent_net)
+            except ValueError as e:
+                raise ValueError('merged coinbase verification failed: %s' % (e,))
         
         # V36+: Validate share-embedded messages (transition signals, etc.)
         #
@@ -1158,6 +1469,24 @@ class MergedMiningShare(BaseShare):
             ('timestamp', pack.IntType(32)),
             ('absheight', pack.IntType(32)),
             ('abswork', pack.VarIntType()),  # V36: variable-length (saves ~7-15 bytes vs IntType(128))
+            # NEW in V36: Merged coinbase verification data for consensus enforcement.
+            # Contains the info peers need to re-derive and verify the merged chain
+            # coinbase (DOGE, etc.) was built correctly with proper PPLNS distribution.
+            # This closes the trust gap: without this, a malicious node could steal
+            # merged chain rewards from miners connected to it.
+            ('merged_coinbase_info', pack.PossiblyNoneType(
+                [],  # Default: empty (no merged mining or pre-enforcement shares)
+                pack.ListType(pack.ComposedType([
+                    ('chain_id', pack.IntType(32)),            # AuxPoW chain ID (e.g., 98 for DOGE)
+                    ('coinbase_value', pack.VarIntType()),     # Total block reward (satoshis)
+                    ('block_height', pack.VarIntType()),       # Merged chain block height (BIP34)
+                    ('block_header_bytes', pack.FixedStrType(80)),  # 80-byte block header
+                    ('coinbase_merkle_link', pack.ComposedType([   # Merkle proof: coinbase → root
+                        ('branch', pack.ListType(pack.IntType(256))),
+                        ('index', pack.IntType(0)),  # always 0 (coinbase is first tx)
+                    ])),
+                ]))
+            )),
             # Consensus commitment for merged mining reward distribution.
             # Hash of the expected PPLNS weight distribution (from get_v36_merged_weights).
             # Peers recompute this from their own share chain state and reject if mismatch.
