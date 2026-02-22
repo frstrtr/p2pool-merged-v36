@@ -1522,6 +1522,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
             self.node.net,
         )
         
+        # CRITICAL: If AutoRatchet selects MergedMiningShare (V36), force v36_active=True.
+        # MergedMiningShare.gentx_before_refhash uses COMBINED_DONATION_SCRIPT, so
+        # generate_transaction MUST also use COMBINED_DONATION_SCRIPT. Without this,
+        # a fresh chain bootstrap with confirmed ratchet state would mismatch:
+        # is_v36_active() needs CHAIN_LENGTH shares (empty=False) but share_type=V36.
+        if share_type.VERSION >= 36:
+            v36_active = True
+        
         # Still run the original voting check for switchover logging and protocol version update.
         # The AutoRatchet already handles the actual share_type decision, but this keeps
         # the "Switchover imminent" progress messages and update_min_protocol_version calls.
