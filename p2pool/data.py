@@ -221,12 +221,18 @@ def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
         else:
             # Auto-convert: extract pubkey_hash from parent address
             try:
-                pubkey_hash, version, _ = bitcoin_data.address_to_pubkey_hash(key, parent_net)
+                pubkey_hash, version, witver = bitcoin_data.address_to_pubkey_hash(key, parent_net)
                 if version == parent_net.ADDRESS_VERSION:
                     # P2PKH — construct merged chain P2PKH script directly
                     merged_script = '\x76\xa9\x14' + pack.IntType(160).pack(pubkey_hash) + '\x88\xac'
+                elif version == parent_net.ADDRESS_P2SH_VERSION:
+                    # P2SH — construct merged chain P2SH script (OP_HASH160 <hash> OP_EQUAL)
+                    merged_script = '\xa9\x14' + pack.IntType(160).pack(pubkey_hash) + '\x87'
+                elif version == -1 and witver == 0 and pubkey_hash <= (1 << 160) - 1:
+                    # P2WPKH (bech32 v0, 20-byte program) — same pubkey_hash
+                    merged_script = '\x76\xa9\x14' + pack.IntType(160).pack(pubkey_hash) + '\x88\xac'
             except Exception:
-                pass  # Unconvertible (P2SH, P2WSH, etc.) — skip
+                pass  # Unconvertible (P2WSH, P2TR, etc.) — skip
         
         if merged_script is not None:
             script_weights[merged_script] = script_weights.get(merged_script, 0) + weight
@@ -1213,6 +1219,10 @@ class BaseShare(object):
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
             raise ValueError('''gentx doesn't match hash_link''')
         
+        # Parent chain gentx is verified — log it for consensus audit
+        if self.VERSION >= 36:
+            print >>sys.stderr, '[CONSENSUS] Parent chain gentx PASSED for share %064x (miner=%s)' % (self.hash, self.address)
+        
         # V36+: Verify merged coinbase consensus enforcement.
         # Re-derive the canonical merged chain coinbase from PPLNS weights and
         # committed parameters, then verify it matches what's committed in mm_data.
@@ -1220,7 +1230,12 @@ class BaseShare(object):
         if self.VERSION >= 36:
             try:
                 parent_net = self.net.PARENT
+                merged_info = self.share_info.get('merged_coinbase_info')
+                if merged_info:
+                    print >>sys.stderr, '[CONSENSUS] Verifying merged coinbase for share %064x (%d chain(s))' % (self.hash, len(merged_info))
                 verify_merged_coinbase_commitment(self, tracker, self.net, parent_net)
+                if merged_info:
+                    print >>sys.stderr, '[CONSENSUS] Merged coinbase PASSED for share %064x' % self.hash
             except ValueError as e:
                 raise ValueError('merged coinbase verification failed: %s' % (e,))
         

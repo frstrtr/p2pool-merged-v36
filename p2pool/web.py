@@ -609,10 +609,17 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         accepted_weight += weight
                     else:
                         # Parent chain address — try auto-conversion
-                        is_convertible, pubkey_hash, _ = is_pubkey_hash_address(key, parent_net)
+                        addr_result = is_pubkey_hash_address(key, parent_net)
+                        is_convertible = addr_result[0]
+                        pubkey_hash = addr_result[1]
+                        addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
                         if is_convertible and pubkey_hash is not None:
-                            merged_address = bitcoin_data.pubkey_hash_to_address(
-                                pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
+                            if addr_type == 'p2sh':
+                                merged_address = bitcoin_data.pubkey_hash_to_address(
+                                    pubkey_hash, chain['addr_net'].ADDRESS_P2SH_VERSION, -1, chain['addr_net'])
+                            else:
+                                merged_address = bitcoin_data.pubkey_hash_to_address(
+                                    pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
                             resolved[merged_address] = resolved.get(merged_address, 0) + weight
                             key_to_parent[merged_address] = key
                             accepted_weight += weight

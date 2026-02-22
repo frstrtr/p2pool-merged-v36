@@ -52,7 +52,7 @@ print_throttle = 0.0
 
 def is_pubkey_hash_address(address, net):
     """
-    Check if an address contains a pubkey hash that can be converted to merged chain addresses.
+    Check if an address can be converted to merged chain addresses.
     
     =================================================================================
     MERGED MINING ADDRESS CONVERSION - TECHNICAL EXPLANATION
@@ -61,52 +61,44 @@ def is_pubkey_hash_address(address, net):
     When P2Pool performs merged mining (e.g., Litecoin + Dogecoin), miner payouts need
     to be distributed on BOTH chains. However, miners only provide a Litecoin address.
     
-    To create the Dogecoin payout address, we extract the pubkey_hash from the Litecoin
-    address and re-encode it with the Dogecoin address version. This ONLY works for
-    addresses that contain a raw pubkey_hash:
+    To create the Dogecoin payout address, we extract the 20-byte hash from the
+    Litecoin address and re-encode it with the Dogecoin address version.
     
     CONVERTIBLE ADDRESS TYPES:
     --------------------------
     1. P2PKH (Pay-to-Public-Key-Hash) - Legacy addresses
        - Litecoin: starts with 'L' (mainnet) or 'm/n' (testnet)
        - Format: Base58Check(version || HASH160(pubkey))
-       - The 20-byte HASH160(pubkey) can be extracted and re-encoded for Dogecoin
-       - Example: LTC 'LbxJe7Nf59gv2vK7Mw8kEa6aWFDHjwsf2E' -> DOGE 'DCo7...'
+       - The 20-byte HASH160(pubkey) is re-encoded as DOGE P2PKH
+       - addr_type: 'p2pkh'
     
     2. P2WPKH (Pay-to-Witness-Public-Key-Hash) - Native SegWit v0
        - Litecoin: starts with 'ltc1q' followed by 39 more chars (43 total)
        - Format: Bech32(hrp, version=0, witness_program=HASH160(pubkey))
-       - The 20-byte witness program IS the pubkey_hash
-       - Example: LTC 'ltc1qna9n6gs...' (43 chars) -> DOGE 'D...'
+       - The 20-byte witness program IS the pubkey_hash → re-encoded as DOGE P2PKH
+       - addr_type: 'p2pkh'
     
-    NON-CONVERTIBLE ADDRESS TYPES (contain script hashes, NOT pubkey hashes):
-    -------------------------------------------------------------------------
     3. P2SH (Pay-to-Script-Hash) - Legacy script addresses
        - Litecoin: starts with 'M' or '3' (mainnet) or '2' (testnet)
        - Format: Base58Check(p2sh_version || HASH160(script))
-       - The hash is of a SCRIPT, not a public key - CANNOT be safely converted!
-       - Used for: multisig, SegWit-wrapped addresses, complex scripts
+       - The 20-byte script_hash is re-encoded as DOGE P2SH
+       - addr_type: 'p2sh'
+       - CAVEAT: the redeem script must use opcodes supported by the merged chain.
+         P2SH-P2WPKH (SegWit wrapped in P2SH) will be unspendable on chains
+         without SegWit support (e.g., Dogecoin). For standard multisig P2SH,
+         conversion works correctly since both chains support the same opcodes.
     
+    NON-CONVERTIBLE ADDRESS TYPES:
+    -------------------------------------------------------------------------
     4. P2WSH (Pay-to-Witness-Script-Hash) - Native SegWit script addresses
        - Litecoin: starts with 'ltc1q' followed by ~59 more chars (62 total)
        - Format: Bech32(hrp, version=0, witness_program=SHA256(script))
-       - The 32-byte witness program is a SHA256 hash of a script
-       - WARNING: These look similar to P2WPKH but are LONGER (62 vs 43 chars)
-       - CANNOT be converted - the script exists only on the parent chain!
+       - 32-byte SHA256 hash — CANNOT be re-encoded as 20-byte hash
     
     5. P2TR (Pay-to-Taproot) - Taproot addresses (witness v1)
        - Litecoin: starts with 'ltc1p...'
        - Format: Bech32m(hrp, version=1, tweaked_pubkey)
-       - Contains a 32-byte tweaked public key, not a simple hash
-       - CANNOT be safely converted
-    
-    WHY P2SH/P2WSH CANNOT BE CONVERTED:
-    -----------------------------------
-    These addresses are hashes of SCRIPTS (smart contracts), not public keys.
-    The underlying script (e.g., "2-of-3 multisig with keys A, B, C") only exists
-    on the parent chain. Creating a Dogecoin address from the script hash would
-    result in an address that NO ONE can spend from, because the script doesn't
-    exist on Dogecoin.
+       - 32-byte tweaked public key — CANNOT be safely converted
     
     P2WPKH vs P2WSH DETECTION:
     --------------------------
@@ -119,27 +111,25 @@ def is_pubkey_hash_address(address, net):
     A legitimate 20-byte hash will never exceed this, while a 32-byte hash
     almost certainly will (probability of false negative: 1 in 2^96).
     
-    REDISTRIBUTION OF UNCONVERTIBLE SHARES:
-    ---------------------------------------
-    When an address cannot be converted, that miner's share of the merged
-    mining reward is redistributed proportionally to all convertible addresses,
-    EXCLUDING the primary donation (author fee). This ensures:
-    1. 100% of the merged block reward is distributed
-    2. Miners with convertible addresses get slightly more DOGE
-    3. The author donation doesn't unfairly benefit from unconvertible addresses
-    
-    Returns: (is_convertible, pubkey_hash, error_message)
+    Returns: (is_convertible, hash_value, error_message, addr_type)
     - is_convertible: True if address can be converted to merged chain
-    - pubkey_hash: The 160-bit hash (int) if convertible, None otherwise
+    - hash_value: The 160-bit hash (int) if convertible, None otherwise
     - error_message: Human-readable error if not convertible, None otherwise
+    - addr_type: 'p2pkh' or 'p2sh' — indicates which output script type to use
+      (only present when is_convertible is True; callers should default to 'p2pkh')
     =================================================================================
     """
     try:
         pubkey_hash, version, witver = bitcoin_data.address_to_pubkey_hash(address, net)
         
         # Check for P2SH (script hash, not pubkey hash)
+        # P2SH addresses CAN be converted to merged chain P2SH addresses.
+        # The 20-byte script_hash is re-encoded with the merged chain's P2SH version.
+        # Caveat: the redeem script must use opcodes supported by both chains.
+        # P2SH-P2WPKH (SegWit wrapped in P2SH) may be unspendable on chains without
+        # SegWit support (e.g., Dogecoin), but we trust the miner to know their setup.
         if version == net.ADDRESS_P2SH_VERSION:
-            return (False, None, 'P2SH address (script hash) cannot be converted to merged chain')
+            return (True, pubkey_hash, None, 'p2sh')
         
         # Check for P2WPKH vs P2WSH (both are witness v0, but different lengths)
         if witver == 0:
@@ -150,7 +140,7 @@ def is_pubkey_hash_address(address, net):
             if pubkey_hash > (1 << 160) - 1:  # Larger than 20 bytes can represent
                 return (False, None, 'P2WSH address (32-byte script hash) cannot be converted to merged chain')
             else:
-                return (True, pubkey_hash, None)  # P2WPKH - convertible
+                return (True, pubkey_hash, None, 'p2pkh')  # P2WPKH - convertible (same pubkey_hash)
         
         # Check for Taproot (witness v1) - not convertible (32-byte tweaked pubkey)
         if witver == 1:
@@ -162,7 +152,7 @@ def is_pubkey_hash_address(address, net):
         
         # P2PKH (legacy) - convertible
         if version == net.ADDRESS_VERSION:
-            return (True, pubkey_hash, None)
+            return (True, pubkey_hash, None, 'p2pkh')
         
         # Unknown address type
         return (False, None, 'Unknown address type (version=%s, witver=%s)' % (version, witver))
@@ -508,17 +498,26 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                 parent_address = key
                                                 parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
                                                 
-                                                # CRITICAL: Validate that address contains a pubkey hash (not script hash)
-                                                # P2SH, P2WSH, P2TR addresses CANNOT be converted to merged chain!
-                                                is_convertible, pubkey_hash, error_msg = is_pubkey_hash_address(parent_address, parent_net)
+                                                # Validate that address can be converted to merged chain
+                                                # P2PKH and P2WPKH: auto-convert to merged P2PKH
+                                                # P2SH: auto-convert to merged P2SH
+                                                # P2WSH, P2TR: cannot be converted
+                                                addr_result = is_pubkey_hash_address(parent_address, parent_net)
+                                                is_convertible = addr_result[0]
+                                                pubkey_hash = addr_result[1]
+                                                error_msg = addr_result[2]
+                                                addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
                                                 
                                                 if not is_convertible:
                                                     # Cannot convert this address - skip it with warning
                                                     skipped_addresses.append((parent_address[:20] + '...', error_msg))
                                                     continue
                                                 
-                                                # Re-encode as merged chain address
-                                                merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                                # Re-encode as merged chain address (P2PKH or P2SH)
+                                                if addr_type == 'p2sh':
+                                                    merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
+                                                else:
+                                                    merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
                                             else:
                                                 # Older VERSION: key is P2PKH script
                                                 merged_address = bitcoin_data.script2_to_address(key, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
@@ -1139,9 +1138,23 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 if not user or not user.strip():
                     pubkey_hash = self.my_pubkey_hash
                 else:
-                    is_convertible, validated_pubkey_hash, error_msg = is_pubkey_hash_address(user, self.node.net.PARENT)
+                    addr_result = is_pubkey_hash_address(user, self.node.net.PARENT)
+                    is_convertible = addr_result[0]
+                    validated_pubkey_hash = addr_result[1]
+                    error_msg = addr_result[2]
+                    addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
                     if is_convertible:
                         pubkey_hash = validated_pubkey_hash
+                        # P2SH addresses: auto-generate merged chain P2SH address.
+                        # The script_hash is re-encoded with the merged chain's P2SH version.
+                        # This is stored in merged_addresses so it flows through the
+                        # MERGED: prefix path in get_v36_merged_weights/canonical builder.
+                        if addr_type == 'p2sh' and not merged_addresses.get('_validated'):
+                            p2sh_merged_entries = self._auto_generate_p2sh_merged_addresses(pubkey_hash)
+                            if p2sh_merged_entries:
+                                merged_addresses['_validated'] = p2sh_merged_entries
+                                print >>sys.stderr, '[MERGED] Auto-generated P2SH merged address for %s (script_hash=%040x)' % (
+                                    user[:30] + '...' if len(user) > 30 else user, pubkey_hash)
                     else:
                         print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
                         pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
@@ -1276,6 +1289,38 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         return result
 
+    def _auto_generate_p2sh_merged_addresses(self, script_hash):
+        """Auto-generate P2SH merged chain addresses for a miner using a P2SH parent address.
+        
+        When a miner connects with a P2SH LTC address and provides no explicit
+        --merged-address-doge, we auto-generate a DOGE P2SH address from the same
+        script_hash. This is stored in merged_addresses so it flows through the
+        MERGED: prefix path in get_v36_merged_weights and build_canonical_merged_coinbase.
+        
+        Caveat: the redeem script must use opcodes supported by the merged chain.
+        P2SH-P2WPKH (SegWit wrapped in P2SH) will be unspendable on chains without
+        SegWit support (e.g., Dogecoin). The miner is trusted to know their setup.
+        
+        Returns: list of {chain_id, script} entries, or None if no merged chains configured
+        """
+        entries = []
+        # Generate for all known merged chains (currently just Dogecoin, chain_id 98)
+        for chain_id in [98]:  # Dogecoin
+            try:
+                merged_net = self._get_merged_address_net(chain_id)
+                if merged_net is None:
+                    continue
+                p2sh_version = getattr(merged_net, 'ADDRESS_P2SH_VERSION', None)
+                if p2sh_version is None:
+                    continue
+                # Build P2SH scriptPubKey: OP_HASH160 <20-byte-hash> OP_EQUAL
+                from p2pool.bitcoin.data import pack
+                p2sh_script = '\xa9\x14' + pack.IntType(160).pack(script_hash) + '\x87'
+                entries.append({'chain_id': chain_id, 'script': p2sh_script})
+            except Exception as e:
+                print >>sys.stderr, '[MERGED] Failed to auto-generate P2SH for chain %d: %s' % (chain_id, e)
+        return entries if entries else None
+
     def _get_merged_address_net(self, chainid):
         if chainid == 98:  # Dogecoin
             parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
@@ -1309,11 +1354,18 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         # 3) Fallback to converting parent-chain user address to merged-chain encoding.
         base_user = user.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
-        is_convertible, pubkey_hash, _ = is_pubkey_hash_address(base_user, parent_net)
+        addr_result = is_pubkey_hash_address(base_user, parent_net)
+        is_convertible = addr_result[0]
+        pubkey_hash = addr_result[1]
+        addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
         if is_convertible and pubkey_hash is not None:
             try:
-                return bitcoin_data.pubkey_hash_to_address(
-                    pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                if addr_type == 'p2sh':
+                    return bitcoin_data.pubkey_hash_to_address(
+                        pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
+                else:
+                    return bitcoin_data.pubkey_hash_to_address(
+                        pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
             except Exception:
                 return None
         return None
@@ -2305,7 +2357,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             if miner_payout == 0 and sh:
                                                 try:
                                                     parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
-                                                    is_conv, pkh, _ = is_pubkey_hash_address(base_user, parent_net)
+                                                    addr_result = is_pubkey_hash_address(base_user, parent_net)
+                                                    is_conv = addr_result[0]
+                                                    pkh = addr_result[1]
+                                                    a_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
                                                     if is_conv and pkh:
                                                         chainid_val = aux_work.get('chainid', 0)
                                                         p_sym = getattr(parent_net, 'SYMBOL', '')
@@ -2315,6 +2370,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                         else:
                                                             m_net = parent_net
                                                         if m_net:
+                                                            if a_type == 'p2sh':
+                                                                merged_addr = bitcoin_data.pubkey_hash_to_address(pkh, m_net.ADDRESS_P2SH_VERSION, -1, m_net)
+                                                            else:
+                                                                merged_addr = bitcoin_data.pubkey_hash_to_address(pkh, m_net.ADDRESS_VERSION, -1, m_net)
                                                             merged_addr = bitcoin_data.pubkey_hash_to_address(pkh, m_net.ADDRESS_VERSION, -1, m_net)
                                                             for addr, val in sh.iteritems():
                                                                 if addr == merged_addr:
@@ -2420,10 +2479,17 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                 merged_net = dogecoin_testnet_net if is_testnet else dogecoin_net
                                                 if merged_net:
                                                     parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
-                                                    is_convertible, pubkey_hash, _ = is_pubkey_hash_address(user, parent_net)
+                                                    addr_result = is_pubkey_hash_address(user, parent_net)
+                                                    is_convertible = addr_result[0]
+                                                    pubkey_hash = addr_result[1]
+                                                    addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
                                                     if is_convertible and pubkey_hash:
-                                                        miner_merged_address = bitcoin_data.pubkey_hash_to_address(
-                                                            pubkey_hash, merged_net.ADDRESS_VERSION, -1, merged_net)
+                                                        if addr_type == 'p2sh':
+                                                            miner_merged_address = bitcoin_data.pubkey_hash_to_address(
+                                                                pubkey_hash, merged_net.ADDRESS_P2SH_VERSION, -1, merged_net)
+                                                        else:
+                                                            miner_merged_address = bitcoin_data.pubkey_hash_to_address(
+                                                                pubkey_hash, merged_net.ADDRESS_VERSION, -1, merged_net)
                                         except Exception as e:
                                             pass  # Keep original address on error
                                         

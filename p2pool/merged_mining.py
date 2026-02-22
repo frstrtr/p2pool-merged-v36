@@ -206,10 +206,17 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
                         # Extract pubkey_hash from parent chain address
                         pubkey_hash_info = bitcoin_data.address_to_pubkey_hash(address, parent_net)
                         pubkey_hash = pubkey_hash_info[0]
+                        version = pubkey_hash_info[1]
                         
-                        # Re-encode with merged chain address version
-                        converted_address = bitcoin_data.pubkey_hash_to_address(
-                            pubkey_hash, addr_net.ADDRESS_VERSION, -1, addr_net)
+                        # Re-encode with appropriate merged chain address version
+                        if version == parent_net.ADDRESS_P2SH_VERSION:
+                            # P2SH: re-encode with merged chain P2SH version
+                            converted_address = bitcoin_data.pubkey_hash_to_address(
+                                pubkey_hash, addr_net.ADDRESS_P2SH_VERSION, -1, addr_net)
+                        else:
+                            # P2PKH (or bech32 P2WPKH): re-encode with merged chain P2PKH version
+                            converted_address = bitcoin_data.pubkey_hash_to_address(
+                                pubkey_hash, addr_net.ADDRESS_VERSION, -1, addr_net)
                         
                         script2 = bitcoin_data.address_to_script2(converted_address, addr_net)
                         append_or_coalesce_output(script2, amount)
