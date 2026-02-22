@@ -1131,11 +1131,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
             pubkey_type = self.my_pubkey_type
         # Resolve miner address to pubkey_hash for share creation.
         # V36 uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS) in coinbase for donations.
-        # No fake miner mechanism needed — donation is handled entirely in coinbase.
+        # No fake miner mechanism needed - donation is handled entirely in coinbase.
         else:
             try:
                 if not user or not user.strip():
-                    # No address provided — redistribute rewards to all miners
+                    # No address provided - redistribute rewards to all miners
                     pubkey_hash = p2pool_data.POOL_REDISTRIBUTION_PUBKEY_HASH
                     pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
                 else:
@@ -1185,17 +1185,17 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> script %s (chain_id: %d)' % (
                                             src_label, user, ae['script'].encode('hex'), ae['chain_id'])
                             else:
-                                # Tier 3: unconvertible — merged rewards go to pool distribution
-                                print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain — pool distribution' % (
+                                # Tier 3: unconvertible - merged rewards go to pool distribution
+                                print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain - pool distribution' % (
                                     user[:30] + '...' if len(user) > 30 else user, addr_type)
                     else:
                         print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
                         pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                         pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
-            except: # Invalid/unparseable address — redistribute to all miners
+            except: # Invalid/unparseable address - redistribute to all miners
                 pubkey_hash = p2pool_data.POOL_REDISTRIBUTION_PUBKEY_HASH
                 pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
-                print >>sys.stderr, '[POOL] Invalid miner address %s — rewards redistributed to all miners proportionally' % (
+                print >>sys.stderr, '[POOL] Invalid miner address %s - rewards redistributed to all miners proportionally' % (
                     user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)')
         
         # Append worker name to user for identification
