@@ -596,7 +596,8 @@ PUBKEY_TYPE_P2SH   = 2
 # Special pubkey_hash for pool redistribution — rewards from shares with this
 # hash are distributed proportionally to all other miners in the PPLNS window.
 # Used when a miner provides a missing or invalid address.
-POOL_REDISTRIBUTION_PUBKEY_HASH = '\x00' * 20
+# pubkey_hash is IntType(160), so this is integer 0.
+POOL_REDISTRIBUTION_PUBKEY_HASH = 0
 
 def _redistribute_pool_amount(amounts, pool_addr, donation_addrs=None):
     """Redistribute pool redistribution address rewards proportionally to all other miners.
