@@ -1162,7 +1162,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     try:
                                         ae_net = self._get_merged_address_net(ae['chain_id'])
                                         ae_chain = self._get_merged_chain_name(ae['chain_id'])
-                                        ae_addr = bitcoin_data.script2_to_address(ae['script'], ae_net.ADDRESS_VERSION, -1, ae_net)
+                                        # Use pubkey_hash_to_address for reliable address derivation
+                                        if addr_type == 'p2sh':
+                                            ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_P2SH_VERSION, -1, ae_net)
+                                        else:
+                                            ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_VERSION, -1, ae_net)
                                         print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> %s %s (chain: %s, script: %s)' % (
                                             addr_type.upper(), user, ae_addr,
                                             'P2SH' if addr_type == 'p2sh' else 'P2PKH',
