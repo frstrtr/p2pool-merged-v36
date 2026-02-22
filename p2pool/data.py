@@ -2007,7 +2007,14 @@ def get_user_stale_props(tracker, share_hash, lookbehind, net):
 def get_expected_payouts(tracker, best_share_hash, block_target, subsidy, net):
     weights, total_weight, donation_weight = tracker.get_cumulative_weights(best_share_hash, min(tracker.get_height(best_share_hash), net.REAL_CHAIN_LENGTH), 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target))
     res = dict((script, subsidy*weight//total_weight) for script, weight in weights.iteritems())
-    donation_addr = donation_script_to_address(net)
+    # Use correct donation address based on whether V36 is active:
+    # V36+: COMBINED_DONATION_SCRIPT (P2SH) → combined_donation_script_to_address()
+    # Pre-V36: DONATION_SCRIPT (P2PK) → donation_script_to_address()
+    best_share = tracker.items[best_share_hash]
+    if best_share.VERSION >= 36:
+        donation_addr = combined_donation_script_to_address(net)
+    else:
+        donation_addr = donation_script_to_address(net)
     res[donation_addr] = res.get(donation_addr, 0) + subsidy - sum(res.itervalues())
     return res
 
