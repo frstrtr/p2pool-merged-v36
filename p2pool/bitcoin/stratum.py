@@ -399,7 +399,7 @@ class StratumRPCMiningProvider(object):
             self.authorized = username
         self.username = username.strip()
         
-        self.user, self.address, self.desired_share_target, self.desired_pseudoshare_target, self.merged_addresses = self.wb.get_user_details(username)
+        self.user, self.address, self.pubkey_type, self.desired_share_target, self.desired_pseudoshare_target, self.merged_addresses = self.wb.get_user_details(username)
         reactor.callLater(0, self._send_work)
         return True
 
