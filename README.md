@@ -218,6 +218,54 @@ Username: LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc,DFv7Rp94R9sQvo4PV5STp2qJPsBCprauFe.
 Password: x
 ```
 
+### Supported Address Types
+
+P2Pool supports three Litecoin address types for the operator (`-a`) and stratum miner addresses.
+Each type produces its **native** scriptPubKey in the LTC coinbase — no unnecessary conversions.
+
+| Address Type | Prefix (Mainnet) | Prefix (Testnet) | Script Type in Coinbase | How to Generate |
+|---|---|---|---|---|
+| **P2PKH** (Legacy) | `L...` | `m...` / `n...` | `OP_DUP OP_HASH160 <hash> OP_EQUALVERIFY OP_CHECKSIG` | `litecoin-cli getnewaddress "" legacy` |
+| **P2SH** (Script Hash) | `M...` / `3...` | `Q...` / `2...` | `OP_HASH160 <hash> OP_EQUAL` | `litecoin-cli getnewaddress "" p2sh-segwit` |
+| **P2WPKH** (Bech32 SegWit v0) | `ltc1q...` (42 chars) | `tltc1q...` (43 chars) | `OP_0 <20-byte-hash>` (`witness_v0_keyhash`) | `litecoin-cli getnewaddress "" bech32` |
+
+> **Note:** P2WSH (`ltc1q...` 62 chars), P2TR/Taproot (`ltc1p...`) and future witness versions are **not supported** — their 32-byte hashes cannot be safely converted to 20-byte merged chain addresses.
+
+#### Merged Chain (Dogecoin) Address Conversion
+
+When mining Litecoin + Dogecoin, miner payouts are distributed on **both chains**. The merged chain address is derived as follows:
+
+| Miner Provides | Merged Chain Payout | Notes |
+|---|---|---|
+| `LTC_ADDR,DOGE_ADDR` | Uses the explicit DOGE address directly | **Recommended** — full control over DOGE payouts |
+| `LTC_ADDR` only (P2PKH) | Auto-converts `HASH160(pubkey)` → DOGE P2PKH | Same pubkey hash, different version byte |
+| `LTC_ADDR` only (Bech32) | Auto-converts 20-byte witness program → DOGE P2PKH | Bech32 → P2PKH on DOGE (no SegWit on DOGE) |
+| `LTC_ADDR` only (P2SH) | Auto-converts `HASH160(script)` → DOGE P2SH | See ⚠️ warning below |
+| `LTC_ADDR,INVALID_ADDR` | Logs warning, falls back to auto-conversion | Invalid addresses are rejected gracefully |
+
+> ⚠️ **P2SH Conversion Warning:** When a P2SH-P2WPKH (SegWit-wrapped-in-P2SH) Litecoin address is auto-converted to Dogecoin, the resulting DOGE P2SH address will reference a redeem script containing SegWit opcodes. Since **Dogecoin does not support SegWit**, these funds may be **unspendable**. If you use P2SH addresses on Litecoin, always provide an explicit Dogecoin address:
+> ```
+> Username: MLTCp2shAddress,DDOGElegacyAddress.worker1
+> ```
+
+#### Example: Getting Addresses for Mining
+
+```bash
+# Litecoin addresses (pick one format)
+litecoin-cli getnewaddress "" legacy         # P2PKH:  LV...
+litecoin-cli getnewaddress "" p2sh-segwit    # P2SH:   M...
+litecoin-cli getnewaddress "" bech32         # Bech32: ltc1q...
+
+# Dogecoin address (always use legacy - DOGE has no SegWit)
+dogecoin-cli getnewaddress "" legacy         # P2PKH:  D...
+
+# Connect with explicit DOGE address (recommended)
+# Username: ltc1q...,DDogeAddress.rig1
+
+# Connect with auto-conversion (bech32 → DOGE P2PKH)
+# Username: ltc1q....rig1
+```
+
 ---
 
 ---
