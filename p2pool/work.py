@@ -1158,6 +1158,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             if auto_entries:
                                 merged_addresses['_validated'] = auto_entries
                                 # Log full details of auto-converted addresses
+                                # Use pubkey_type for accurate source type label
+                                src_type_names = {
+                                    p2pool_data.PUBKEY_TYPE_P2PKH: 'P2PKH',
+                                    p2pool_data.PUBKEY_TYPE_P2WPKH: 'BECH32',
+                                    p2pool_data.PUBKEY_TYPE_P2SH: 'P2SH',
+                                }
+                                src_label = src_type_names.get(pubkey_type, addr_type.upper())
                                 for ae in auto_entries:
                                     try:
                                         ae_net = self._get_merged_address_net(ae['chain_id'])
@@ -1165,15 +1172,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # Use pubkey_hash_to_address for reliable address derivation
                                         if addr_type == 'p2sh':
                                             ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_P2SH_VERSION, -1, ae_net)
+                                            dst_label = 'P2SH'
                                         else:
                                             ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_VERSION, -1, ae_net)
+                                            dst_label = 'P2PKH'
                                         print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> %s %s (chain: %s, script: %s)' % (
-                                            addr_type.upper(), user, ae_addr,
-                                            'P2SH' if addr_type == 'p2sh' else 'P2PKH',
+                                            src_label, user, ae_addr, dst_label,
                                             ae_chain, ae['script'].encode('hex'))
                                     except Exception:
                                         print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> script %s (chain_id: %d)' % (
-                                            addr_type.upper(), user, ae['script'].encode('hex'), ae['chain_id'])
+                                            src_label, user, ae['script'].encode('hex'), ae['chain_id'])
                             else:
                                 # Tier 3: unconvertible — merged rewards go to pool distribution
                                 print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain — pool distribution' % (
