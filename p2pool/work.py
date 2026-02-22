@@ -1061,16 +1061,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 elif '_' in merged_addr:
                     merged_addr, worker = merged_addr.split('_', 1)
                 
-                # Validate the merged address against known chain networks
-                # Try all DOGE networks (testnet4alpha, testnet, mainnet)
+                # Validate the merged address against the CURRENT merged chain network only.
+                # Reject addresses that don't match — don't try other networks.
+                chain_net = self._get_merged_address_net(98)  # 98 = Dogecoin
+                chain_name = self._get_merged_chain_name(98)
                 validated = False
-                for chain_name, chain_net in [
-                    ('dogecoin_testnet4alpha', dogecoin_testnet4alpha_net),
-                    ('dogecoin_testnet', dogecoin_testnet_net),
-                    ('dogecoin', dogecoin_net),
-                ]:
-                    if chain_net is None:
-                        continue
+                if chain_net is not None:
                     try:
                         pubkey_hash, version, witver = bitcoin_data.address_to_pubkey_hash(merged_addr, chain_net)
                         # Convert to payment script for storage in share
@@ -1081,14 +1077,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         merged_addresses['_validated'] = [{'chain_id': 98, 'script': script}]
                         validated = True
                         print >>sys.stderr, '[MERGED] Validated explicit DOGE address: %s (chain: %s, script: %s)' % (merged_addr, chain_name, script.encode('hex'))
-                        break
-                    except (ValueError, Exception):
-                        continue
+                    except (ValueError, Exception) as e:
+                        pass  # falls through to !validated branch below
                 
                 if not validated:
-                    # Address failed validation on all known DOGE networks.
+                    # Address failed validation on the current DOGE network.
                     # Do NOT store it — fallback to auto-conversion from parent address.
-                    print >>sys.stderr, '[MERGED] WARNING: Invalid DOGE address from stratum: %s (will auto-convert from LTC address)' % merged_addr
+                    print >>sys.stderr, '[MERGED] WARNING: Invalid DOGE address from stratum: %s (rejected by %s network, will auto-convert from LTC address)' % (merged_addr, chain_name)
                     # Still store unvalidated for current-work display, but NOT for share storage
                     merged_addresses['dogecoin'] = merged_addr
                     merged_addresses['_validated'] = None  # Signals: do not store in share
@@ -1162,10 +1157,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             auto_entries = self._auto_generate_merged_addresses(pubkey_hash, addr_type)
                             if auto_entries:
                                 merged_addresses['_validated'] = auto_entries
-                                print >>sys.stderr, '[MERGED] Auto-converted %s address %s to merged chain %s' % (
-                                    addr_type.upper(),
-                                    user[:30] + '...' if len(user) > 30 else user,
-                                    'P2SH' if addr_type == 'p2sh' else 'P2PKH')
+                                # Log full details of auto-converted addresses
+                                for ae in auto_entries:
+                                    try:
+                                        ae_net = self._get_merged_address_net(ae['chain_id'])
+                                        ae_chain = self._get_merged_chain_name(ae['chain_id'])
+                                        ae_addr = bitcoin_data.script2_to_address(ae['script'], ae_net.ADDRESS_VERSION, -1, ae_net)
+                                        print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> %s %s (chain: %s, script: %s)' % (
+                                            addr_type.upper(), user, ae_addr,
+                                            'P2SH' if addr_type == 'p2sh' else 'P2PKH',
+                                            ae_chain, ae['script'].encode('hex'))
+                                    except Exception:
+                                        print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> script %s (chain_id: %d)' % (
+                                            addr_type.upper(), user, ae['script'].encode('hex'), ae['chain_id'])
                             else:
                                 # Tier 3: unconvertible — merged rewards go to pool distribution
                                 print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain — pool distribution' % (
@@ -1350,13 +1354,39 @@ class WorkerBridge(worker_interface.WorkerBridge):
         return entries if entries else None
 
     def _get_merged_address_net(self, chainid):
+        """Return the network object for the active merged chain.
+        
+        Uses the same detection logic as the MergedMiningBroadcaster:
+          - testnet + port 44557 → dogecoin_testnet4alpha
+          - testnet + other port → dogecoin_testnet
+          - mainnet → dogecoin
+        """
         if chainid == 98:  # Dogecoin
             parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
             is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
-            merged_addr_net = dogecoin_testnet_net if is_testnet else dogecoin_net
-            if merged_addr_net is not None:
-                return merged_addr_net
+            if is_testnet:
+                merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
+                if merged_p2p_port == 44557 and dogecoin_testnet4alpha_net is not None:
+                    return dogecoin_testnet4alpha_net
+                if dogecoin_testnet_net is not None:
+                    return dogecoin_testnet_net
+            else:
+                if dogecoin_net is not None:
+                    return dogecoin_net
         return self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+
+    def _get_merged_chain_name(self, chainid):
+        """Return a human-readable name for the active merged chain."""
+        if chainid == 98:  # Dogecoin
+            parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
+            is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
+            if is_testnet:
+                merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
+                if merged_p2p_port == 44557 and dogecoin_testnet4alpha_net is not None:
+                    return 'dogecoin_testnet4alpha'
+                return 'dogecoin_testnet'
+            return 'dogecoin'
+        return 'merged_%d' % chainid
 
     def _derive_merged_finder_address(self, user, merged_addresses, chainid, merged_addr_net, parent_net):
         # 1) Prefer validated merged address/script supplied via stratum for this chain.
