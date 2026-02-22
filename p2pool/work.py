@@ -1183,8 +1183,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> script %s (chain_id: %d)' % (
                                             src_label, user, ae['script'].encode('hex'), ae['chain_id'])
                             else:
-                                # Tier 3: unconvertible — merged rewards go to pool distribution
-                                print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain — pool distribution' % (
+                                # Tier 3: unconvertible - merged rewards go to pool distribution
+                                print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain - pool distribution' % (
                                     user[:30] + '...' if len(user) > 30 else user, addr_type)
                     else:
                         print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
