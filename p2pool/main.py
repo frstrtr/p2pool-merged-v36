@@ -545,12 +545,16 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                         
                         paystr = ''
                         paytot = 0.0
+                        all_txouts = node.get_current_txouts()
                         for i in range(len(pubkeys.keys)):
-                            curtot = node.get_current_txouts().get(
+                            curtot = all_txouts.get(
                                     pubkeys.keys[i]['address'], 0)
                             paytot += curtot*1e-8
                             paystr += "(%.4f)" % (curtot*1e-8,)
                         paystr += "=%.4f" % (paytot,)
+                        # Debug: Show all PPLNS addresses and their payouts
+                        pplns_str = ', '.join('%s: %.4f' % (addr[:20], val*1e-8) for addr, val in sorted(all_txouts.items(), key=lambda x: -x[1])[:10])
+                        print >>sys.stderr, '[PPLNS] %d addrs: %s' % (len(all_txouts), pplns_str)
                         this_str += '\n Shares: %i (%i orphan, %i dead) Stale rate: %s Efficiency: %s Current payout: %s %s' % (
                             shares, stale_orphan_shares, stale_doa_shares,
                             math.format_binomial_conf(stale_orphan_shares + stale_doa_shares, shares, 0.95),
