@@ -397,8 +397,10 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         
         print 'Listening for workers on %r port %i...' % (worker_endpoint[0], worker_endpoint[1])
         
-        # Convert address to pubkey_hash for WorkerBridge
-        my_pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(my_address, net.PARENT)
+        # Convert address to pubkey_hash and preserve address type for WorkerBridge
+        my_pubkey_hash, _my_ver, _my_witver = bitcoin_data.address_to_pubkey_hash(my_address, net.PARENT)
+        from p2pool.data import get_pubkey_type as _get_pubkey_type
+        my_pubkey_type = _get_pubkey_type(_my_ver, _my_witver, net.PARENT)
         
         # Log merged chain operator address configuration
         if merged_urls:
@@ -409,8 +411,10 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
             else:
                 # Convert parent address to merged chain format for display
                 try:
+                    from p2pool.data import pubkey_type_to_version_witver as _pt2vw
+                    _dver, _dwitver = _pt2vw(my_pubkey_type, net.PARENT)
                     merged_operator_addr = bitcoin_data.pubkey_hash_to_address(
-                        my_pubkey_hash, net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+                        my_pubkey_hash, _dver, _dwitver, net.PARENT)
                     print '    Auto-converting parent address to merged chain format: %s' % merged_operator_addr
                     print '    (You can override with --merged-operator-address <dogecoin_address>)'
                 except Exception as e:
@@ -419,7 +423,8 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         
         wb = work.WorkerBridge(node, my_pubkey_hash, args.donation_percentage,
                        merged_urls, args.node_owner_fee, args, pubkeys,
-                               bitcoind, args.share_rate)
+                               bitcoind, args.share_rate,
+                               my_pubkey_type=my_pubkey_type)
         web_root = web.get_web_root(wb, datadir_path, bitcoind_getinfo_var, static_dir=args.web_static)
         caching_wb = worker_interface.CachingWorkerBridge(wb)
         worker_interface.WorkerInterface(caching_wb).attach_to(web_root, get_handler=lambda request: request.redirect('/static/'))

@@ -576,6 +576,41 @@ def combined_donation_script_to_address(net):
     _combined_donation_addr_cache[id(net)] = addr
     return addr
 
+# =============================================================================
+# V36 Address Type System
+# =============================================================================
+# V36 shares store a 1-byte pubkey_type alongside the 20-byte pubkey_hash
+# to preserve the miner's original address type in the share chain.
+# This enables native P2WPKH (bech32) and P2SH outputs in the parent chain
+# coinbase, instead of always converting to P2PKH.
+#
+# Values:
+#   0 = P2PKH   (legacy, OP_DUP OP_HASH160 <20> OP_EQUALVERIFY OP_CHECKSIG)
+#   1 = P2WPKH  (bech32 v0, OP_0 <20-byte witness_program>)
+#   2 = P2SH    (OP_HASH160 <20> OP_EQUAL)
+# =============================================================================
+PUBKEY_TYPE_P2PKH  = 0
+PUBKEY_TYPE_P2WPKH = 1
+PUBKEY_TYPE_P2SH   = 2
+
+def pubkey_type_to_version_witver(pubkey_type, net):
+    """Map V36 pubkey_type integer to (version, witver) for script/address construction."""
+    if pubkey_type == PUBKEY_TYPE_P2WPKH:
+        return (-1, 0)          # bech32 v0: version=-1, witver=0
+    elif pubkey_type == PUBKEY_TYPE_P2SH:
+        return (net.ADDRESS_P2SH_VERSION, -1)
+    else:
+        return (net.ADDRESS_VERSION, -1)  # P2PKH default
+
+def get_pubkey_type(version, witver, net):
+    """Derive pubkey_type integer from address_to_pubkey_hash() return values."""
+    if witver == 0:
+        return PUBKEY_TYPE_P2WPKH
+    elif version == net.ADDRESS_P2SH_VERSION:
+        return PUBKEY_TYPE_P2SH
+    else:
+        return PUBKEY_TYPE_P2PKH
+
 class BaseShare(object):
     VERSION = 0
     VOTING_VERSION = 0
@@ -770,9 +805,11 @@ class BaseShare(object):
         
         amounts = dict((script, share_data['subsidy']*(199*weight)//(200*total_weight)) for script, weight in weights.iteritems()) # 99.5% goes according to weights prior to this share
         if 'address' not in share_data:
+            # V36: Use pubkey_type to derive native address (bech32, P2SH, or P2PKH)
+            _pt = share_data.get('pubkey_type', PUBKEY_TYPE_P2PKH)
+            _ver, _witver = pubkey_type_to_version_witver(_pt, net.PARENT)
             this_address = bitcoin_data.pubkey_hash_to_address(
-                    share_data['pubkey_hash'], net.PARENT.ADDRESS_VERSION,
-                    -1, net.PARENT)
+                    share_data['pubkey_hash'], _ver, _witver, net.PARENT)
         else:
             this_address = share_data['address']
         
@@ -810,10 +847,12 @@ class BaseShare(object):
                     this_address, net.PARENT)
             del(share_data['address'])
         
-        # V36: store pubkey_hash (IntType(160)) instead of address string (saves ~15 bytes)
+        # V36: store pubkey_hash and pubkey_type (saves ~15 bytes vs VarStrType address)
         if cls.VERSION >= 36 and 'pubkey_hash' not in share_data:
-            share_data['pubkey_hash'], _, _ = bitcoin_data.address_to_pubkey_hash(
+            _ph, _v, _wv = bitcoin_data.address_to_pubkey_hash(
                     this_address, net.PARENT)
+            share_data['pubkey_hash'] = _ph
+            share_data['pubkey_type'] = get_pubkey_type(_v, _wv, net.PARENT)
             if 'address' in share_data:
                 del share_data['address']
         
@@ -1089,13 +1128,14 @@ class BaseShare(object):
         self.timestamp = self.share_info['timestamp']
         self.previous_hash = self.share_data['previous_share_hash']
         if self.VERSION >= 36:
-            # V36: pubkey_hash stored as IntType(160) — compact binary
+            # V36: Use pubkey_type to construct native script/address
+            # (P2PKH=0, P2WPKH/bech32=1, P2SH=2)
+            _ver, _witver = pubkey_type_to_version_witver(
+                    self.share_data.get('pubkey_type', PUBKEY_TYPE_P2PKH), net.PARENT)
             self.new_script = bitcoin_data.pubkey_hash_to_script2(
-                    self.share_data['pubkey_hash'],
-                    net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+                    self.share_data['pubkey_hash'], _ver, _witver, net.PARENT)
             self.address = bitcoin_data.pubkey_hash_to_address(
-                    self.share_data['pubkey_hash'],
-                    net.PARENT.ADDRESS_VERSION, -1, net.PARENT)
+                    self.share_data['pubkey_hash'], _ver, _witver, net.PARENT)
         elif self.VERSION >= 34:
             self.new_script = bitcoin_data.address_to_script2(
                     self.share_data['address'], net.PARENT)
@@ -1474,6 +1514,7 @@ class MergedMiningShare(BaseShare):
                 ('coinbase', pack.VarStrType()),
                 ('nonce', pack.IntType(32)),
                 ('pubkey_hash', pack.IntType(160)),  # V36: compact binary pubkey_hash (saves ~15 bytes vs VarStrType address)
+                ('pubkey_type', pack.IntType(8)),     # V36: address type (0=P2PKH, 1=P2WPKH/bech32, 2=P2SH)
                 ('subsidy', pack.VarIntType()),      # V36: variable-length (saves ~3-7 bytes vs IntType(64))
                 ('donation', pack.IntType(16)),
                 ('stale_info', pack.EnumType(pack.IntType(8), dict((k, {0: None, 253: 'orphan', 254: 'doa'}.get(k, 'unk%i' % (k,))) for k in xrange(256)))),

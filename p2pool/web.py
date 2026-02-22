@@ -1427,9 +1427,13 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                                 except Exception as e:
                                     try:
                                         b['miner'] = bitcoin_data.script2_to_address(
-                                            s.new_script, node.net.ADDRESS_VERSION, -1, node.net.PARENT)
+                                            s.new_script, -1, 0, node.net.PARENT)  # bech32 v0
                                     except Exception as e2:
-                                        print('Failed to extract miner address: %s / %s' % (e, e2))
+                                        try:
+                                            b['miner'] = bitcoin_data.script2_to_address(
+                                                s.new_script, node.net.PARENT.ADDRESS_P2SH_VERSION, -1, node.net.PARENT)  # P2SH
+                                        except Exception as e3:
+                                            print('Failed to extract miner address: %s / %s / %s' % (e, e2, e3))
                             # Fill in subsidy and miner_payout if missing
                             if not b.get('subsidy'):
                                 try:
@@ -1455,9 +1459,13 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 except Exception:
                     try:
                         miner_addr = bitcoin_data.script2_to_address(
-                            s.new_script, node.net.ADDRESS_VERSION, -1, node.net.PARENT)
-                    except Exception as e:
-                        print('Failed to extract miner from share %s: %s' % ('%064x' % s.hash, e))
+                            s.new_script, -1, 0, node.net.PARENT)  # bech32 v0
+                    except Exception:
+                        try:
+                            miner_addr = bitcoin_data.script2_to_address(
+                                s.new_script, node.net.PARENT.ADDRESS_P2SH_VERSION, -1, node.net.PARENT)  # P2SH
+                        except Exception as e:
+                            print('Failed to extract miner from share %s: %s' % ('%064x' % s.hash, e))
                 block_info = {
                     'ts': s.timestamp,
                     'hash': block_hash,

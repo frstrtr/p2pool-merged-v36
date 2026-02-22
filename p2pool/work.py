@@ -164,7 +164,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
     COINBASE_XNONCE1_LENGTH = 1
     COINBASE_NONCE_LENGTH = 8
 
-    def __init__(self, node, my_pubkey_hash, donation_percentage, merged_urls, worker_fee, args, pubkeys, bitcoind, share_rate):
+    def __init__(self, node, my_pubkey_hash, donation_percentage, merged_urls, worker_fee, args, pubkeys, bitcoind, share_rate, my_pubkey_type=0):
         worker_interface.WorkerBridge.__init__(self)
         self.recent_shares_ts_work = []
 
@@ -174,6 +174,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.pubkeys = pubkeys
         self.args = args
         self.my_pubkey_hash = my_pubkey_hash
+        self.my_pubkey_type = my_pubkey_type  # V36: 0=P2PKH, 1=P2WPKH/bech32, 2=P2SH
 		
         self.donation_percentage = args.donation_percentage
         self.node_owner_fee = getattr(args, 'node_owner_fee', worker_fee)
@@ -1117,12 +1118,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     if p2pool.DEBUG:
                         log.err()        
 
-        # Initialize pubkey_hash with default
+        # Initialize pubkey_hash and pubkey_type with operator defaults
         pubkey_hash = self.my_pubkey_hash
+        pubkey_type = self.my_pubkey_type  # V36: 0=P2PKH, 1=P2WPKH, 2=P2SH
         
         if self.args.address == 'dynamic':
             i = self.pubkeys.weighted()
             pubkey_hash = self.pubkeys.keys[i]
+            pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH  # dynamic addresses are P2PKH
 
             c = time.time()
             if (c - self.pubkeys.stamp) > self.args.timeaddresses:
@@ -1130,6 +1133,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         if random.uniform(0, 100) < self.node_owner_fee:
             pubkey_hash = self.my_pubkey_hash
+            pubkey_type = self.my_pubkey_type
         # Resolve miner address to pubkey_hash for share creation.
         # V36 uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS) in coinbase for donations.
         # No fake miner mechanism needed — donation is handled entirely in coinbase.
@@ -1145,6 +1149,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
                     if is_convertible:
                         pubkey_hash = validated_pubkey_hash
+                        # Detect V36 pubkey_type from miner's address
+                        try:
+                            _, _v, _wv = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
+                            pubkey_type = p2pool_data.get_pubkey_type(_v, _wv, self.node.net.PARENT)
+                        except:
+                            pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
                         # Auto-generate merged chain address when miner provides
                         # no explicit merged address via stratum.
                         # Priority: explicit (already in _validated) > auto-convert > pool distribution
@@ -1162,9 +1172,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     user[:30] + '...' if len(user) > 30 else user, addr_type)
                     else:
                         print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
-                        pubkey_hash, _, _ = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
+                        pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
+                        pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
             except: # XXX blah
                 pubkey_hash = self.my_pubkey_hash
+                pubkey_type = self.my_pubkey_type
         
         # Append worker name to user for identification
         if worker:
@@ -1172,7 +1184,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         # Debug: Uncomment to trace user details processing
         #print '[DEBUG] get_user_details returning: user=%r, merged_addresses=%r' % (user, merged_addresses)
-        return user, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses
+        return user, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses
 
     def preprocess_request(self, user):
         # Debug: Uncomment to trace preprocess flow
@@ -1180,9 +1192,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Removed peer connection check - allow solo mining
         if time.time() > self.current_work.value['last_update'] + 60:
             raise jsonrpc.Error_for_code(-12345)(u'lost contact with coind')
-        username, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses = self.get_user_details(user)
-        #print '[DEBUG] preprocess_request returning 5 values: username=%r' % (username,)
-        return username, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses
+        username, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses = self.get_user_details(user)
+        #print '[DEBUG] preprocess_request returning 6 values: username=%r' % (username,)
+        return username, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses
 
     def _estimate_local_hash_rate(self):
         if len(self.recent_shares_ts_work) == 50:
@@ -1532,7 +1544,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         return user_merged_work
 
-    def get_work(self, user, pubkey_hash, desired_share_target, desired_pseudoshare_target, merged_addresses=None):
+    def get_work(self, user, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses=None):
         # Debug: Uncomment to trace get_work calls
         #print '[DEBUG] get_work called with user=%r, merged_addresses=%r' % (user, merged_addresses)
         global print_throttle
@@ -1663,8 +1675,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
             )
             
             if share_type.VERSION >= 36:
-                # V36: store pubkey_hash as IntType(160) — compact binary (saves ~15 bytes)
+                # V36: store pubkey_hash as IntType(160) + pubkey_type (1 byte)
                 share_data_base['pubkey_hash'] = pubkey_hash
+                share_data_base['pubkey_type'] = pubkey_type  # 0=P2PKH, 1=P2WPKH/bech32, 2=P2SH
             elif share_type.VERSION >= 34:
                 # V34-V35: use 'address' as a string
                 share_data_base['address'] = bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT)
@@ -1968,7 +1981,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
             except:
                 log.err(None, 'Error while processing potential block:')
 
-            user, _, _, _, _ = self.get_user_details(user)
+            user, _, _, _, _, _ = self.get_user_details(user)
             assert header['previous_block'] == ba['previous_block']
             # Note: header['merkle_root'] is calculated in stratum.py with the correct coinbase_nonce
             # Don't recalculate it here because worker_interface.py prepends additional nonce data
