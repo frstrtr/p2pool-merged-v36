@@ -1029,6 +1029,64 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         return message_data
 
+    def _pick_random_pplns_miner(self):
+        """Pick a random miner (pubkey_hash, pubkey_type) weighted by PPLNS hashrate.
+
+        Used for probabilistic redistribution of invalid/missing miner addresses.
+        Same consensus-safe model as the node operator fee (-f flag): the chosen
+        miner's address is baked into the share at creation time, invisible to
+        consensus validation.
+
+        Returns (pubkey_hash, pubkey_type) of a randomly selected valid miner,
+        or (self.my_pubkey_hash, self.my_pubkey_type) if no PPLNS data available.
+
+        Results are cached for 30 seconds to avoid expensive weight recalculation
+        on every work request.
+        """
+        now = time.time()
+        # Cache: refresh every 30 seconds or on first call
+        if not hasattr(self, '_pplns_cache') or (now - self._pplns_cache_time) > 30:
+            self._pplns_cache = None
+            self._pplns_cache_time = now
+            try:
+                best = self.node.best_share_var.value
+                if best is not None:
+                    tracker = self.node.tracker
+                    block_target = self.current_work.value['bits'].target
+                    weights, total_weight, donation_weight = tracker.get_cumulative_weights(
+                        best,
+                        min(tracker.get_height(best), self.node.net.REAL_CHAIN_LENGTH),
+                        65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(block_target),
+                    )
+                    if weights:
+                        # Build list of (address, weight, pubkey_hash, pubkey_type)
+                        entries = []
+                        for addr, w in weights.iteritems():
+                            try:
+                                ph, ver, witver = bitcoin_data.address_to_pubkey_hash(addr, self.node.net.PARENT)
+                                pt = p2pool_data.get_pubkey_type(ver, witver, self.node.net.PARENT)
+                                entries.append((addr, w, ph, pt))
+                            except Exception:
+                                pass  # skip undecodable addresses (e.g. donation scripts)
+                        if entries:
+                            self._pplns_cache = entries
+            except Exception:
+                pass
+
+        if not self._pplns_cache:
+            return self.my_pubkey_hash, self.my_pubkey_type
+
+        entries = self._pplns_cache
+        total = sum(w for _, w, _, _ in entries)
+        r = random.randint(0, total - 1)
+        cumulative = 0
+        for addr, w, ph, pt in entries:
+            cumulative += w
+            if r < cumulative:
+                return ph, pt
+        # Fallback (shouldn't reach here)
+        return entries[-1][2], entries[-1][3]
+
     def get_user_details(self, username):
         # Debug: Uncomment to trace user details lookup
         #print '[DEBUG] get_user_details called with username:', repr(username)
@@ -1135,7 +1193,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
         else:
             try:
                 if not user or not user.strip():
-                    pubkey_hash = self.my_pubkey_hash
+                    # Empty address: redistribute to random PPLNS miner
+                    pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
+                    merged_addresses = {}  # Option B: discard any merged address too
+                    print >>sys.stderr, '[POOL] Empty miner address - share credited to random PPLNS miner'
                 else:
                     addr_result = is_pubkey_hash_address(user, self.node.net.PARENT)
                     is_convertible = addr_result[0]
@@ -1190,9 +1251,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
                         pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                         pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
-            except: # XXX blah
-                pubkey_hash = self.my_pubkey_hash
-                pubkey_type = self.my_pubkey_type
+            except: # Invalid/unparseable address - probabilistic redistribution
+                pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
+                merged_addresses = {}  # Option B: discard any merged address too
+                print >>sys.stderr, '[POOL] Invalid miner address %s - share credited to random PPLNS miner' % (
+                    user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)')
         
         # Append worker name to user for identification
         if worker:

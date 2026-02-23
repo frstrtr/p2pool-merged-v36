@@ -243,6 +243,31 @@ When mining Litecoin + Dogecoin, miner payouts are distributed on **both chains*
 | `LTC_ADDR` only (P2SH) | Auto-converts `HASH160(script)` → DOGE P2SH | See ⚠️ warning below |
 | `LTC_ADDR,INVALID_ADDR` | Logs warning, falls back to auto-conversion | Invalid addresses are rejected gracefully |
 
+#### Invalid Address Redistribution
+
+When a miner connects with an invalid or unparseable parent chain (LTC) address, their mining
+rewards are **probabilistically redistributed** to all other valid miners proportional to their
+PPLNS hashrate contribution. This uses the same consensus-safe mechanism as the node operator fee
+(`-f` flag): the share's `pubkey_hash` field is replaced at creation time with a randomly-selected
+valid miner's address, weighted by PPLNS work. No coinbase or consensus changes are required.
+
+**Option B policy:** If the parent (LTC) address is invalid, any merged (DOGE) address — even if
+valid — is also discarded. Both chains' rewards are redistributed together.
+
+| # | Parent (LTC) | Merged (DOGE) | LTC Payout | DOGE Payout |
+|---|---|---|---|---|
+| 1 | Valid | Valid (explicit) | Miner (correct) | Miner (correct) |
+| 2 | Valid | Invalid / missing | Miner (correct) | Auto-converts from LTC pubkey_hash |
+| 3 | Invalid | Invalid / missing | Redistributed to random PPLNS miner | Auto-converts from redistributed pubkey_hash |
+| 4 | Invalid | Valid (explicit) | Redistributed to random PPLNS miner | **Also redistributed** (Option B) |
+
+**Stratum separators:** `,` separates parent from merged address. `.` or `_` separates the worker
+name. `+` and `/` set pseudoshare and share difficulty. Any other characters in the address portion
+that prevent parsing will make the address invalid, triggering redistribution.
+
+**Example:** A miner connecting as `XXX_rig1` has user=`XXX` (invalid LTC address), worker=`rig1`.
+Their share rewards go to a randomly-selected valid miner from the PPLNS window.
+
 > ⚠️ **P2SH Conversion Warning:** When a P2SH-P2WPKH (SegWit-wrapped-in-P2SH) Litecoin address is auto-converted to Dogecoin, the resulting DOGE P2SH address will reference a redeem script containing SegWit opcodes. Since **Dogecoin does not support SegWit**, these funds may be **unspendable**. If you use P2SH addresses on Litecoin, always provide an explicit Dogecoin address:
 > ```
 > Username: MLTCp2shAddress,DDOGElegacyAddress.worker1
