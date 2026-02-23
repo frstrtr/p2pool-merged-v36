@@ -479,14 +479,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         try:
                                             if key.startswith('MERGED:'):
                                                 # Explicit merged chain script from V36 share's merged_addresses.
-                                                # Decode hex script and convert to address for build_merged_coinbase()
-                                                merged_script = key[7:].decode('hex')
-                                                try:
-                                                    merged_address = bitcoin_data.script2_to_address(merged_script, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
-                                                except Exception:
-                                                    # Script might not be standard P2PKH — use raw script as key
-                                                    merged_address = key  # Fallback: use tagged key as-is
-                                                accepted_weights[merged_address] = accepted_weights.get(merged_address, 0) + weight
+                                                # Pass through as-is — build_merged_coinbase() handles MERGED: prefix
+                                                # by decoding the hex script directly (no address round-trip needed).
+                                                accepted_weights[key] = accepted_weights.get(key, 0) + weight
                                                 accepted_total_weight += weight
                                                 continue
                                             

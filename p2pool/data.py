@@ -358,6 +358,14 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
     if height == 0:
         return
     
+    # Skip verification when tracker chain is incomplete (< REAL_CHAIN_LENGTH).
+    # The PPLNS weights depend on tracker state — if the verifier has fewer shares
+    # than the creator, the canonical coinbase will differ and verification fails.
+    # This is expected during initial sync or when peers have different chain depths.
+    # Once the chain is fully synced, verification will run and catch any mismatch.
+    if height < net.REAL_CHAIN_LENGTH:
+        return  # Insufficient chain depth for reliable PPLNS verification
+    
     block_target = share.header['bits'].target
     max_weight = 65535 * net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
     chain_length = min(height, net.REAL_CHAIN_LENGTH)

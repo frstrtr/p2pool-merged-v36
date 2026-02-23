@@ -192,6 +192,17 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
         total_distributed += amount
         
         if amount > 0:  # Skip dust outputs
+            # MERGED: prefix = raw hex-encoded script from get_v36_merged_weights().
+            # These are already valid merged-chain scriptPubKeys (P2PKH, P2SH, etc.)
+            # stored in shares' merged_addresses field. Use directly — no address
+            # conversion needed (and conversion may fail for P2SH scripts).
+            if address.startswith('MERGED:'):
+                script2 = address[7:].decode('hex')
+                append_or_coalesce_output(script2, amount)
+                if DEBUG_COINBASE:
+                    print >>sys.stderr, '[MINER PAYOUT] MERGED:%s...: %d satoshis (%.1f%% of %.1f%%) [raw script]' % (
+                        address[7:21], amount, fraction * 100, 100 - donation_percentage - finder_fee_percentage)
+                continue
             try:
                 # First try: address is already in merged chain format
                 script2 = bitcoin_data.address_to_script2(address, addr_net)
