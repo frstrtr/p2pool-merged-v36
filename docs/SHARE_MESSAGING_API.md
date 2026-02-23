@@ -876,4 +876,4 @@ If validation fails, the node prints an error and starts without the message.
 - [SHARE_MESSAGING_INTEGRATION.md](SHARE_MESSAGING_INTEGRATION.md) — Code integration plan
 - [SHARE_MESSAGING_QUICKSTART.md](SHARE_MESSAGING_QUICKSTART.md) — Operator/miner quick start guide
 - [SHARE_MESSAGING_SECURITY.md](SHARE_MESSAGING_SECURITY.md) — Security model and threat analysis
-- [create_transition_message.py](create_transition_message.py) — Standalone Python 3 authority message tool
+- [create_transition_message.py](../scripts/create_transition_message.py) — Standalone Python 3 authority message tool

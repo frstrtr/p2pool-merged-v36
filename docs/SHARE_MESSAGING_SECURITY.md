@@ -502,4 +502,4 @@ If you discover a vulnerability in the P2Pool share messaging system:
 - [SHARE_MESSAGING_API.md](SHARE_MESSAGING_API.md) — HTTP API reference
 - [SHARE_MESSAGING_QUICKSTART.md](SHARE_MESSAGING_QUICKSTART.md) — Operator/miner quick start
 - [SHARE_MESSAGING_INTEGRATION.md](SHARE_MESSAGING_INTEGRATION.md) — Code integration plan
-- [create_transition_message.py](create_transition_message.py) — Standalone Python 3 authority message tool
+- [create_transition_message.py](../scripts/create_transition_message.py) — Standalone Python 3 authority message tool

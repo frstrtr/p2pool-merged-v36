@@ -443,4 +443,4 @@ For the full security analysis, see [SHARE_MESSAGING_SECURITY.md](SHARE_MESSAGIN
 - [SHARE_MESSAGING_PROTOCOL.md](SHARE_MESSAGING_PROTOCOL.md) — Wire format specification
 - [SHARE_MESSAGING_INTEGRATION.md](SHARE_MESSAGING_INTEGRATION.md) — Code integration plan
 - [SHARE_MESSAGING_SECURITY.md](SHARE_MESSAGING_SECURITY.md) — Threat model and security analysis
-- [create_transition_message.py](create_transition_message.py) — Standalone Python 3 authority message tool
+- [create_transition_message.py](../scripts/create_transition_message.py) — Standalone Python 3 authority message tool

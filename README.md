@@ -51,10 +51,10 @@ The installation guide covers:
 | Document | Description |
 |----------|-------------|
 | [mm-adapter/README.md](mm-adapter/README.md) | Merged mining adapter setup & config reference |
-| [MULTIADDRESS_MINING_GUIDE.md](MULTIADDRESS_MINING_GUIDE.md) | Multi-address mining configuration |
-| [CUSTOM_NETWORK_GUIDE.md](CUSTOM_NETWORK_GUIDE.md) | Adding support for new cryptocurrencies |
-| [ASIC_SUPPORT_COMPLETE.md](ASIC_SUPPORT_COMPLETE.md) | BIP320 version-rolling & Scrypt ASIC support details |
-| [SHARE_ARCHIVE_README.md](SHARE_ARCHIVE_README.md) | Share archival and recovery |
+| [MULTIADDRESS_MINING_GUIDE.md](docs/MULTIADDRESS_MINING_GUIDE.md) | Multi-address mining configuration |
+| [CUSTOM_NETWORK_GUIDE.md](docs/CUSTOM_NETWORK_GUIDE.md) | Adding support for new cryptocurrencies |
+| [ASIC_SUPPORT_COMPLETE.md](docs/ASIC_SUPPORT_COMPLETE.md) | BIP320 version-rolling & Scrypt ASIC support details |
+| [SHARE_ARCHIVE_README.md](docs/SHARE_ARCHIVE_README.md) | Share archival and recovery |
 
 ---
 
@@ -337,7 +337,7 @@ pypy run_p2pool.py --net litecoin -a YOUR_LTC_ADDRESS
 For Ubuntu 24.04 systems, we provide an automated installer script that sets up PyPy2, builds a local OpenSSL 1.1, and configures p2pool with systemd integration:
 
 ```bash
-./install_p2pool_ubuntu_2404.sh
+./scripts/install_p2pool_ubuntu_2404.sh
 ```
 
 ### Older Systems (Ubuntu 20.04 and earlier)
@@ -419,7 +419,7 @@ Common options:
 - `-a ADDRESS` - Your Litecoin payout address
 - `--bitcoind-rpc-port 9332` - Litecoin RPC port (default: 9332)
 - `--bitcoind-address 127.0.0.1` - Litecoin RPC address
-- `--share-rate SECONDS` - Target seconds per pseudoshare (default: 10)
+- `--share-rate SECONDS` - Target seconds per pseudoshare (default: 3)
 - `--merged URL` - Merged mining daemon URL (Dogecoin)
 
 ## Troubleshooting
@@ -469,7 +469,7 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 ## Port Forwarding
 
 If behind NAT, forward these ports:
-- **9338**: P2Pool P2P (for peer connections)
+- **9326**: P2Pool P2P (for peer connections)
 - **9327**: Stratum (for miners)
 
 Do NOT forward port 9332 (Litecoin RPC - security risk)

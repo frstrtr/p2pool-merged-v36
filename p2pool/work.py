@@ -1000,7 +1000,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
             message_data = raw_hex.decode('hex')
         except (ValueError, TypeError):
             print >> sys.stderr, '[TRANSITION] ERROR: --transition-message must be a hex string or path to a file containing one'
-            print >> sys.stderr, '[TRANSITION] Get the hex string from the authority key holder (create_transition_message.py)'
+            print >> sys.stderr, '[TRANSITION] Get the hex string from the authority key holder (scripts/create_transition_message.py)'
             return None
         
         if len(message_data) < 50:  # minimum: header(49) + at least 1 byte
