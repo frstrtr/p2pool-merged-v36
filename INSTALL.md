@@ -164,6 +164,9 @@ pypy get-pip.py
 # Core dependencies (includes scrypt hashing)
 pypy -m pip install twisted==19.10.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22'
 
+# ECDSA library (required for share messaging signature verification)
+pypy -m pip install ecdsa
+
 # Optional: For web interface SSL
 pypy -m pip install pyasn1 pyasn1-modules service_identity
 ```
