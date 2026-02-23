@@ -2375,50 +2375,22 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
                     merged_symbol, merged_name,
                     math.format_dt(time.time() - mw['last_update'])))
     
-    # AutoRatchet chain-state warning: alert when running on a pre-V36 sharechain
+    # AutoRatchet: determine effective state for transition-signal gating
+    # (The dashboard ratchet banner handles the visual transition status display)
     ratchet_confirmed = False
     if auto_ratchet is not None:
         ratchet_state = getattr(auto_ratchet, 'state', '')
         
-        # Count V35 vs V36 shares in the chain (always, regardless of ratchet state)
-        height = tracker.get_height(best_share)
-        sample = min(height, net.REAL_CHAIN_LENGTH) if height > 0 else 0
-        v35_count = 0
-        v36_count = 0
-        for share in tracker.get_chain(best_share, sample):
-            if share.VERSION >= 36:
-                v36_count += 1
-            else:
-                v35_count += 1
-        total = v35_count + v36_count
-        
-        # Effective state: if confirmed but chain is mostly V35, treat as voting
-        # (stale confirmed state from previous session after sharechain flush)
+        # Detect stale confirmed: if chain is mostly V35, treat as voting
         effective_state = ratchet_state
-        if ratchet_state == 'confirmed' and total > 0 and v36_count * 100 // total < 50:
-            effective_state = 'voting'  # override stale confirmed
+        if ratchet_state == 'confirmed':
+            height = tracker.get_height(best_share)
+            sample = min(height, net.REAL_CHAIN_LENGTH) if height > 0 else 0
+            v36_count = sum(1 for share in tracker.get_chain(best_share, sample) if share.VERSION >= 36)
+            if sample > 0 and v36_count * 100 // sample < 50:
+                effective_state = 'voting'
         
         ratchet_confirmed = effective_state == 'confirmed'
-        
-        if v35_count > 0 and total > 0 and not ratchet_confirmed:
-            v35_pct = v35_count * 100 // total
-            shares_needed = net.REAL_CHAIN_LENGTH - total if total < net.REAL_CHAIN_LENGTH else 0
-            if effective_state == 'voting':
-                if total < net.REAL_CHAIN_LENGTH:
-                    res.append('V36 TRANSITION: Building chain %d/%d shares (%d%% V35). '
-                        'Need %d more shares to fill window before activation can begin.' % (
-                            total, net.REAL_CHAIN_LENGTH, v35_pct, shares_needed))
-                else:
-                    res.append('V36 TRANSITION: Voting — %d%% V35, %d%% V36 in %d-share window. '
-                        'Need 95%% V36 votes to activate.' % (
-                            v35_pct, 100 - v35_pct, net.REAL_CHAIN_LENGTH))
-            elif effective_state == 'activated':
-                confirmation_window = net.REAL_CHAIN_LENGTH * 2
-                activated_height = getattr(auto_ratchet, '_activated_height', None)
-                shares_since = (height - activated_height) if activated_height else 0
-                res.append('V36 TRANSITION: Activated — producing V36 shares. '
-                    'Confirmation progress: %d/%d shares (%d%% V36 in chain).' % (
-                        shares_since, confirmation_window, 100 - v35_pct))
     if ratchet_confirmed:
         return res
     try:
