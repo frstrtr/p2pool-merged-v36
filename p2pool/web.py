@@ -207,8 +207,16 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         
         # Hide transition widget when AutoRatchet is CONFIRMED — the
         # V35->V36 transition is complete, all tasks done.
+        # But detect stale confirmed state: if chain is <50% V36, treat as voting
         ratchet = getattr(wb, 'auto_ratchet', None)
-        ratchet_confirmed = ratchet is not None and getattr(ratchet, 'state', '') == 'confirmed'
+        ratchet_state = getattr(ratchet, 'state', '') if ratchet else ''
+        effective_ratchet_state = ratchet_state
+        if ratchet_state == 'confirmed' and chain_height > 0:
+            # Check if confirmed state is stale (chain mostly V35)
+            v36_share_count = sum(c for v, c in share_type_counts.iteritems() if v >= 36)
+            if total_shares > 0 and v36_share_count * 100 // total_shares < 50:
+                effective_ratchet_state = 'voting'  # stale confirmed, override
+        ratchet_confirmed = effective_ratchet_state == 'confirmed'
         show_transition = is_transitioning and not ratchet_confirmed
         
         # The effective target is the SUCCESSOR version when we're in successor transition
@@ -280,11 +288,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             message = 'Waiting for V%d signaling in sampling window' % effective_target
             transition_progress = 0
         
-        # AutoRatchet state for dashboard
+        # AutoRatchet state for dashboard — report effective state
         ratchet_info = None
         if ratchet is not None:
             ratchet_info = dict(
-                state=getattr(ratchet, 'state', 'unknown'),
+                state=effective_ratchet_state,
+                persisted_state=getattr(ratchet, 'state', 'unknown'),
                 activated_at=getattr(ratchet, '_activated_at', None),
                 activated_height=getattr(ratchet, '_activated_height', None),
                 confirmed_at=getattr(ratchet, '_confirmed_at', None),
