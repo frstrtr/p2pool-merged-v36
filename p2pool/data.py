@@ -1663,6 +1663,78 @@ class WeightsSkipList(forest.TrackerSkipList):
         assert share_count == max_shares or total_weight == desired_weight
         return math.add_dicts(*math.flatten_linked_list(weights_list)), total_weight, total_donation_weight
 
+class MergedWeightsSkipList(forest.TrackerSkipList):
+    """O(log n) skip list for V36 merged mining PPLNS weight computation.
+    
+    Like WeightsSkipList but excludes pre-V36 shares (desired_version < 36)
+    and resolves address keys from merged_addresses when chain_id is set.
+    Pre-V36 shares count toward share_count (window sizing) but contribute
+    zero weight — their weight is redistributed to V36 miners.
+    
+    One instance per chain_id is required since address resolution depends
+    on which merged chain's merged_addresses entry to look up.
+    """
+    
+    def __init__(self, tracker, chain_id=None):
+        forest.TrackerSkipList.__init__(self, tracker)
+        self.chain_id = chain_id
+    
+    def get_delta(self, element):
+        share = self.tracker.items[element]
+        att = bitcoin_data.target_to_average_attempts(share.target)
+        
+        if share.desired_version < 36:
+            # Pre-V36: excluded from merged weight distribution.
+            # Count share (for window sizing) but zero weight.
+            return (1, {}, 0, 0)
+        
+        # V36-signaling share: determine address key
+        address_key = share.address  # default: parent chain address
+        
+        if self.chain_id is not None and share.VERSION >= 36:
+            merged_addrs = getattr(share, 'merged_addresses', None)
+            if merged_addrs is None and hasattr(share, 'share_info') and isinstance(share.share_info, dict):
+                merged_addrs = share.share_info.get('merged_addresses', None)
+            if merged_addrs:
+                for entry in merged_addrs:
+                    if entry['chain_id'] == self.chain_id:
+                        address_key = 'MERGED:' + entry['script'].encode('hex')
+                        break
+        
+        return (1, {address_key: att*(65535-share.share_data['donation'])},
+                att*65535, att*share.share_data['donation'])
+    
+    def combine_deltas(self, (sc1, w1, tw1, dw1), (sc2, w2, tw2, dw2)):
+        return sc1 + sc2, math.add_dicts(w1, w2), tw1 + tw2, dw1 + dw2
+    
+    def initial_solution(self, start, (max_shares, desired_weight)):
+        assert desired_weight % 65535 == 0, divmod(desired_weight, 65535)
+        return 0, None, 0, 0
+    
+    def apply_delta(self, (sc1, wl, tw1, dw1), (sc2, w2, tw2, dw2), (max_shares, desired_weight)):
+        if tw1 + tw2 > desired_weight and sc2 == 1:
+            if not w2:
+                # Pre-V36 single step with zero weight — can't overshoot, pass through
+                return sc1 + sc2, (wl, w2), tw1, dw1
+            assert (desired_weight - tw1) % 65535 == 0
+            script, = w2.iterkeys()
+            new_weights = {script: (desired_weight - tw1)//65535*w2[script]//(tw2//65535)}
+            return sc1 + sc2, (wl, new_weights), desired_weight, dw1 + (desired_weight - tw1)//65535*dw2//(tw2//65535)
+        return sc1 + sc2, (wl, w2), tw1 + tw2, dw1 + dw2
+    
+    def judge(self, (sc, wl, tw, dw), (max_shares, desired_weight)):
+        if sc > max_shares or tw > desired_weight:
+            return 1
+        elif sc == max_shares or tw == desired_weight:
+            return 0
+        else:
+            return -1
+    
+    def finalize(self, (sc, wl, tw, dw), (max_shares, desired_weight)):
+        assert sc <= max_shares and tw <= desired_weight
+        assert sc == max_shares or tw == desired_weight
+        return math.add_dicts(*math.flatten_linked_list(wl)), tw, dw
+
 class OkayTracker(forest.Tracker):
     def __init__(self, net):
         forest.Tracker.__init__(self, delta_type=forest.get_attributedelta_type(dict(forest.AttributeDelta.attrs,
@@ -1674,6 +1746,13 @@ class OkayTracker(forest.Tracker):
             work=lambda share: bitcoin_data.target_to_average_attempts(share.target),
         )), subset_of=self)
         self.get_cumulative_weights = WeightsSkipList(self)
+        self._merged_weights_skip_lists = {}  # chain_id -> MergedWeightsSkipList
+    
+    def get_v36_merged_cumulative_weights(self, chain_id, start_hash, chain_length, max_weight):
+        """O(log n) merged mining weight computation via skip list."""
+        if chain_id not in self._merged_weights_skip_lists:
+            self._merged_weights_skip_lists[chain_id] = MergedWeightsSkipList(self, chain_id)
+        return self._merged_weights_skip_lists[chain_id](start_hash, chain_length, max_weight)
 
     def attempt_verify(self, share, block_abs_height_func, known_txs):
         if share.hash in self.verified.items:
@@ -2099,28 +2178,16 @@ def get_desired_version_counts(tracker, best_share_hash, dist):
 def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, chain_id=None):
     """Calculate PPLNS weights for merged mining, including ONLY V36-signaling shares.
     
+    Uses O(log n) MergedWeightsSkipList when the tracker supports it
+    (OkayTracker), falling back to O(n) linear walk otherwise.
+    
     During the V36 transition, pre-V36 shares should not receive merged mining
     rewards because V35 nodes don't contribute to merged block building.
     Their weight is excluded entirely — redistributed proportionally to V36
     miners by virtue of a smaller total_weight denominator.
     
-    IMPORTANT: We filter on share.desired_version (not share.VERSION) because
-    share VERSION only flips to 36 after 95% activation.  Before that, even
-    V36 nodes produce V35-type shares but signal desired_version=36.
-    desired_version identifies which software the miner runs.
-    
-    ADDRESS RESOLUTION (two-tier):
-    1. If share.VERSION >= 36 and share has merged_addresses with a matching
-       chain_id entry, use that explicit merged-chain script as key.
-       These addresses are marked with a 'MERGED:' prefix so work.py knows
-       they don't need auto-conversion.
-    2. Otherwise, use share.address (parent chain address) as key.
-       work.py will auto-convert P2PKH addresses to merged chain format.
-       Unconvertible addresses (P2SH, P2WSH, P2TR) are handled in work.py
-       — their weight is skipped and redistributed to convertible miners.
-    
     Args:
-        tracker: OkayTracker instance
+        tracker: OkayTracker instance (or any Tracker)
         best_share_hash: Head of share chain
         chain_length: Number of shares to walk (typically REAL_CHAIN_LENGTH)
         max_weight: Weight cap (65535 * SPREAD * target_to_average_attempts)
@@ -2133,6 +2200,22 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
         Only V36-signaling shares are counted.
         Keys prefixed with 'MERGED:' are already merged-chain scripts (hex-encoded).
     """
+    if chain_length <= 0 or best_share_hash is None:
+        return {}, 0, 0
+    
+    # Fast path: O(log n) via MergedWeightsSkipList
+    if hasattr(tracker, 'get_v36_merged_cumulative_weights'):
+        weights, total_weight, donation_weight = tracker.get_v36_merged_cumulative_weights(
+            chain_id, best_share_hash, chain_length, max_weight)
+        _last = getattr(get_v36_merged_weights, '_last_log_key', None)
+        _cur = (len(weights), total_weight)
+        if _last != _cur:
+            get_v36_merged_weights._last_log_key = _cur
+            print 'Merged mining weights: %d addresses (weight=%d, donation=%d) via skip list' % (
+                len(weights), total_weight, donation_weight)
+        return weights, total_weight, donation_weight
+    
+    # Fallback: O(n) linear walk for trackers without SkipList support
     weights = {}  # {address_key: weight}
     total_weight = 0
     donation_weight = 0
@@ -2145,22 +2228,15 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
         share_total = att * 65535  # Total contribution of this share
         
         if share.desired_version < 36:
-            # Pre-V36 signaling share: exclude from merged mining distribution.
-            # Still count towards max_weight so the window size is consistent
-            # with the parent chain PPLNS window.
             pre_v36_count += 1
             if total_weight + donation_weight + share_total > max_weight:
                 break
             continue
         
-        # V36-signaling share: include with same weight formula as WeightsSkipList
         share_weight = att * (65535 - share.share_data['donation'])
         share_donation = att * share.share_data['donation']
         
-        # Respect weight cap — stop when window is full
         if total_weight + donation_weight + share_weight + share_donation > max_weight:
-            # Proportional truncation for boundary share (matches WeightsSkipList)
-            # Uses integer arithmetic for cross-platform determinism (consensus-critical)
             remaining = max_weight - total_weight - donation_weight
             total_share = share_weight + share_donation
             if remaining > 0 and total_share > 0:
@@ -2169,27 +2245,21 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
             else:
                 break
         
-        # Address resolution: try explicit merged_addresses first, then parent address
         address_key = None
         
         if chain_id is not None and share.VERSION >= 36:
-            # V36 share type: may have explicit merged_addresses
             merged_addrs = getattr(share, 'merged_addresses', None)
             if merged_addrs is None:
-                # Try share_info path (V36 shares store it in share_info)
                 merged_addrs = share.share_info.get('merged_addresses', None) if hasattr(share, 'share_info') and isinstance(share.share_info, dict) else None
             
             if merged_addrs:
                 for entry in merged_addrs:
                     if entry['chain_id'] == chain_id:
-                        # Explicit merged chain script — tag with MERGED: prefix
-                        # so work.py knows it doesn't need auto-conversion
                         address_key = 'MERGED:' + entry['script'].encode('hex')
                         explicit_count += 1
                         break
         
         if address_key is None:
-            # No explicit merged address: use parent chain address (auto-convert in work.py)
             address_key = share.address
         
         weights[address_key] = weights.get(address_key, 0) + share_weight
