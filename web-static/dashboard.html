@@ -493,7 +493,7 @@
         .table-panel {
             display: flex;
             flex-direction: column;
-            height: 580px;   /* fixed height keeps all three columns aligned */
+            height: 660px;   /* fixed height keeps all three columns aligned */
             overflow: hidden; /* only inner .table-scroll scrolls, never the panel itself */
         }
         .table-panel .table-scroll {
@@ -2298,9 +2298,10 @@
                     
                     // Update show more button
                     var showMoreBtn = d3.select('#blocks_show_more');
-                    if (window.blocksDisplayCount < window.allBlocks.length) {
+                    var blocksRemaining = window.allBlocks.length - window.blocksDisplayCount;
+                    if (blocksRemaining > 0) {
                         showMoreBtn.style('display', 'block')
-                            .text('Show 5 more... (' + (window.allBlocks.length - window.blocksDisplayCount) + ' remaining)');
+                            .text('Show ' + Math.min(5, blocksRemaining) + ' more... (' + blocksRemaining + ' remaining)');
                     } else {
                         showMoreBtn.style('display', 'none');
                     }
@@ -2311,7 +2312,9 @@
                 
                 // Show more button handler
                 d3.select('#blocks_show_more').on('click', function() {
-                    window.blocksDisplayCount = Math.min(window.blocksDisplayCount + 5, window.allBlocks.length);
+                    var remaining = window.allBlocks.length - window.blocksDisplayCount;
+                    var step = (remaining <= 5) ? remaining : 5;
+                    window.blocksDisplayCount = Math.min(window.blocksDisplayCount + step, window.allBlocks.length);
                     renderBlocks();
                 });
             });
@@ -2408,9 +2411,10 @@
                     
                     // Update show more button
                     var showMoreBtn = d3.select('#merged_blocks_show_more');
-                    if (window.mergedBlocksDisplayCount < window.allMergedBlocks.length) {
+                    var mergedRemaining = window.allMergedBlocks.length - window.mergedBlocksDisplayCount;
+                    if (mergedRemaining > 0) {
                         showMoreBtn.style('display', 'block')
-                            .text('Show 5 more... (' + (window.allMergedBlocks.length - window.mergedBlocksDisplayCount) + ' remaining)');
+                            .text('Show ' + Math.min(5, mergedRemaining) + ' more... (' + mergedRemaining + ' remaining)');
                     } else {
                         showMoreBtn.style('display', 'none');
                     }
@@ -2421,7 +2425,9 @@
                 
                 // Show more button handler
                 d3.select('#merged_blocks_show_more').on('click', function() {
-                    window.mergedBlocksDisplayCount = Math.min(window.mergedBlocksDisplayCount + 5, window.allMergedBlocks.length);
+                    var remaining = window.allMergedBlocks.length - window.mergedBlocksDisplayCount;
+                    var step = (remaining <= 5) ? remaining : 5;
+                    window.mergedBlocksDisplayCount = Math.min(window.mergedBlocksDisplayCount + step, window.allMergedBlocks.length);
                     renderMergedBlocks();
                 });
             });
@@ -2536,10 +2542,11 @@
             });
             
             // Show "Show more" button if there are more payouts
-            if (window.payoutsDisplayCount < window.payoutsData.sortedAddrs.length) {
+            var payoutsRemaining = window.payoutsData.sortedAddrs.length - window.payoutsDisplayCount;
+            if (payoutsRemaining > 0) {
                 d3.select('#payouts_show_more')
                     .style('display', 'block')
-                    .text('Show 5 more (' + (window.payoutsData.sortedAddrs.length - window.payoutsDisplayCount) + ' remaining)');
+                    .text('Show ' + Math.min(5, payoutsRemaining) + ' more (' + payoutsRemaining + ' remaining)');
             } else {
                 d3.select('#payouts_show_more').style('display', 'none');
             }
@@ -2625,8 +2632,10 @@
                 
                 // Set up show more button click handler
                 d3.select('#payouts_show_more').on('click', function() {
+                    var rem = window.payoutsData.sortedAddrs.length - window.payoutsDisplayCount;
+                    var step = (rem <= 5) ? rem : 5;
                     window.payoutsDisplayCount = Math.min(
-                        window.payoutsDisplayCount + 5,
+                        window.payoutsDisplayCount + step,
                         window.payoutsData.sortedAddrs.length
                     );
                     renderPayoutsWithShowMore();
@@ -2661,8 +2670,10 @@
             
             // Set up show more button for simple payouts
             d3.select('#payouts_show_more').on('click', function() {
+                var rem = window.payoutsData.sortedAddrs.length - window.payoutsDisplayCount;
+                var step = (rem <= 5) ? rem : 5;
                 window.payoutsDisplayCount = Math.min(
-                    window.payoutsDisplayCount + 5,
+                    window.payoutsDisplayCount + step,
                     window.payoutsData.sortedAddrs.length
                 );
                 renderSimplePayoutsWithShowMore();
@@ -2694,10 +2705,11 @@
             });
             
             // Show "Show more" button if there are more payouts
-            if (window.payoutsDisplayCount < window.payoutsData.sortedAddrs.length) {
+            var simpleRemaining = window.payoutsData.sortedAddrs.length - window.payoutsDisplayCount;
+            if (simpleRemaining > 0) {
                 d3.select('#payouts_show_more')
                     .style('display', 'block')
-                    .text('Show 5 more (' + (window.payoutsData.sortedAddrs.length - window.payoutsDisplayCount) + ' remaining)');
+                    .text('Show ' + Math.min(5, simpleRemaining) + ' more (' + simpleRemaining + ' remaining)');
             } else {
                 d3.select('#payouts_show_more').style('display', 'none');
             }
@@ -2888,10 +2900,11 @@
                     });
                     
                     // Show "Show more" button if there are more peers
-                    if (window.broadcastPeersDisplayCount < window.allBroadcasterPeers.length) {
+                    var bcRemaining = window.allBroadcasterPeers.length - window.broadcastPeersDisplayCount;
+                    if (bcRemaining > 0) {
                         d3.select('#broadcaster_peers_show_more')
                             .style('display', 'block')
-                            .text('Show 5 more... (' + (window.allBroadcasterPeers.length - window.broadcastPeersDisplayCount) + ' remaining)');
+                            .text('Show ' + Math.min(5, bcRemaining) + ' more... (' + bcRemaining + ' remaining)');
                     } else {
                         d3.select('#broadcaster_peers_show_more').style('display', 'none');
                     }
@@ -2901,8 +2914,10 @@
                 
                 // Set up show more button
                 d3.select('#broadcaster_peers_show_more').on('click', function() {
+                    var bcRem = window.allBroadcasterPeers.length - window.broadcastPeersDisplayCount;
+                    var bcStep = (bcRem <= 5) ? bcRem : 5;
                     window.broadcastPeersDisplayCount = Math.min(
-                        window.broadcastPeersDisplayCount + 5,
+                        window.broadcastPeersDisplayCount + bcStep,
                         window.allBroadcasterPeers.length
                     );
                     renderBroadcasterPeers();
