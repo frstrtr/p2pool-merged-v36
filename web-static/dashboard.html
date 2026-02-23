@@ -1335,7 +1335,7 @@
         <div class="two-col">
             <!-- Recent Blocks -->
             <div class="table-container">
-                <div class="section-header" style="flex-wrap: wrap;">
+                <div class="section-header" style="flex-wrap: wrap; flex-direction: column; align-items: flex-start; gap: 6px;">
                     <h2>🏆 Recent Blocks</h2>
                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                         <span class="badge" id="blocks_count">0</span>
@@ -1367,7 +1367,7 @@
             
             <!-- Merged Mining Blocks -->
             <div class="table-container" id="merged_blocks_section" style="display: none;">
-                <div class="section-header" style="flex-wrap: wrap;">
+                <div class="section-header" style="flex-wrap: wrap; flex-direction: column; align-items: flex-start; gap: 6px;">
                     <h2>⛏️ Merged Mining Blocks</h2>
                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                         <span class="badge" id="merged_blocks_count" style="background: var(--primary);">0</span>
@@ -1395,10 +1395,12 @@
             
             <!-- Payouts -->
             <div class="table-container">
-                <div class="section-header">
+                <div class="section-header" style="flex-wrap: wrap; flex-direction: column; align-items: flex-start; gap: 6px;">
                     <h2>💵 Current Payouts</h2>
-                    <span class="badge"><span id="payouts_total">0</span> <span class="symbol-small">DASH</span></span>
-                    <span class="badge" id="merged_payouts_badge" style="display: none; background: #6f42c1; margin-left: 8px;"><span id="merged_payouts_total">0</span> <span id="merged_payouts_symbol">AUX</span></span>
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <span class="badge"><span id="payouts_total">0</span> <span class="symbol-small">DASH</span></span>
+                        <span class="badge" id="merged_payouts_badge" style="display: none; background: #6f42c1;"><span id="merged_payouts_total">0</span> <span id="merged_payouts_symbol">AUX</span></span>
+                    </div>
                 </div>
                 <div class="table-scroll">
                     <table id="payouts" class="data-table">
