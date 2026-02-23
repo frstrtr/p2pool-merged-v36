@@ -1,12 +1,12 @@
 # Custom Network Configuration Guide
 
-This guide explains how to create a private P2Pool-Dash network with custom parameters.
+This guide explains how to create a private P2Pool network with custom parameters.
 
 ## Quick Start
 
 1. **Copy example config:**
    ```bash
-   cp p2pool/networks/dash_custom_example.py p2pool/networks/dash_mypool.py
+   cp p2pool/networks/litecoin.py p2pool/networks/litecoin_mypool.py
    ```
 
 2. **Edit key parameters:**
@@ -20,13 +20,13 @@ This guide explains how to create a private P2Pool-Dash network with custom para
    REAL_CHAIN_LENGTH = CHAIN_LENGTH
    
    # Change ports to avoid conflicts
-   P2P_PORT = 8998
-   WORKER_PORT = 7902
+   P2P_PORT = 9337
+   WORKER_PORT = 9326
    ```
 
 3. **Run your custom network:**
    ```bash
-   python run_p2pool.py --net dash_mypool <your-address>
+   python run_p2pool.py --net litecoin_mypool <your-address>
    ```
 
 ## Chain Length Selection
@@ -129,7 +129,7 @@ find data/share_archive -name "shares_*.txt" -mtime +7 -exec gzip {} \;
 IDENTIFIER = 'YOURPOOL'.encode('hex').decode('hex')
 PREFIX = 'YOURPREF'.encode('hex').decode('hex')
 COINBASEEXT = 'YOUR_COINBASE_TAG'.decode('hex')
-P2P_PORT = 8997  # Different from mainnet (8999)
+P2P_PORT = 9337  # Different from mainnet (9338)
 ```
 
 ### Connecting Nodes:
@@ -138,10 +138,10 @@ Since there are no bootstrap nodes, manually connect:
 
 ```bash
 # Node 1 (first node)
-python run_p2pool.py --net dash_mypool <address>
+python run_p2pool.py --net litecoin_mypool <address>
 
 # Node 2 (connect to node 1)
-python run_p2pool.py --net dash_mypool <address> --p2pool-node <node1-ip>:8997
+python run_p2pool.py --net litecoin_mypool <address> --p2pool-node <node1-ip>:9337
 ```
 
 ## Payout Behavior
@@ -168,7 +168,7 @@ REAL_CHAIN_LENGTH = 5*24*60*60//20  # 5 days
 
 ```bash
 # Use regtest network (CHAIN_LENGTH=100)
-python run_p2pool.py --net dash_regtest <address>
+python run_p2pool.py --net btcregtest <address>
 
 # Verify:
 # 1. Shares accumulate properly
@@ -181,13 +181,13 @@ python run_p2pool.py --net dash_regtest <address>
 **Then move to testnet:**
 
 ```bash
-python run_p2pool.py --net dash_testnet <address>
+python run_p2pool.py --net litecoin_testnet <address>
 ```
 
 **Finally, deploy custom network:**
 
 ```bash
-python run_p2pool.py --net dash_mypool <address>
+python run_p2pool.py --net litecoin_mypool <address>
 ```
 
 ## Monitoring
@@ -290,9 +290,9 @@ WORKER_PORT = 7899
 
 ## References
 
-- See `p2pool/networks/dash_custom_example.py` for annotated example
+- See `p2pool/networks/litecoin.py` for annotated production config
 - See `SHARE_ARCHIVE_README.md` for archive management details
 - See mainnet configs for production examples:
-  - `dash.py` - 24 hour chain
-  - `dash_testnet.py` - testnet with same parameters
-  - `dash_regtest.py` - testing with 100 share chain
+  - `litecoin.py` - 24 hour chain
+  - `litecoin_testnet.py` - testnet with same parameters
+  - `btcregtest.py` - testing with short share chain

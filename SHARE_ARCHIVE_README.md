@@ -86,7 +86,7 @@ If you need to restore archived shares (e.g., after corruption):
 
 2. **Backup current data**
    ```bash
-   cd ~/p2pool-dash/data
+   cd ~/p2pool-merged-v36/data
    cp -r shares shares_backup
    cp -r share_archive share_archive_backup
    ```
@@ -182,7 +182,7 @@ The archival system **automatically adapts** to any `CHAIN_LENGTH` setting. If y
 
 #### Example: 5-Day Chain
 ```python
-# In your custom network config (e.g., dash_custom.py)
+# In your custom network config (e.g., litecoin_mypool.py)
 CHAIN_LENGTH = 5*24*60*60//20  # 21,600 shares = 5 days
 REAL_CHAIN_LENGTH = 5*24*60*60//20
 ```
@@ -222,7 +222,7 @@ REAL_CHAIN_LENGTH = 5*24*60*60//20
 **Network Isolation:**
 - Custom networks need unique IDENTIFIER
 - Won't connect to mainnet automatically
-- See `p2pool/networks/dash_custom_example.py`
+- See `p2pool/networks/litecoin.py`
 
 ### Future Configuration Options
 

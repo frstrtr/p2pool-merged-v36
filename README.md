@@ -1,12 +1,10 @@
-# P2Pool-Dash
+# P2Pool Merged Mining (V36)
 
-Decentralized pool mining software for Dash, Litecoin, and Dogecoin cryptocurrencies.
+Decentralized pool mining software for Litecoin and Dogecoin (merged mining).
 
 ## 🎉 Litecoin + Dogecoin Merged Mining
 
 **Status:** ✅ **PRODUCTION READY** - Mainnet merged mining operational
-
-Branch: `feature/scrypt-litecoin-dogecoin`
 
 ### Key Features
 - ✅ Litecoin scrypt mining with Dogecoin AuxPoW merged mining
@@ -16,25 +14,6 @@ Branch: `feature/scrypt-litecoin-dogecoin`
 - ✅ Node-owner fees are sharechain-weighted on both parent and merged chains
 - ✅ Real-time monitoring dashboard
 - ✅ MM-Adapter bridge for standard Dogecoin daemon compatibility
-
-### Combined Donation Addresses (Mainnet + Testnet)
-
-Current V36 combined marker script (both chains):
-
-- `a9148c6272621d89e8fa526dd86acff60c7136be8e8587`
-
-Mainnet addresses derived from this script:
-
-- **Litecoin mainnet (parent chain):** `MLhSmVQxMusLE3pjGFvp4unFckgjeD8LUA`
-- **Dogecoin mainnet (merged chain):** `A5EZCT4tUrtoKuvJaWbtVQADzdUKdtsqpr`
-
-Testnet addresses derived from the same script:
-
-- **Litecoin testnet (parent chain):** `QZQGeMoG3MaLmWwRTcbMwuxYenkHE2zhUN`
-- **Dogecoin testnet/testnet4alpha (merged chain):** `2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f`
-
-For pre-V36 vs post-V36 address history (LTC/BTC/DOGE mainnet+testnet), see
-[MERGED_MINING_DONATION.md#v36-donation-script-transition-feb-2026](MERGED_MINING_DONATION.md#v36-donation-script-transition-feb-2026).
 
 ### Architecture
 
@@ -51,8 +30,6 @@ For pre-V36 vs post-V36 address history (LTC/BTC/DOGE mainnet+testnet), see
                              │ (Python 3)   │  Port 22555  │   Core      │
                              └──────────────┘              └─────────────┘
 ```
-
-See [MERGED_MINING_DONATION.md](MERGED_MINING_DONATION.md) for technical details.
 
 ## 📋 Documentation
 
@@ -73,7 +50,6 @@ The installation guide covers:
 
 | Document | Description |
 |----------|-------------|
-| [MERGED_MINING_DONATION.md](MERGED_MINING_DONATION.md) | LTC+DOGE merged mining technical details |
 | [mm-adapter/README.md](mm-adapter/README.md) | Merged mining adapter setup |
 | [MULTIADDRESS_MINING_GUIDE.md](MULTIADDRESS_MINING_GUIDE.md) | Multi-address mining configuration |
 | [CUSTOM_NETWORK_GUIDE.md](CUSTOM_NETWORK_GUIDE.md) | Adding support for new cryptocurrencies |
@@ -95,9 +71,8 @@ The installation guide covers:
 
 ```bash
 # Clone repository
-git clone https://github.com/dashpay/p2pool-dash.git
-cd p2pool-dash
-git checkout feature/scrypt-litecoin-dogecoin
+git clone https://github.com/frstrtr/p2pool-merged-v36.git
+cd p2pool-merged-v36
 
 # Install PyPy 2.7 (Ubuntu 24.04+)
 wget https://downloads.python.org/pypy/pypy2.7-v7.3.20-linux64.tar.bz2
@@ -342,10 +317,8 @@ sudo snap install pypy --classic
 pypy -m pip install twisted==19.10.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22'
 
 # Clone and setup
-git clone https://github.com/dashpay/p2pool-dash.git
-cd p2pool-dash
-git submodule init
-git submodule update
+git clone https://github.com/frstrtr/p2pool-merged-v36.git
+cd p2pool-merged-v36
 
 # Run P2Pool (Litecoin + Dogecoin merged mining)
 pypy run_p2pool.py --net litecoin -a YOUR_LTC_ADDRESS
@@ -367,9 +340,8 @@ If Python 2.7 is still available:
 
 ```bash
 sudo apt-get install python2 python2-dev python2-twisted python2-pip gcc g++
-git clone https://github.com/dashpay/p2pool-dash.git
-cd p2pool-dash
-git submodule init && git submodule update
+git clone https://github.com/frstrtr/p2pool-merged-v36.git
+cd p2pool-merged-v36
 pip install 'scrypt>=0.8.0,<=0.8.22'
 python2 run_p2pool.py --net litecoin -a YOUR_LTC_ADDRESS
 ```
@@ -464,7 +436,7 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 
 ### v23.0+ Critical Fixes
 - ✅ Missing type classes in pack.py (ComposedWithContextualOptionalsType, ContextualOptionalType, BoolType)
-- ✅ Wrong module import (bitcoin → dash)
+- ✅ Wrong module import paths fixed
 - ✅ Block hash formatting (zero-padding)
 - ✅ Empty payee address handling
 - ✅ Removed defunct bootstrap nodes
@@ -472,16 +444,16 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 
 ### Enhanced Features (December 2025)
 - ✅ Enhanced difficulty control (+diff, /diff modifiers)
-- ✅ X11 DUMB_SCRYPT_DIFF constant for accurate difficulty display
+- ✅ DUMB_SCRYPT_DIFF constant for accurate scrypt difficulty display
 - ✅ Worker IP tracking infrastructure
 - ✅ Configurable vardiff with --share-rate parameter (default: 10 seconds)
 - ✅ Improved min_share_target bounds for better difficulty adjustment
-- ✅ Fixed Dash-specific got_response() signature compatibility
+- ✅ Fixed got_response() signature compatibility
 - ✅ **Block luck calculation** with time-weighted average hashrate
 - ✅ **Hashrate sampling** for precise luck statistics
 - ✅ **Telegram notifications** for block announcements
 - ✅ **Block status tracking** (confirmed/orphaned/pending)
-- ✅ **Dash Platform support** (v20+): Handles OP_RETURN platform payments (original Dash fork feature)
+- ✅ **Extended coinbase support**: Handles OP_RETURN platform payments in coinbase
 - ✅ **Packed object compatibility**: Fixed share verification for _script field handling
 - ✅ **Mainnet ready**: Full support for masternode/platform/superblock payment structures
 - ✅ **Solo mining support**: Removed peer connection requirement - works standalone with PERSIST=True
@@ -618,4 +590,4 @@ Thanks to:
 * The Bitcoin Foundation for its generous support of P2Pool
 * The Litecoin Project for its generous donations to P2Pool
 * The Vertcoin Community for its great contribution to P2Pool
-* jakehaas, vertoe, chaeplin, dstorm, poiuty, elbereth  and mr.slaveg from the Darkcoin/Dash Community
+* jakehaas, vertoe, chaeplin, dstorm, poiuty, elbereth and mr.slaveg from the early P2Pool community

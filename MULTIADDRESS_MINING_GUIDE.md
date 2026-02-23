@@ -257,7 +257,7 @@ For issues or questions:
 1. Check P2Pool logs: `data/litecoin_testnet/debug.log`
 2. Monitor console output for error messages
 3. Verify both daemons are synced and running
-4. Check GitHub issues: https://github.com/frstrtr/p2pool-dash
+3. Check GitHub issues: https://github.com/frstrtr/p2pool-merged-v36
 
 ---
 
