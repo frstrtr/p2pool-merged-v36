@@ -62,9 +62,9 @@ See [MERGED_MINING_DONATION.md](MERGED_MINING_DONATION.md) for technical details
 
 The installation guide covers:
 - ✅ System requirements and dependencies
-- ✅ Dash Core installation and configuration
+- ✅ Litecoin Core & Dogecoin Core installation and configuration
 - ✅ Python 2.7 / PyPy setup (modern Ubuntu/Debian)
-- ✅ dash_hash module compilation
+- ✅ Scrypt hashing setup (`pip install scrypt` or legacy ltc_scrypt C extension)
 - ✅ Standalone vs Multi-node configuration
 - ✅ Common issues and solutions (OpenSSL, missing modules, etc.)
 - ✅ Performance tuning and security
@@ -77,7 +77,7 @@ The installation guide covers:
 | [mm-adapter/README.md](mm-adapter/README.md) | Merged mining adapter setup |
 | [MULTIADDRESS_MINING_GUIDE.md](MULTIADDRESS_MINING_GUIDE.md) | Multi-address mining configuration |
 | [CUSTOM_NETWORK_GUIDE.md](CUSTOM_NETWORK_GUIDE.md) | Adding support for new cryptocurrencies |
-| [ASIC_SUPPORT_COMPLETE.md](ASIC_SUPPORT_COMPLETE.md) | ASICBOOST implementation details |
+| [ASIC_SUPPORT_COMPLETE.md](ASIC_SUPPORT_COMPLETE.md) | BIP320 version-rolling & Scrypt ASIC support details |
 | [SHARE_ARCHIVE_README.md](SHARE_ARCHIVE_README.md) | Share archival and recovery |
 
 ---
@@ -104,14 +104,9 @@ wget https://downloads.python.org/pypy/pypy2.7-v7.3.20-linux64.tar.bz2
 tar xjf pypy2.7-v7.3.20-linux64.tar.bz2
 export PATH="$PWD/pypy2.7-v7.3.20-linux64/bin:$PATH"
 
-# Install P2Pool dependencies
+# Install P2Pool dependencies (includes scrypt hashing)
 pypy -m ensurepip
-pypy -m pip install twisted pycryptodome
-
-# Build litecoin_scrypt module
-cd litecoin_scrypt
-pypy setup.py install --user
-cd ..
+pypy -m pip install twisted pycryptodome 'scrypt>=0.8.0,<=0.8.22'
 ```
 
 ### Step 2: Configure Litecoin Core
@@ -314,22 +309,23 @@ dogecoin-cli getnewaddress "" legacy         # P2PKH:  D...
 
 ---
 
----
-
-## Dash Mining (Original)
+## General Installation & Usage
 
 ### Requirements
 
-* **Dash Core**: >=23.0.0 (Protocol 70238+)
+* **Litecoin Core**: >=0.21.0 (for parent chain)
+* **Dogecoin Core**: >=1.14.7 (for merged mining child chain)
 * **Python**: 2.7 (via PyPy recommended)
 * **Twisted**: >=19.10.0
 * **pycryptodome**: >=3.9.0
-* **dash_hash**: X11 hashing module (included as submodule)
+* **ltc_scrypt**: Scrypt hashing — `pip install 'scrypt>=0.8.0,<=0.8.22'` (v0.8.23+ uses f-strings, breaks Python 2.7/PyPy). Falls back to legacy C extension in `litecoin_scrypt/` if py-scrypt is unavailable.
 
 ### Features
 
-* ✅ **ASICBOOST Support**: Full BIP320 version-rolling implementation
-* ✅ **Modern ASIC Compatible**: Works with Antminer D3/D5/D7
+* ✅ **Scrypt PoW**: Litecoin/Dogecoin Scrypt (N=1024, r=1, p=1) mining
+* ✅ **Merged Mining**: Simultaneous LTC + DOGE mining with AuxPoW
+* ✅ **Modern Scrypt ASIC Compatible**: Works with Antminer L3+/L7, Goldshell LT5/LT6, Elphapex DG1, etc.
+* ✅ **BIP320 Version-Rolling**: Stratum `mining.configure` for version-mask negotiation
 * ✅ **Enhanced Difficulty Control**: Support for +difficulty and /difficulty modifiers
 * ✅ **Variable Difficulty**: Configurable vardiff with --share-rate parameter
 * ✅ **Backward Compatible**: CPU/GPU miners still supported
@@ -343,7 +339,7 @@ Python 2 is no longer available. Use PyPy:
 sudo snap install pypy --classic
 
 # Install dependencies
-pypy -m pip install twisted==19.10.0 pycryptodome
+pypy -m pip install twisted==19.10.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22'
 
 # Clone and setup
 git clone https://github.com/dashpay/p2pool-dash.git
@@ -351,13 +347,8 @@ cd p2pool-dash
 git submodule init
 git submodule update
 
-# Build dash_hash
-cd dash_hash
-pypy setup.py install --user
-cd ..
-
-# Run P2Pool
-pypy run_p2pool.py --net dash -a YOUR_DASH_ADDRESS
+# Run P2Pool (Litecoin + Dogecoin merged mining)
+pypy run_p2pool.py --net litecoin -a YOUR_LTC_ADDRESS
 ```
 
 **See [INSTALL.md](INSTALL.md) for detailed instructions.**
@@ -379,59 +370,59 @@ sudo apt-get install python2 python2-dev python2-twisted python2-pip gcc g++
 git clone https://github.com/dashpay/p2pool-dash.git
 cd p2pool-dash
 git submodule init && git submodule update
-cd dash_hash && python2 setup.py install --user && cd ..
-python2 run_p2pool.py --net dash -a YOUR_DASH_ADDRESS
+pip install 'scrypt>=0.8.0,<=0.8.22'
+python2 run_p2pool.py --net litecoin -a YOUR_LTC_ADDRESS
 ```
 
 ## Mining to P2Pool
 
 Point your miner to:
 ```
-stratum+tcp://YOUR_IP:7903
+stratum+tcp://YOUR_IP:9327
 ```
 
-Username: Your Dash address  
+Username: Your Litecoin address (optionally with DOGE address — see [Multiaddress Mining](#-multiaddress-mining))
 Password: anything
 
 ### Advanced Username Options
 
-You can append difficulty modifiers to your Dash address:
+You can append difficulty modifiers to your Litecoin address:
 
 **Pseudoshare difficulty** (for vardiff tuning):
 ```
 YOUR_ADDRESS+DIFFICULTY
-Example: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u+4096
+Example: ltc1qexampleaddress+4096
 ```
 
 **Actual share difficulty** (fixed minimum):
 ```
 YOUR_ADDRESS/DIFFICULTY
-Example: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u/65536
+Example: ltc1qexampleaddress/65536
 ```
 
 **Worker names** (for monitoring):
 ```
 YOUR_ADDRESS.worker_name
-Example: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u.antminer1
+Example: ltc1qexampleaddress.asic1
 ```
 
 ## Configuration Modes
 
 ### Standalone Mode (Solo/Testing)
-Edit `p2pool/networks/dash.py`:
+Edit `p2pool/networks/litecoin.py`:
 ```python
 PERSIST = False  # No peers required
 ```
 
 ### Multi-Node Mode (Pool Mining)
-Edit `p2pool/networks/dash.py`:
+Edit `p2pool/networks/litecoin.py`:
 ```python
 PERSIST = True  # Connect to P2Pool network
 ```
 
-**⚠️ IMPORTANT**: When upgrading to the latest version with Dash Platform support:
-- **Delete old sharechain data**: `data/dash/shares.*` and `data/dash/graph_db`
-- Old shares are incompatible due to `_script` field changes
+**⚠️ IMPORTANT**: When upgrading to the latest version with V36 share format:
+- **Delete old sharechain data**: `data/litecoin/shares.*` and `data/litecoin/graph_db`
+- Old shares are incompatible due to V36 field changes
 - All nodes in the P2Pool network must update together
 - **Protection**: Incompatible shares are validated and rejected BEFORE entering sharechain
 - Outdated peers receive clear upgrade instructions in logs
@@ -445,12 +436,13 @@ pypy run_p2pool.py --help
 ```
 
 Common options:
-- `--net dash` - Use Dash mainnet
-- `--net dash_testnet` - Use Dash testnet
-- `-a ADDRESS` - Your Dash payout address
-- `--dashd-rpc-port 9998` - Dash RPC port (default: 9998)
-- `--dashd-address 127.0.0.1` - Dash RPC address
+- `--net litecoin` - Use Litecoin mainnet
+- `--net litecoin_testnet` - Use Litecoin testnet
+- `-a ADDRESS` - Your Litecoin payout address
+- `--bitcoind-rpc-port 9332` - Litecoin RPC port (default: 9332)
+- `--bitcoind-address 127.0.0.1` - Litecoin RPC address
 - `--share-rate SECONDS` - Target seconds per pseudoshare (default: 10)
+- `--merged URL` - Merged mining daemon URL (Dogecoin)
 
 ## Troubleshooting
 
@@ -458,7 +450,7 @@ Common options:
 
 All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, including:
 
-- ❌ `ImportError: No module named dash_hash` → Rebuild dash_hash module
+- ❌ `ImportError: No module named ltc_scrypt` → Run `pip install 'scrypt>=0.8.0,<=0.8.22'` (or build legacy C extension: `cd litecoin_scrypt && python setup.py install`)
 - ❌ `AttributeError: ComposedWithContextualOptionalsType` → Update to latest version
 - ❌ `ValueError: Block not found` → Update to commit e9b5f57+
 - ❌ `ImportError: No module named bitcoin` → Update to latest version
@@ -489,7 +481,7 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 - ✅ **Hashrate sampling** for precise luck statistics
 - ✅ **Telegram notifications** for block announcements
 - ✅ **Block status tracking** (confirmed/orphaned/pending)
-- ✅ **Dash Platform support** (v20+): Handles OP_RETURN platform payments (22.5% block subsidy)
+- ✅ **Dash Platform support** (v20+): Handles OP_RETURN platform payments (original Dash fork feature)
 - ✅ **Packed object compatibility**: Fixed share verification for _script field handling
 - ✅ **Mainnet ready**: Full support for masternode/platform/superblock payment structures
 - ✅ **Solo mining support**: Removed peer connection requirement - works standalone with PERSIST=True
@@ -499,14 +491,14 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 ## Port Forwarding
 
 If behind NAT, forward these ports:
-- **8999**: P2Pool P2P (for peer connections)
-- **7903**: Stratum (for miners)
+- **9338**: P2Pool P2P (for peer connections)
+- **9327**: Stratum (for miners)
 
-Do NOT forward port 9998 (Dash RPC - security risk)
+Do NOT forward port 9332 (Litecoin RPC - security risk)
 
 ## Web Interface & API
 
-P2Pool provides a web interface at `http://YOUR_IP:7903/`:
+P2Pool provides a web interface at `http://YOUR_IP:9327/`:
 
 ### Web Pages
 - `/static/index.html` - Classic status page
@@ -539,7 +531,7 @@ The pool uses three methods for hashrate estimation (in order of preference):
 
 To enable Telegram block announcements:
 1. Create a bot via [@BotFather](https://t.me/botfather)
-2. Edit `data/dash/telegram_config.json`:
+2. Edit `data/litecoin/telegram_config.json`:
 ```json
 {
   "enabled": true,
@@ -561,7 +553,7 @@ The Stratum interface includes intelligent threat detection that monitors connec
 Thresholds are configurable per network in `p2pool/networks/*.py`:
 
 ```python
-# Default values (dash.py)
+# Default values (litecoin.py)
 CONNECTION_WORKER_ELEVATED = 4.0   # Flag if >4 connections per worker
 CONNECTION_WORKER_WARNING = 6.0     # Flag as high if >6 connections per worker
 ```
@@ -570,7 +562,7 @@ This ensures legitimate miners running multiple machines from the same IP are no
 
 ### Persistent Block History
 
-P2Pool stores all found blocks in `data/dash/block_history.json` for permanent record-keeping. This allows the web interface to display complete historical data including:
+P2Pool stores all found blocks in `data/litecoin/block_history.json` for permanent record-keeping. This allows the web interface to display complete historical data including:
 
 - Block height, hash, and timestamp
 - Network difficulty and block reward
@@ -592,22 +584,22 @@ EOF
 
 # Populate block history from blockchain
 pypy populate_block_history.py \
-    --datadir data/dash \
+    --datadir data/litecoin \
     --blocks-file historical_blocks.txt \
-    --dashd-rpc-username YOUR_RPC_USER \
-    --dashd-rpc-password YOUR_RPC_PASS
+    --bitcoind-rpc-username YOUR_RPC_USER \
+    --bitcoind-rpc-password YOUR_RPC_PASS
 ```
 
 Or specify blocks directly:
 ```bash
 pypy populate_block_history.py \
-    --datadir data/dash \
+    --datadir data/litecoin \
     --blocks 2389670,2389615,2389577 \
-    --dashd-rpc-username YOUR_RPC_USER \
-    --dashd-rpc-password YOUR_RPC_PASS
+    --bitcoind-rpc-username YOUR_RPC_USER \
+    --bitcoind-rpc-password YOUR_RPC_PASS
 ```
 
-The script will query dashd to fetch block rewards, timestamps, and difficulty, then merge this data into your block history. This ensures consistent graphs and statistics even for blocks found before the current p2pool installation.
+The script will query litecoind to fetch block rewards, timestamps, and difficulty, then merge this data into your block history. This ensures consistent graphs and statistics even for blocks found before the current p2pool installation.
 
 Official wiki :
 -------------------------
