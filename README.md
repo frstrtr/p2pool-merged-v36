@@ -284,10 +284,15 @@ that prevent parsing will make the address invalid, triggering redistribution.
 **Example:** A miner connecting as `XXX_rig1` has user=`XXX` (invalid LTC address), worker=`rig1`.
 Their share rewards go to a randomly-selected valid miner from the PPLNS window.
 
-> ⚠️ **P2SH Conversion Warning:** When a P2SH Litecoin address is auto-converted to Dogecoin, the resulting DOGE P2SH address references the **same redeem script hash**. If the underlying script is Dogecoin-compatible (e.g. bare multisig, P2PKH-in-P2SH, or any script using only opcodes supported by Dogecoin), the miner **can redeem funds normally**. However, if the script contains SegWit witness programs (P2SH-P2WPKH / P2SH-P2WSH), those funds become **anyone-can-spend** on Dogecoin: the redeemScript `OP_0 <20-byte-hash>` evaluates to `true` without any signature on a non-SegWit chain, so **anyone who knows the redeemScript can steal the funds**. The redeemScript is revealed the first time the miner spends from that address on Litecoin. When in doubt, provide an explicit Dogecoin address:
-> ```
-> Username: MLTCp2shAddress,DDOGElegacyAddress.worker1
-> ```
+> ⚠️ **P2SH Conversion Warning:** When a P2SH Litecoin address (starting with `M` or `3`) is auto-converted to Dogecoin, the resulting DOGE P2SH address references the **same redeem script hash**. P2Pool cannot reverse a script hash to inspect the underlying redeem script, so it converts all P2SH addresses unconditionally. Miners using P2SH have **two options**:
+>
+> 1. **Ensure the redeem script uses only Dogecoin-compatible opcodes** — bare multisig (`OP_CHECKMULTISIG`), P2PK (`OP_CHECKSIG`), P2PKH-in-P2SH (`OP_DUP OP_HASH160 ... OP_EQUALVERIFY OP_CHECKSIG`), or any script built from opcodes that both Litecoin and Dogecoin support. These convert safely and funds are spendable on both chains.
+> 2. **Provide an explicit Dogecoin address** via stratum comma syntax to bypass auto-conversion entirely:
+>    ```
+>    Username: MLTCp2shAddress,DDOGElegacyAddress.worker1
+>    ```
+>
+> **What to avoid:** If the P2SH redeem script contains SegWit witness programs (P2SH-P2WPKH / P2SH-P2WSH), the converted DOGE P2SH address becomes **anyone-can-spend** — the redeemScript `OP_0 <20-byte-hash>` evaluates to `true` without any signature on a non-SegWit chain, and anyone who learns the redeemScript (revealed on the first LTC spend from that address) can steal the DOGE funds. Most modern Litecoin wallets default to P2SH-P2WPKH, so **if in doubt, use option 2**.
 
 #### Example: Getting Addresses for Mining
 
