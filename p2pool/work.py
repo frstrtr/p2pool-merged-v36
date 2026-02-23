@@ -645,7 +645,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     merged_net_name = 'Dogecoin Testnet'
                                     merged_net_symbol = 'tDOGE'
                             
-                            self.merged_work.set(math.merge_dicts(self.merged_work.value, {chainid: dict(
+                            old_work = self.merged_work.value.get(chainid, {})
+                            old_hash = old_work.get('hash', 0)
+                            
+                            new_merged_entry = dict(
                                 template=template,
                                 hash=doge_block_hash,  # CRITICAL: This hash gets embedded in Litecoin coinbase
                                 target=parsed_target,
@@ -661,7 +664,20 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 finder_fee_percentage=0.5,
                                 daemon_warnings=merged_daemon_warnings,
                                 last_update=time.time(),
-                            )}))
+                            )
+                            
+                            if doge_block_hash != old_hash:
+                                # Hash changed — new DOGE block or PPLNS weights changed.
+                                # Fire merged_work.changed → new_work_event for all miners.
+                                self.merged_work.set(math.merge_dicts(self.merged_work.value, {chainid: new_merged_entry}))
+                                print '[MERGED-REFRESH] NEW TEMPLATE height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
+                            else:
+                                # Hash unchanged — same DOGE block, same PPLNS weights.
+                                # Update bookkeeping fields in-place WITHOUT firing
+                                # merged_work.changed (avoids spurious new_work_event).
+                                if chainid in self.merged_work.value:
+                                    self.merged_work.value[chainid]['last_update'] = new_merged_entry['last_update']
+                                    self.merged_work.value[chainid]['daemon_warnings'] = new_merged_entry['daemon_warnings']
                             pass  # Suppressed: print '[MERGED-REFRESH] Template height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
                         else:
                             # getblocktemplate succeeded but no auxpow - shouldn't happen
@@ -791,7 +807,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             print >>sys.stderr, 'Failed to start merged broadcaster: %s' % e
                         broadcaster_initialized = True
                     
-                    self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: dict(
+                    new_merged_entry = dict(
                         hash=new_hash,
                         # createauxblock returns target in LE hex; use IntType(256) LE unpack
                         # to get the correct integer (same result as int(BE_hex, 16))
@@ -804,11 +820,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         finder_fee_percentage=0.5,
                         daemon_warnings=merged_daemon_warnings,
                         last_update=time.time(),
-                    )}))
+                    )
                     
-                    # Log when hash changes (new block template)
                     if new_hash != old_hash:
+                        # Hash changed — new DOGE block template. Fire merged_work.changed
+                        # which triggers new_work_event → _send_work() for all miners.
+                        self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: new_merged_entry}))
                         print '[MERGED-REFRESH-SINGLE] NEW TEMPLATE hash=%s target=%s height=%s' % (auxblock['hash'][:16], auxblock['target'][:16], auxblock.get('height', '?'))
+                    else:
+                        # Hash unchanged — same DOGE block, just a polling heartbeat.
+                        # Update last_update/daemon_warnings in-place WITHOUT firing
+                        # merged_work.changed (avoids spurious new_work_event that would
+                        # trigger 25+ full get_work() rebuilds for zero benefit).
+                        if auxblock['chainid'] in self.merged_work.value:
+                            self.merged_work.value[auxblock['chainid']]['last_update'] = new_merged_entry['last_update']
+                            self.merged_work.value[auxblock['chainid']]['daemon_warnings'] = new_merged_entry['daemon_warnings']
                 
                 yield deferral.sleep(1)
         
@@ -1283,10 +1309,20 @@ class WorkerBridge(worker_interface.WorkerBridge):
         return miner_hash_rates, miner_dead_hash_rates
 
     def get_local_addr_rates(self):
+        # Cache for 2 seconds — result is identical within a single work event burst
+        # (all 25+ miners calling get_work() on the same event get the same datums).
+        # Saves O(datums) × O(miners) iterations per event.
+        now = time.time()
+        cached = getattr(self, '_local_addr_rates_cache', None)
+        if cached is not None:
+            cached_result, cached_ts = cached
+            if now - cached_ts < 2.0:
+                return cached_result
         addr_hash_rates = {}
         datums, dt = self.local_addr_rate_monitor.get_datums_in_last()
         for datum in datums:
             addr_hash_rates[datum['pubkey_hash']] = addr_hash_rates.get(datum['pubkey_hash'], 0) + datum['work']/dt
+        self._local_addr_rates_cache = (addr_hash_rates, now)
         return addr_hash_rates
 
     def update_best_difficulty(self, user, difficulty):
