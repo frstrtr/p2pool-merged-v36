@@ -2375,14 +2375,42 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
                     merged_symbol, merged_name,
                     math.format_dt(time.time() - mw['last_update'])))
     
-    # Scan recent shares for authority-signed transition signals
-    # These are TRANSITION_SIGNAL messages embedded in V36 shares,
-    # signed by one of the COMBINED_DONATION_SCRIPT keys (forrestv or maintainer).
-    # Skip when AutoRatchet is CONFIRMED — the V35->V36 transition is complete,
-    # so V36 transition signals are no longer relevant.
+    # AutoRatchet chain-state warning: alert when running on a pre-V36 sharechain
     ratchet_confirmed = False
     if auto_ratchet is not None:
-        ratchet_confirmed = getattr(auto_ratchet, 'state', '') == 'confirmed'
+        ratchet_state = getattr(auto_ratchet, 'state', '')
+        ratchet_confirmed = ratchet_state == 'confirmed'
+        if not ratchet_confirmed:
+            # Count V35 vs V36 shares in the chain
+            height = tracker.get_height(best_share)
+            sample = min(height, net.REAL_CHAIN_LENGTH)
+            v35_count = 0
+            v36_count = 0
+            for share in tracker.get_chain(best_share, sample):
+                if share.VERSION >= 36:
+                    v36_count += 1
+                else:
+                    v35_count += 1
+            total = v35_count + v36_count
+            if v35_count > 0 and total > 0:
+                v35_pct = v35_count * 100 // total
+                shares_needed = net.REAL_CHAIN_LENGTH - total if total < net.REAL_CHAIN_LENGTH else 0
+                if ratchet_state == 'voting':
+                    if total < net.REAL_CHAIN_LENGTH:
+                        res.append('V36 TRANSITION: Building chain %d/%d shares (%d%% V35). '
+                            'Need %d more shares to fill window before activation can begin.' % (
+                                total, net.REAL_CHAIN_LENGTH, v35_pct, shares_needed))
+                    else:
+                        res.append('V36 TRANSITION: Voting — %d%% V35, %d%% V36 in %d-share window. '
+                            'Need 95%% V36 votes to activate.' % (
+                                v35_pct, 100 - v35_pct, net.REAL_CHAIN_LENGTH))
+                elif ratchet_state == 'activated':
+                    confirmation_window = net.REAL_CHAIN_LENGTH * 2
+                    activated_height = getattr(auto_ratchet, '_activated_height', None)
+                    shares_since = (height - activated_height) if activated_height else 0
+                    res.append('V36 TRANSITION: Activated — producing V36 shares. '
+                        'Confirmation progress: %d/%d shares (%d%% V36 in chain).' % (
+                            shares_since, confirmation_window, 100 - v35_pct))
     if ratchet_confirmed:
         return res
     try:

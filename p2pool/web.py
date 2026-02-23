@@ -280,6 +280,16 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             message = 'Waiting for V%d signaling in sampling window' % effective_target
             transition_progress = 0
         
+        # AutoRatchet state for dashboard
+        ratchet_info = None
+        if ratchet is not None:
+            ratchet_info = dict(
+                state=getattr(ratchet, 'state', 'unknown'),
+                activated_at=getattr(ratchet, '_activated_at', None),
+                activated_height=getattr(ratchet, '_activated_height', None),
+                confirmed_at=getattr(ratchet, '_confirmed_at', None),
+            )
+        
         return dict(
             chain_height=chain_height,
             chain_length_required=chain_length,
@@ -313,7 +323,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             transition_progress=round(transition_progress, 2),
             thresholds=dict(accept=60, activate=95),
             status=status,
-            message=message
+            message=message,
+            # AutoRatchet state
+            auto_ratchet=ratchet_info,
         )
     
     def format_eta(seconds):

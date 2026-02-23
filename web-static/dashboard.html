@@ -167,6 +167,32 @@
             content: "⚠️";
             font-size: 1.2rem;
         }
+        
+        .warning-item.info-banner {
+            background: rgba(33, 150, 243, 0.15);
+            border-color: #2196F3;
+        }
+        .warning-item.info-banner::before {
+            content: "🔄";
+        }
+        .warning-item.transition-banner {
+            background: rgba(255, 193, 7, 0.15);
+            border-color: #FFC107;
+        }
+        .warning-item.transition-banner::before {
+            content: "⏳";
+        }
+        .ratchet-state-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-left: 6px;
+        }
+        .ratchet-voting { background: #FFC107; color: #000; }
+        .ratchet-activated { background: #2196F3; color: #fff; }
+        .ratchet-confirmed { background: #4CAF50; color: #fff; }
 
         /* Share Messages — display deferred to BBS page (Phase 4)
          * Messages are available via /msg/* REST API only.
@@ -1144,6 +1170,7 @@
     <main class="container">
         <div class="last-update" id="last-update">Last update: loading...</div>
         <div class="warnings" id="warnings"></div>
+        <div id="ratchet-banner" style="display: none; margin-bottom: 20px;"></div>
         <!-- Share messages: API-only (/msg/*), no dashboard display -->
         
         <!-- Version Signaling Status -->
@@ -1991,7 +2018,10 @@
                 var warnings = d3.select('#warnings').selectAll('.warning-item')
                     .data(local_stats.warnings || []);
                 warnings.enter().append('div')
-                    .attr('class', 'warning-item')
+                    .attr('class', function(w) {
+                        if (w.indexOf('V36 TRANSITION:') === 0) return 'warning-item transition-banner';
+                        return 'warning-item';
+                    })
                     .text(function(w) { return w; });
                 warnings.exit().remove();
 
@@ -2092,6 +2122,60 @@
                             parts.push('V' + ver + ': ' + d3.format('.1f')(typeData.percentage) + '% (' + typeData.count + ')');
                         }
                         shareTypesSpan.text(parts.join(' | '));
+                    }
+                    
+                    // AutoRatchet chain-state banner
+                    var ratchetDiv = d3.select('#ratchet-banner');
+                    if (vs.auto_ratchet && vs.auto_ratchet.state !== 'confirmed') {
+                        var r = vs.auto_ratchet;
+                        var v35Count = 0, v36Count = 0;
+                        if (vs.share_types) {
+                            for (var v in vs.share_types) {
+                                if (parseInt(v) >= 36) v36Count += vs.share_types[v].count;
+                                else v35Count += vs.share_types[v].count;
+                            }
+                        }
+                        var total = v35Count + v36Count;
+                        var bannerClass = 'warning-item';
+                        var bannerText = '';
+                        var badgeClass = 'ratchet-state-badge';
+                        
+                        if (r.state === 'voting') {
+                            bannerClass += ' transition-banner';
+                            badgeClass += ' ratchet-voting';
+                            if (!vs.chain_ready) {
+                                bannerText = 'V36 Transition: VOTING — Building chain ' + 
+                                    vs.chain_height + '/' + vs.chain_length_required + 
+                                    ' shares. Need full ' + vs.chain_length_required + 
+                                    '-share window before activation can begin.';
+                            } else {
+                                var v35Pct = total > 0 ? Math.round(v35Count * 100 / total) : 0;
+                                bannerText = 'V36 Transition: VOTING — ' + v35Pct + '% V35, ' + 
+                                    (100 - v35Pct) + '% V36 shares in ' + vs.chain_length_required + 
+                                    '-share window. Need 95% V36 votes to activate.';
+                            }
+                        } else if (r.state === 'activated') {
+                            bannerClass += ' info-banner';
+                            badgeClass += ' ratchet-activated';
+                            var v36Pct = total > 0 ? Math.round(v36Count * 100 / total) : 0;
+                            var confirmWindow = vs.chain_length_required * 2;
+                            var sharesSince = r.activated_height ? (vs.chain_height - r.activated_height) : 0;
+                            bannerText = 'V36 Transition: ACTIVATED — Producing V36 shares. ' +
+                                'Confirmation progress: ' + sharesSince + '/' + confirmWindow + 
+                                ' shares (' + v36Pct + '% V36 in chain).';
+                        }
+                        
+                        if (bannerText) {
+                            ratchetDiv.style('display', 'block');
+                            ratchetDiv.html('');
+                            var item = ratchetDiv.append('div').attr('class', bannerClass);
+                            item.append('span').text(bannerText);
+                            item.append('span').attr('class', badgeClass).text(r.state.toUpperCase());
+                        } else {
+                            ratchetDiv.style('display', 'none');
+                        }
+                    } else {
+                        ratchetDiv.style('display', 'none');
                     }
                 });
                 

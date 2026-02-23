@@ -11,7 +11,7 @@ PREFIX = 'ad9614f6466a39cf'.decode('hex')      # Message prefix for P2Pool proto
 
 P2P_PORT = 19338  # Port for P2Pool peer-to-peer communication (share propagation)
 MIN_TARGET = 0    # Minimum share target (hardest difficulty allowed)
-MAX_TARGET = 2**256//2**10 - 1  # ~10x easier than mainnet, allows mining with ~100 kH/s (difficulty ~0.0625 LTC = 4 Scrypt)
+MAX_TARGET = 2**256//20 - 1  # Match jtoomim canonical (2**256//20) for cross-version interop
 
 # PERSIST = False means this node can start its own new sharechain if no peers available.
 # When PERSIST=False:
