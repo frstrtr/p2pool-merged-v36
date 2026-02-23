@@ -2329,8 +2329,8 @@
                     return;
                 }
                 
-                // Show the section
-                d3.select('#merged_blocks_section').style('display', 'block');
+                // Show the section (use 'flex' to preserve table-panel layout)
+                d3.select('#merged_blocks_section').style('display', 'flex');
                 d3.select('#merged_blocks_count').text(blocks.length);
                 
                 // Update chain name badge
