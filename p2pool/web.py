@@ -1186,7 +1186,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             'total_estimated_rewards': total_estimated_rewards,
             'confirmed_rewards': confirmed_rewards,
             'maturing_rewards': maturing_rewards,
-            'blocks': miner_blocks,
+            'blocks': miner_blocks[:10],  # Limit to 10 most recent
         }
     
     web_root.putChild('miner_payouts', WebInterface(get_miner_payouts))
@@ -1336,7 +1336,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             'total_estimated_rewards': total_estimated_rewards,
             'confirmed_rewards': confirmed_rewards,
             'maturing_rewards': maturing_rewards,
-            'blocks': miner_merged_blocks,
+            'blocks': miner_merged_blocks[:10],  # Limit to 10 most recent
         }
     
     web_root.putChild('merged_miner_payouts', WebInterface(get_merged_miner_payouts))
@@ -1575,8 +1575,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     total_luck += b['luck']
                     luck_count += 1
             
-            # Return a copy with pool_avg_luck added to first block
-            result = list(block_history)
+            # Return a copy with pool_avg_luck added, limited to 10 most recent
+            result = list(block_history[:10])  # block_history is sorted newest-first
             if result and luck_count > 0:
                 result[0] = dict(result[0])
                 result[0]['pool_avg_luck'] = total_luck / luck_count
@@ -1743,11 +1743,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     x_merged.start(60)  # Save every 60 seconds
     stop_event.watch(x_merged.stop)
     
-    # Merged mined blocks endpoint - show verified and pending blocks (not orphaned)
-    web_root.putChild('recent_merged_blocks', WebInterface(lambda: [b for b in wb.recent_merged_blocks[::-1] if b.get('verified') != False]))
+    # Merged mined blocks endpoint - show verified and pending blocks (not orphaned), limited to 10
+    web_root.putChild('recent_merged_blocks', WebInterface(lambda: [b for b in wb.recent_merged_blocks[::-1] if b.get('verified') != False][:10]))
     
-    # All merged blocks endpoint - for debugging (includes orphaned and pending)
-    web_root.putChild('all_merged_blocks', WebInterface(lambda: wb.recent_merged_blocks[::-1]))
+    # All merged blocks endpoint - for debugging (includes orphaned and pending), limited to 10
+    web_root.putChild('all_merged_blocks', WebInterface(lambda: wb.recent_merged_blocks[-10:][::-1]))
     
     # Merged mining stats endpoint
     def get_merged_stats():
@@ -1813,7 +1813,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             'pending_blocks': pending,
             'orphaned_blocks': orphaned,
             'networks': networks,
-            'recent': [b for b in blocks[-5:][::-1]],  # Last 5 blocks
+            'recent': [b for b in blocks[-10:][::-1]],  # Last 10 blocks
             'block_value': merged_block_value,
             'symbol': merged_symbol,
         }
