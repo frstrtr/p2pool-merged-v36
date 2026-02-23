@@ -417,24 +417,6 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
         # Step 6: Parse and verify DOGE block header
         header = bitcoin_data.block_header_type.unpack(header_bytes)
         if header['merkle_root'] != expected_merkle_root:
-            import sys
-            print >>sys.stderr, '[VERIFY-DEBUG] chain=%d height=%d chain_length=%d max_weight=%d' % (
-                chain_id, height, chain_length, max_weight)
-            print >>sys.stderr, '[VERIFY-DEBUG] block_target=%064x' % share.header['bits'].target
-            print >>sys.stderr, '[VERIFY-DEBUG] coinbase_value=%d block_height=%d' % (coinbase_value, block_height)
-            print >>sys.stderr, '[VERIFY-DEBUG] finder_script=%s' % (
-                finder_script.encode('hex') if finder_script else 'None')
-            print >>sys.stderr, '[VERIFY-DEBUG] share_pubkey_hash=%s pubkey_type=%s merged_addrs=%s' % (
-                '%040x' % share_pubkey_hash if share_pubkey_hash is not None else 'None',
-                share_pubkey_type,
-                repr([(e['chain_id'], e['script'].encode('hex')) for e in merged_addrs]) if merged_addrs else 'None')
-            print >>sys.stderr, '[VERIFY-DEBUG] weights: %d entries, total=%d, donation=%d' % (
-                len(weights), total_weight, donation_weight)
-            print >>sys.stderr, '[VERIFY-DEBUG] canonical_txid=%064x' % canonical_txid
-            # Dump canonical coinbase outputs
-            for i, txo in enumerate(canonical_coinbase.get('tx_outs', [])):
-                print >>sys.stderr, '[VERIFY-DEBUG]   out[%d]: value=%d script=%s' % (
-                    i, txo['value'], txo['script'].encode('hex'))
             raise ValueError(
                 'merged coinbase verification failed for chain %d: '
                 'canonical merkle_root %064x != header merkle_root %064x' % (
