@@ -231,6 +231,20 @@ Each type produces its **native** scriptPubKey in the LTC coinbase — no unnece
 
 > **Note:** P2WSH (`ltc1q...` 62 chars), P2TR/Taproot (`ltc1p...`) and future witness versions are **not supported** — their 32-byte hashes cannot be safely converted to 20-byte merged chain addresses.
 
+### Supported Merged Chain Address Types (Dogecoin)
+
+Miners can provide an explicit Dogecoin address via the stratum username (separated by `,`).
+Each type produces its **native** scriptPubKey in the DOGE merged coinbase. Dogecoin does **not** support SegWit.
+
+| Address Type | Prefix (Mainnet) | Prefix (Testnet) | Script Type in Coinbase | How to Generate |
+|---|---|---|---|---|
+| **P2PKH** (Legacy) | `D...` | `n...` | `OP_DUP OP_HASH160 <hash> OP_EQUALVERIFY OP_CHECKSIG` | `dogecoin-cli getnewaddress "" legacy` |
+| **P2SH** (Script Hash) | `9...` / `A...` | `2...` | `OP_HASH160 <hash> OP_EQUAL` | `dogecoin-cli getnewaddress "" p2sh-segwit` |
+
+> **Note:** Dogecoin has **no SegWit support** (`SOFTFORKS_REQUIRED = set()`). Bech32 addresses cannot be used.
+> If no explicit DOGE address is provided, P2Pool auto-converts the LTC address hash to a DOGE address
+> using the corresponding version byte (P2PKH→P2PKH, P2SH→P2SH, Bech32→P2PKH).
+
 #### Merged Chain (Dogecoin) Address Conversion
 
 When mining Litecoin + Dogecoin, miner payouts are distributed on **both chains**. The merged chain address is derived as follows:
