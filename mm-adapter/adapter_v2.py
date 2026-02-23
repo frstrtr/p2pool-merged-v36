@@ -258,7 +258,6 @@ class MultiAddressMergedMiningAdapter:
         
         # --- Cached state (updated by background poller) ---
         self.cached_tip_hash: Optional[str] = None       # getbestblockhash result
-        self.cached_response: Optional[Dict] = None      # Full GBT response for P2Pool
         self.cached_response_time: float = 0             # When last built
         
         # Background poller settings
@@ -324,7 +323,7 @@ class MultiAddressMergedMiningAdapter:
         now = time.time()
         tip_changed = (tip_hash != self.cached_tip_hash)
         needs_full = (tip_changed
-                      or self.cached_response is None
+                      or self._current_template is None
                       or now - self.cached_response_time >= FULL_REFRESH_INTERVAL)
 
         if not needs_full:
