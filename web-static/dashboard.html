@@ -498,6 +498,7 @@
         .table-panel .table-scroll {
             flex: 1 1 0;
             min-height: 0;   /* allow flex shrink below content size */
+            max-height: none; /* flex controls height, not the base 500px cap */
         }
         
         .amount {
@@ -1432,7 +1433,7 @@
         <!-- Network Peers: Side-by-side layout -->
         <div class="two-col">
             <!-- P2Pool Nodes -->
-            <div class="table-container">
+            <div class="table-container table-panel">
                 <div class="section-header">
                     <h2>🌐 P2Pool Nodes</h2>
                     <div style="display: flex; gap: 10px; align-items: center;">
@@ -1472,7 +1473,7 @@
             </div>
             
             <!-- Litecoin Peers (Broadcaster) -->
-            <div class="table-container">
+            <div class="table-container table-panel">
                 <div class="section-header">
                     <h2>📡 Litecoin Peers</h2>
                     <div style="display: flex; gap: 10px; align-items: center;">
@@ -2471,7 +2472,7 @@
 
         // Payouts state for show more functionality
         window.payoutsData = null;
-        window.payoutsDisplayCount = 10;
+        window.payoutsDisplayCount = 5;
         window.payoutsMergedSymbol = null;
         
         function renderPayoutsWithShowMore() {
@@ -2566,7 +2567,7 @@
                 
                 // Store for show more
                 window.payoutsData = { mergedPays: mergedPays, sortedAddrs: arr };
-                window.payoutsDisplayCount = 10;
+                window.payoutsDisplayCount = 5;
                 
                 // Calculate totals
                 var total = d3.sum(arr, function(addr) { return mergedPays[addr].amount; });
@@ -2650,7 +2651,7 @@
             
             // Store for show more functionality
             window.payoutsData = { simplePays: pays, sortedAddrs: arr };
-            window.payoutsDisplayCount = 10;
+            window.payoutsDisplayCount = 5;
             
             var total = d3.sum(arr, function(addr) { return pays[addr]; });
             d3.select('#payouts_total').text(d3.format('.4f')(total));
