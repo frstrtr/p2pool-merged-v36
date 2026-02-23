@@ -45,27 +45,17 @@ MAX_TARGET = 2**256//2**20 - 1
 PERSIST = True
 WORKER_PORT = 9327
 BOOTSTRAP_ADDRS = [
-        # Local test nodes
-        '192.168.86.30',        # jtoomim test node (local)
-        '192.168.86.29',        # merged test node (local)
-        '192.168.86.31',        # merged test node (local)
-        # Active nodes discovered 2025 (protocol 3502)
-        'ml.toom.im',           # jtoomim's node - healthy, 1.5% orphan rate
-        '31.25.241.224',        # peer from ml.toom.im
-        '20.106.76.227',        # peer from ml.toom.im
-        '83.221.211.116',       # peer from ml.toom.im
-        # Legacy nodes (may be offline)
-        'crypto.office-on-the.net',
-        'ltc.p2pool.leblancnet.us',
-        '51.148.43.34',
-        '68.131.29.131',
-        '87.102.46.100',
-        '89.237.60.231',
-        '95.79.35.133',
-        '96.255.61.32',
-        '174.56.93.93',
-        '178.238.236.130',
-        '194.190.93.235',
+        # Active p2pool nodes (verified 2026-02-24 via peer_addresses API)
+        'ml.toom.im',           # jtoomim's node (protocol 3502)
+        'usa.p2p-spb.xyz',      # p2p-spb pool node (protocol 3502)
+        # Live peers seen by ml.toom.im and usa.p2p-spb.xyz
+        '20.127.82.115',        # Azure peer
+        '31.25.241.224',        # EU peer
+        '20.113.157.65',        # Azure peer
+        '20.106.76.227',        # Azure peer
+        '15.218.180.55',        # AWS peer
+        '173.79.139.224',       # US peer
+        '174.60.78.162',        # US peer
 ]
 ANNOUNCE_CHANNEL = '#p2pool-ltc'
 VERSION_CHECK = lambda v: None if 100400 <= v else 'Litecoin version too old. Upgrade to 0.10.4 or newer!'

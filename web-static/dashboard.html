@@ -1339,7 +1339,6 @@
                     <h2>🏆 Recent Blocks</h2>
                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                         <span class="badge" id="blocks_count">0</span>
-                        <span class="badge" id="pool_luck_badge" style="background: var(--success);">Avg: -</span>
                         <span class="badge" id="luck_current_round" style="background: var(--primary);" title="Current round luck">Round: -</span>
                         <span class="badge" id="luck_seven_days" style="background: var(--primary);" title="7-day average luck">7d: -</span>
                         <span class="badge" id="luck_thirty_days" style="background: var(--primary);" title="30-day average luck">30d: -</span>
@@ -2148,20 +2147,6 @@
                 }
                 
                 d3.select('#blocks_count').text(blocks.length);
-                
-                // Update pool average luck badge
-                if (blocks[0] && blocks[0].pool_avg_luck) {
-                    var avgLuck = blocks[0].pool_avg_luck;
-                    var luckBadge = d3.select('#pool_luck_badge');
-                    luckBadge.text('Avg Luck: ' + d3.format('.0f')(avgLuck) + '%');
-                    if (avgLuck >= 100) {
-                        luckBadge.style('background', 'var(--success)');
-                    } else if (avgLuck >= 75) {
-                        luckBadge.style('background', 'var(--warning)');
-                    } else {
-                        luckBadge.style('background', 'var(--danger)');
-                    }
-                }
                 
                 // Store only 10 most recent blocks for table display
                 // (graph chart fetches recent_blocks separately and gets full history)
