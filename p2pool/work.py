@@ -1499,6 +1499,35 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 return None
         return None
 
+    # Cache for get_v36_merged_weights results — avoid recomputing on every get_work() call.
+    # Only invalidated when best_share_hash or block_target changes.
+    _merged_weights_cache = None  # (cache_key, {chainid: (weights, total_weight, donation_weight)})
+
+    def _get_cached_merged_weights(self, chainid, tracker, best_share_hash, block_target):
+        """Return cached (weights, total_weight, donation_weight) or compute and cache."""
+        from p2pool.data import get_v36_merged_weights
+
+        height = tracker.get_height(best_share_hash) if best_share_hash is not None else 0
+        max_weight = 65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
+        chain_length = min(height, self.node.net.REAL_CHAIN_LENGTH) if height > 0 else 0
+
+        if chain_length <= 0 or best_share_hash is None:
+            return {}, 0, 0
+
+        cache_key = (best_share_hash, block_target)
+        if self._merged_weights_cache is not None and self._merged_weights_cache[0] == cache_key:
+            cached = self._merged_weights_cache[1]
+            if chainid in cached:
+                return cached[chainid]
+
+        # Cache miss or new key — reset cache
+        if self._merged_weights_cache is None or self._merged_weights_cache[0] != cache_key:
+            self._merged_weights_cache = (cache_key, {})
+
+        result = get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, chain_id=chainid)
+        self._merged_weights_cache[1][chainid] = result
+        return result
+
     def _build_user_specific_merged_work(self, user, merged_addresses, share_pubkey_hash=None, share_pubkey_type=None):
         if not self.merged_work.value:
             return {}
@@ -1523,23 +1552,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     # Use deterministic canonical coinbase builder for consensus enforcement.
                     # Peers re-derive this exact coinbase in check() and verify it matches
                     # what's committed in mm_data → DOGE block hash → DOGE header → merkle root.
-                    from p2pool.data import (get_v36_merged_weights,
-                                             build_canonical_merged_coinbase,
+                    from p2pool.data import (build_canonical_merged_coinbase,
                                              get_canonical_merged_finder_script)
 
                     best_share_hash = self.node.best_share_var.value
                     block_target = self.current_work.value['bits'].target
                     tracker = self.node.tracker
 
-                    height = tracker.get_height(best_share_hash) if best_share_hash is not None else 0
-                    max_weight = 65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
-                    chain_length = min(height, self.node.net.REAL_CHAIN_LENGTH) if height > 0 else 0
-
-                    if chain_length > 0 and best_share_hash is not None:
-                        weights, total_weight, donation_weight = get_v36_merged_weights(
-                            tracker, best_share_hash, chain_length, max_weight, chain_id=chainid)
-                    else:
-                        weights, total_weight, donation_weight = {}, 0, 0
+                    weights, total_weight, donation_weight = self._get_cached_merged_weights(
+                        chainid, tracker, best_share_hash, block_target)
 
                     if weights and total_weight > 0:
                         # Determine finder script from the share's pubkey_hash, NOT from
