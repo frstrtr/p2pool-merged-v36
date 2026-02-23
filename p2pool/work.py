@@ -1571,6 +1571,23 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             weights, total_weight, donation_weight,
                             coinbase_value, block_height_merged,
                             finder_script, merged_addr_net, parent_net)
+                        
+                        # Debug: log creation-side params for comparison with verify-side
+                        import sys
+                        canonical_txid_dbg = bitcoin_data.hash256(bitcoin_data.tx_id_type.pack(doge_coinbase_tx))
+                        print >>sys.stderr, '[CREATE-DEBUG] chain=%d height=%d chain_length=%d max_weight=%d' % (
+                            chainid, height, chain_length, max_weight)
+                        print >>sys.stderr, '[CREATE-DEBUG] block_target=%064x' % block_target
+                        print >>sys.stderr, '[CREATE-DEBUG] coinbase_value=%d block_height=%d' % (coinbase_value, block_height_merged)
+                        print >>sys.stderr, '[CREATE-DEBUG] finder_script=%s' % (
+                            finder_script.encode('hex') if finder_script else 'None')
+                        print >>sys.stderr, '[CREATE-DEBUG] weights: %d entries, total=%d, donation=%d' % (
+                            len(weights), total_weight, donation_weight)
+                        print >>sys.stderr, '[CREATE-DEBUG] canonical_txid=%064x' % canonical_txid_dbg
+                        for i, txo in enumerate(doge_coinbase_tx.get('tx_outs', [])):
+                            print >>sys.stderr, '[CREATE-DEBUG]   out[%d]: value=%d script=%s' % (
+                                i, txo['value'], txo['script'].encode('hex'))
+                        
                         use_canonical = True
 
                 if not use_canonical:
