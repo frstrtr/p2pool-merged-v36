@@ -646,11 +646,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     merged_net_symbol = 'tDOGE'
                             
                             old_work = self.merged_work.value.get(chainid, {})
-                            old_hash = old_work.get('hash', 0)
+                            old_prev = old_work.get('previousblockhash', '')
+                            new_prev = template.get('previousblockhash', '')
                             
                             new_merged_entry = dict(
                                 template=template,
                                 hash=doge_block_hash,  # CRITICAL: This hash gets embedded in Litecoin coinbase
+                                previousblockhash=new_prev,  # Track for change detection
                                 target=parsed_target,
                                 merged_proxy=merged_proxy,
                                 multiaddress=True,
@@ -666,18 +668,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 last_update=time.time(),
                             )
                             
-                            if doge_block_hash != old_hash:
-                                # Hash changed — new DOGE block or PPLNS weights changed.
+                            if new_prev != old_prev:
+                                # New DOGE block found (previousblockhash changed).
                                 # Fire merged_work.changed → new_work_event for all miners.
                                 self.merged_work.set(math.merge_dicts(self.merged_work.value, {chainid: new_merged_entry}))
-                                print '[MERGED-REFRESH] NEW TEMPLATE height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
+                                print '[MERGED-REFRESH] NEW BLOCK height=%d prev=%s hash=%064x' % (template.get('height', 0), new_prev[:16], doge_block_hash)
                             else:
-                                # Hash unchanged — same DOGE block, same PPLNS weights.
-                                # Update bookkeeping fields in-place WITHOUT firing
-                                # merged_work.changed (avoids spurious new_work_event).
+                                # Same DOGE block, template refreshed (timestamp/txns).
+                                # Update ALL fields in-place so get_work() uses fresh
+                                # template, but do NOT fire merged_work.changed (avoids
+                                # spurious new_work_event that triggers N get_work() calls).
                                 if chainid in self.merged_work.value:
-                                    self.merged_work.value[chainid]['last_update'] = new_merged_entry['last_update']
-                                    self.merged_work.value[chainid]['daemon_warnings'] = new_merged_entry['daemon_warnings']
+                                    for key, val in new_merged_entry.items():
+                                        self.merged_work.value[chainid][key] = val
                             pass  # Suppressed: print '[MERGED-REFRESH] Template height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
                         else:
                             # getblocktemplate succeeded but no auxpow - shouldn't happen
@@ -738,10 +741,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         # We used createauxblock, so we need submitauxblock for submission
                         use_submitauxblock = True
                     
-                    # Check if merged work hash changed (new block to mine)
+                    # Check if merged chain tip changed (new block to mine)
                     new_hash = int(auxblock['hash'], 16)
                     old_work = self.merged_work.value.get(auxblock['chainid'], {})
-                    old_hash = old_work.get('hash', 0)
+                    new_prev = auxblock.get('previousblockhash', '')
+                    old_prev = old_work.get('previousblockhash', '')
                     
                     # Initialize merged broadcaster for fallback mode (once)
                     chainid = auxblock['chainid']
@@ -809,6 +813,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     
                     new_merged_entry = dict(
                         hash=new_hash,
+                        previousblockhash=new_prev,  # Track for change detection
                         # createauxblock returns target in LE hex; use IntType(256) LE unpack
                         # to get the correct integer (same result as int(BE_hex, 16))
                         target='p2pool' if auxblock['target'] == 'p2pool' else pack.IntType(256).unpack(auxblock['target'].decode('hex')),
@@ -822,19 +827,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         last_update=time.time(),
                     )
                     
-                    if new_hash != old_hash:
-                        # Hash changed — new DOGE block template. Fire merged_work.changed
-                        # which triggers new_work_event → _send_work() for all miners.
+                    if new_prev != old_prev:
+                        # New DOGE block found (previousblockhash changed).
+                        # Fire merged_work.changed → new_work_event → _send_work().
                         self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: new_merged_entry}))
-                        print '[MERGED-REFRESH-SINGLE] NEW TEMPLATE hash=%s target=%s height=%s' % (auxblock['hash'][:16], auxblock['target'][:16], auxblock.get('height', '?'))
+                        print '[MERGED-REFRESH-SINGLE] NEW BLOCK hash=%s prev=%s height=%s' % (auxblock['hash'][:16], new_prev[:16] if new_prev else '?', auxblock.get('height', '?'))
                     else:
-                        # Hash unchanged — same DOGE block, just a polling heartbeat.
-                        # Update last_update/daemon_warnings in-place WITHOUT firing
-                        # merged_work.changed (avoids spurious new_work_event that would
-                        # trigger 25+ full get_work() rebuilds for zero benefit).
+                        # Same DOGE block, template refreshed (timestamp/txns).
+                        # Update ALL fields in-place so get_work() uses fresh hash,
+                        # but do NOT fire merged_work.changed (avoids spurious
+                        # new_work_event that triggers N get_work() rebuilds).
                         if auxblock['chainid'] in self.merged_work.value:
-                            self.merged_work.value[auxblock['chainid']]['last_update'] = new_merged_entry['last_update']
-                            self.merged_work.value[auxblock['chainid']]['daemon_warnings'] = new_merged_entry['daemon_warnings']
+                            for key, val in new_merged_entry.items():
+                                self.merged_work.value[auxblock['chainid']][key] = val
                 
                 yield deferral.sleep(1)
         
