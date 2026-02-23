@@ -1199,7 +1199,7 @@
                         <div class="signaling-bar" id="propagation-bar" style="width: 0%; background: linear-gradient(90deg, #2196F3, #03A9F4);"></div>
                     </div>
                 </div>
-                <!-- Signaling bar (sampling window) -->
+                <!-- Signaling bar (sampling window) - shown during VOTING -->
                 <div id="signaling-bar-section">
                     <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
                         Sampling Window Signaling: <span id="sampling-signaling-text" style="color: #4CAF50;">-</span>
@@ -1208,6 +1208,20 @@
                         <div class="signaling-bar" id="signaling-bar" style="width: 0%"></div>
                         <div class="signaling-threshold" style="left: 60%"><span>60%</span></div>
                         <div class="signaling-threshold" style="left: 95%"><span>95%</span></div>
+                    </div>
+                </div>
+                <!-- Confirmation progress bar - shown during ACTIVATED -->
+                <div id="confirmation-bar-section" style="display: none;">
+                    <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
+                        V36 Chain Fill: <span id="confirmation-text" style="color: #2196F3;">-</span>
+                    </div>
+                    <div class="signaling-bar-container">
+                        <div class="signaling-bar" id="confirmation-bar" style="width: 0%; background: linear-gradient(90deg, #2196F3, #00BCD4);"></div>
+                        <div class="signaling-threshold" style="left: 50%"><span>50%</span></div>
+                        <div class="signaling-threshold" style="left: 95%; border-color: #4CAF50;"><span style="color: #4CAF50;">95%</span></div>
+                    </div>
+                    <div style="color: #666; font-size: 0.78em; margin-top: 4px; font-style: italic;">
+                        Confirmation requires 2× chain length (<span id="confirm-window-size">800</span> shares) of ≥95% V36 format — ensures the upgrade is sustained and irreversible before locking in.
                     </div>
                 </div>
                 <div class="signaling-stats">
@@ -2077,18 +2091,55 @@
                         d3.select('#propagation-section').style('display', 'none');
                     }
                     
-                    // Sampling window signaling bar
-                    var sigPct = vs.sampling_signaling;
-                    d3.select('#signaling-bar').style('width', Math.min(100, sigPct) + '%');
-                    if (vs.chain_ready) {
-                        d3.select('#sampling-signaling-text').text(
-                            d3.format('.1f')(sigPct) + '% of sampling window (' + 
-                            vs.sampling_window_size + ' shares) voting for V' + vs.target_version +
-                            ' \u2014 need 95% to activate');
+                    // Switch between signaling bar and confirmation bar based on state
+                    var isConfirming = vs.auto_ratchet && vs.auto_ratchet.state === 'activated';
+                    
+                    if (isConfirming) {
+                        // ACTIVATED: show V36 chain fill progress bar
+                        d3.select('#signaling-bar-section').style('display', 'none');
+                        d3.select('#confirmation-bar-section').style('display', 'block');
+                        
+                        var v36FormatPct = 0, v36Cnt = 0, totalCnt = 0;
+                        if (vs.share_types) {
+                            for (var v in vs.share_types) {
+                                totalCnt += vs.share_types[v].count;
+                                if (parseInt(v) >= 36) v36Cnt += vs.share_types[v].count;
+                            }
+                            v36FormatPct = totalCnt > 0 ? (v36Cnt * 100 / totalCnt) : 0;
+                        }
+                        var confirmWindow = vs.confirmation_window || (vs.chain_length_required * 2);
+                        var sharesSince = vs.shares_since_activation || 0;
+                        var fillPct = Math.min(100, v36FormatPct);
+                        
+                        d3.select('#confirmation-bar').style('width', fillPct + '%');
+                        // Color based on whether >95%
+                        if (v36FormatPct >= 95) {
+                            d3.select('#confirmation-bar').style('background', 'linear-gradient(90deg, #4CAF50, #00E676)');
+                        } else {
+                            d3.select('#confirmation-bar').style('background', 'linear-gradient(90deg, #2196F3, #00BCD4)');
+                        }
+                        d3.select('#confirmation-text').text(
+                            d3.format('.1f')(v36FormatPct) + '% V36 format in chain (' + 
+                            v36Cnt + '/' + totalCnt + ' shares). ' +
+                            'Confirmation: ' + sharesSince + '/' + confirmWindow + ' shares elapsed.');
+                        d3.select('#confirm-window-size').text(confirmWindow);
                     } else {
-                        d3.select('#sampling-signaling-text').text(
-                            d3.format('.1f')(vs.target_percentage) + '% overall signaling for V' + vs.target_version +
-                            ' (sampling window activates at ' + vs.chain_length_required + ' shares)');
+                        // VOTING/other: show sampling window signaling bar
+                        d3.select('#signaling-bar-section').style('display', 'block');
+                        d3.select('#confirmation-bar-section').style('display', 'none');
+                        
+                        var sigPct = vs.sampling_signaling;
+                        d3.select('#signaling-bar').style('width', Math.min(100, sigPct) + '%');
+                        if (vs.chain_ready) {
+                            d3.select('#sampling-signaling-text').text(
+                                d3.format('.1f')(sigPct) + '% of sampling window (' + 
+                                vs.sampling_window_size + ' shares) voting for V' + vs.target_version +
+                                ' \u2014 need 95% to activate');
+                        } else {
+                            d3.select('#sampling-signaling-text').text(
+                                d3.format('.1f')(vs.target_percentage) + '% overall signaling for V' + vs.target_version +
+                                ' (sampling window activates at ' + vs.chain_length_required + ' shares)');
+                        }
                     }
                     
                     // Update message
@@ -2163,11 +2214,11 @@
                             bannerClass += ' info-banner';
                             badgeClass += ' ratchet-activated';
                             var v36FormatPct = totalShares > 0 ? Math.round(v36FormatCount * 100 / totalShares) : 0;
-                            var confirmWindow = vs.chain_length_required * 2;
-                            var sharesSince = r.activated_height ? (vs.chain_height - r.activated_height) : 0;
-                            bannerText = 'V36 Transition: ACTIVATED — Producing V36 shares. ' +
-                                'Confirmation progress: ' + sharesSince + '/' + confirmWindow + 
-                                ' shares (' + v36FormatPct + '% V36 format in chain).';
+                            var confirmWindow = vs.confirmation_window || (vs.chain_length_required * 2);
+                            var sharesSince = vs.shares_since_activation || 0;
+                            bannerText = 'V36 Transition: ACTIVATED — Now producing V36 shares. ' +
+                                v36FormatPct + '% V36 format in chain. ' +
+                                'Confirmation: ' + sharesSince + '/' + confirmWindow + ' shares elapsed.';
                         }
                         
                         if (bannerText) {
