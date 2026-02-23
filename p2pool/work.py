@@ -436,14 +436,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # causing distribution misalignment between parent and child.
                                         parent_block_target = self.current_work.value['bits'].target
                                         best_share_hash = self.node.best_share_var.value
-                                        share_height = self.node.tracker.get_height(best_share_hash)
-                                        weights, total_weight, donation_weight = p2pool_data.get_v36_merged_weights(
-                                            self.node.tracker,
-                                            best_share_hash,
-                                            max(0, min(share_height, self.node.net.REAL_CHAIN_LENGTH)),
-                                            65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(parent_block_target),
-                                            chain_id=chainid,
-                                        )
+                                        weights, total_weight, donation_weight = self._get_cached_merged_weights(
+                                            chainid, self.node.tracker, best_share_hash, parent_block_target)
                                     
                                     # Determine the correct merged chain network for address conversion
                                     # We detect based on chainid: Dogecoin chainid = 98 (0x62)
