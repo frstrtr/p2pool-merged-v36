@@ -284,7 +284,7 @@ that prevent parsing will make the address invalid, triggering redistribution.
 **Example:** A miner connecting as `XXX_rig1` has user=`XXX` (invalid LTC address), worker=`rig1`.
 Their share rewards go to a randomly-selected valid miner from the PPLNS window.
 
-> ⚠️ **P2SH Conversion Warning:** When a P2SH-P2WPKH (SegWit-wrapped-in-P2SH) Litecoin address is auto-converted to Dogecoin, the resulting DOGE P2SH address will reference a redeem script containing SegWit opcodes. Since **Dogecoin does not support SegWit**, these funds may be **unspendable**. If you use P2SH addresses on Litecoin, always provide an explicit Dogecoin address:
+> ⚠️ **P2SH Conversion Warning:** When a P2SH Litecoin address is auto-converted to Dogecoin, the resulting DOGE P2SH address references the **same redeem script hash**. If the underlying script is Dogecoin-compatible (e.g. bare multisig, P2PKH-in-P2SH, or any script using only opcodes supported by Dogecoin), the miner **can redeem funds normally**. However, if the script contains SegWit opcodes (P2SH-P2WPKH / P2SH-P2WSH), those funds will be **unspendable** on Dogecoin since it does not support SegWit. When in doubt, provide an explicit Dogecoin address:
 > ```
 > Username: MLTCp2shAddress,DDOGElegacyAddress.worker1
 > ```
