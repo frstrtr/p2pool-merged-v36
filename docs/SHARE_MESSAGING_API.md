@@ -544,7 +544,7 @@ Protocol-level messages (transition signals) require signing by one of the
 belonging to authorized maintainers:
 
 - `forrestv` (original p2pool author): `03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1`
-- `mining4people` (current maintainer): `02fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a`
+- `frstrtr` (current maintainer): `02fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a`
 
 Authority-signed messages have `FLAG_PROTOCOL_AUTHORITY` (0x08) set and
 are encrypted with the authority key before embedding.
@@ -749,7 +749,7 @@ python3 create_transition_message.py create \
   --from 36 --to 37 \
   --msg "Upgrade to V37" \
   --urgency recommended \
-  --url "https://github.com/mining4people/p2pool-merged-v36/releases"
+  --url "https://github.com/frstrtr/p2pool-merged-v36/releases"
 ```
 
 **Key input methods** (mutually exclusive):

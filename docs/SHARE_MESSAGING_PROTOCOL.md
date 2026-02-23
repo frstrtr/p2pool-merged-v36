@@ -376,7 +376,7 @@ Compact JSON payload, authority-signed. Created offline using
   "to": "37",
   "msg": "Upgrade to V37 for MWEB merged mining support",
   "urg": "recommended",
-  "url": "https://github.com/mining4people/p2pool-merged-v36/releases",
+  "url": "https://github.com/frstrtr/p2pool-merged-v36/releases",
   "thr": 95
 }
 ```

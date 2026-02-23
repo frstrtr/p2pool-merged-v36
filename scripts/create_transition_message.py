@@ -22,7 +22,7 @@ WORKFLOW:
 USAGE (authority key holder):
   python3 create_transition_message.py create --privkey <64-hex-chars> \\
       --from 36 --to 37 --msg "Upgrade to V37" --urgency recommended \\
-      --url "https://github.com/mining4people/p2pool-merged-v36/releases"
+      --url "https://github.com/frstrtr/p2pool-merged-v36/releases"
 
 USAGE (node operator — just paste the hex string):
   python run_p2pool.py [options] --transition-message 01a2b3c4d5e6f7...

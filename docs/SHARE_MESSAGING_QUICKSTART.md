@@ -268,7 +268,7 @@ Protocol-level upgrade signals. Created **offline** by authority key holders
 using the standalone Python 3 tool `create_transition_message.py`. The tool
 produces a signed+encrypted hex string that node operators paste into
 `--transition-message`. Regular miners cannot create these — only the
-hardcoded `COMBINED_DONATION_SCRIPT` key holders (forrestv, mining4people).
+hardcoded `COMBINED_DONATION_SCRIPT` key holders (forrestv, frstrtr).
 
 See [Authority Message Creation](#authority-message-creation) below.
 
@@ -295,7 +295,7 @@ Features:
 
 ## Authority Message Creation
 
-Authority key holders (forrestv, mining4people) use the standalone **Python 3**
+Authority key holders (forrestv, frstrtr) use the standalone **Python 3**
 tool `create_transition_message.py` to create signed+encrypted transition
 signals offline. This tool is completely separate from the P2Pool node
 (which runs on PyPy 2.7).
@@ -316,7 +316,7 @@ python3 create_transition_message.py create \
   --from 36 --to 37 \
   --msg "Upgrade to V37 — fixes critical bug" \
   --urgency recommended \
-  --url "https://github.com/mining4people/p2pool-merged-v36/releases"
+  --url "https://github.com/frstrtr/p2pool-merged-v36/releases"
 
 # With BIP39 seed phrase
 python3 create_transition_message.py create \

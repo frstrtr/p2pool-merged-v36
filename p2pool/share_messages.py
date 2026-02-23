@@ -129,7 +129,7 @@ MESSAGE_TYPE_NAMES = {
 # V36 shares mine under COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS).
 # The two keys in the redeem script are the protocol authority signers:
 #   - forrestv (original p2pool author)
-#   - mining4people maintainer  (p2pool-merged-v36)
+#   - frstrtr maintainer  (p2pool-merged-v36)
 #
 # Messages signed by either key carry FLAG_PROTOCOL_AUTHORITY.  These are
 # the only messages that can issue TRANSITION_SIGNAL alerts that nodes will
@@ -150,7 +150,7 @@ MESSAGE_TYPE_NAMES = {
 # Compressed public keys from COMBINED_DONATION_REDEEM_SCRIPT
 # forrestv's key (original p2pool author)
 DONATION_PUBKEY_FORRESTV = '03ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1'.decode('hex')
-# mining4people maintainer key
+# frstrtr maintainer key
 DONATION_PUBKEY_MAINTAINER = '02fe6578f8021a7d466787827b3f26437aef88279ef380af326f87ec362633293a'.decode('hex')
 # Set of both for fast lookup
 DONATION_AUTHORITY_PUBKEYS = frozenset([DONATION_PUBKEY_FORRESTV, DONATION_PUBKEY_MAINTAINER])
@@ -1698,7 +1698,7 @@ def build_transition_signal(
         "to": 37,
         "msg": "Upgrade to v37 for MWEB merged mining support",
         "urg": "recommended",    -- "info" | "recommended" | "required"
-        "url": "https://github.com/mining4people/p2pool-merged-v36/releases",
+        "url": "https://github.com/frstrtr/p2pool-merged-v36/releases",
         "thr": 95                -- activation threshold %   (optional)
       }
 

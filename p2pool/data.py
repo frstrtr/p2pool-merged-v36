@@ -2343,7 +2343,7 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
     majority_desired_version = max(desired_version_counts, key=lambda k: desired_version_counts[k])
     if majority_desired_version not in share_versions and desired_version_counts[majority_desired_version] > sum(desired_version_counts.itervalues())/2:
         res.append('A MAJORITY OF SHARES CONTAIN A VOTE FOR AN UNSUPPORTED SHARE IMPLEMENTATION! (v%i with %i%% support)\n'
-            'An upgrade is likely necessary. Check https://github.com/mining4people/p2pool-merged-v36/releases for more information.' % (
+            'An upgrade is likely necessary. Check https://github.com/frstrtr/p2pool-merged-v36/releases for more information.' % (
                 majority_desired_version, 100*desired_version_counts[majority_desired_version]/sum(desired_version_counts.itervalues())))
     
     if bitcoind_getinfo['warnings'] != '':

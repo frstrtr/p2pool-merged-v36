@@ -212,7 +212,7 @@ short forks have minimal impact.
 **Attack**: Attacker obtains one of the COMBINED_DONATION_SCRIPT authority
 private keys.
 
-**Difficulty**: Requires compromising the key holders (forrestv or mining4people).
+**Difficulty**: Requires compromising the key holders (forrestv or frstrtr).
 
 **Impact**: MODERATE — can send fake transition signals.
 

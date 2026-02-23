@@ -984,7 +984,7 @@ ts = build_transition_signal(
     target_version=37,
     message='Upgrade to v37 for MWEB support',
     urgency='recommended',
-    upgrade_url='https://github.com/mining4people/p2pool-merged-v36/releases',
+    upgrade_url='https://github.com/frstrtr/p2pool-merged-v36/releases',
     activation_threshold=95,
     extra={'deadline': 1700000000},
 )

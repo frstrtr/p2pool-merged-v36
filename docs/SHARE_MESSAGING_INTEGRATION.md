@@ -255,7 +255,7 @@ mismatch and stale share warnings. Urgency levels:
 the current maintainer's release page:
 
 ```
-https://github.com/mining4people/p2pool-merged-v36/releases
+https://github.com/frstrtr/p2pool-merged-v36/releases
 ```
 
 ---

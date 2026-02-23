@@ -423,7 +423,7 @@ enabling automatic peer discovery for new merged mining chains.
 
 ### 6. Protocol Transition Coordination (IMPLEMENTED)
 
-Authority key holders (forrestv, mining4people) broadcast signed+encrypted
+Authority key holders (forrestv, frstrtr) broadcast signed+encrypted
 transition signals via shares. These are created offline using
 `create_transition_message.py` (Python 3) and distributed as hex strings
 to node operators, who paste them into `--transition-message`.
