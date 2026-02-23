@@ -289,10 +289,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # single 64-char hex string and is orders of magnitude cheaper than
             # a full getblocktemplate call + PPLNS + coinbase + merkle rebuild.
             # We still do a full refresh every MERGED_FULL_REFRESH_INTERVAL
-            # seconds so that transaction fees stay reasonably up-to-date.
+            # seconds so that mempool transactions stay reasonably up-to-date.
+            # 5s balances CPU savings (~80% reduction) with transaction freshness
+            # (DOGE has 1-min blocks, so ~12 refreshes per block is plenty).
             _cached_best_block_hash = None
             _last_full_refresh = 0
-            MERGED_FULL_REFRESH_INTERVAL = 30  # seconds between full template refreshes
+            MERGED_FULL_REFRESH_INTERVAL = 5  # seconds between full template refreshes
             
             while self.running:
                 try:
