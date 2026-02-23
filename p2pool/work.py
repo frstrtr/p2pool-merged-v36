@@ -1499,7 +1499,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 return None
         return None
 
-    def _build_user_specific_merged_work(self, user, merged_addresses):
+    def _build_user_specific_merged_work(self, user, merged_addresses, share_pubkey_hash=None, share_pubkey_type=None):
         if not self.merged_work.value:
             return {}
 
@@ -1542,19 +1542,17 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         weights, total_weight, donation_weight = {}, 0, 0
 
                     if weights and total_weight > 0:
-                        # Determine finder script from parent-chain user address
-                        # Three-tier priority: explicit merged addr > auto-convert > pool distribution
-                        base_user = user.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
-                        try:
-                            pubkey_hash_int, version, witver = bitcoin_data.address_to_pubkey_hash(base_user, parent_net)
-                            if version == parent_net.ADDRESS_VERSION:
-                                share_pubkey_hash = pubkey_hash_int  # P2PKH
-                            elif version == -1 and witver == 0 and pubkey_hash_int <= (1 << 160) - 1:
-                                share_pubkey_hash = pubkey_hash_int  # bech32 P2WPKH — same pubkey_hash
-                            else:
-                                share_pubkey_hash = None  # P2SH etc. — rely on merged_addresses
-                        except Exception:
-                            share_pubkey_hash = None
+                        # Determine finder script from the share's pubkey_hash, NOT from
+                        # the user address string. The share may store a different pubkey_hash
+                        # (e.g., random PPLNS miner for invalid addresses). The verifier uses
+                        # share.share_data['pubkey_hash'], so creation must match.
+                        #
+                        # For P2SH pubkey_type: set to None (Tier 2 would make wrong P2PKH;
+                        # rely on merged_addresses Tier 1 instead).
+                        if share_pubkey_type is not None and share_pubkey_type == getattr(p2pool_data, 'PUBKEY_TYPE_P2SH', 2):
+                            canonical_pubkey_hash = None  # P2SH — rely on merged_addresses
+                        else:
+                            canonical_pubkey_hash = share_pubkey_hash  # P2PKH or bech32
 
                         # Get validated merged addresses for this chain
                         merged_addrs_list = None
@@ -1562,7 +1560,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             merged_addrs_list = merged_addresses['_validated']
 
                         finder_script = get_canonical_merged_finder_script(
-                            share_pubkey_hash, merged_addrs_list, chainid, merged_addr_net)
+                            canonical_pubkey_hash, merged_addrs_list, chainid, merged_addr_net)
 
                         coinbase_value = template['coinbasevalue']
                         block_height_merged = template['height']
@@ -1677,7 +1675,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # P2Pool can work standalone even with PERSIST=True
 
         # Build user-specific merged templates so finder fee can target the work recipient.
-        effective_merged_work = self._build_user_specific_merged_work(user, merged_addresses)
+        effective_merged_work = self._build_user_specific_merged_work(user, merged_addresses, share_pubkey_hash=pubkey_hash, share_pubkey_type=pubkey_type)
 
         if effective_merged_work:
             tree, size = bitcoin_data.make_auxpow_tree(effective_merged_work)
