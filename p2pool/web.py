@@ -264,7 +264,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             v36_format_pct = (v36_format_count * 100 // total_shares) if total_shares > 0 else 0
             confirm_window = chain_length * 2
             activated_height = getattr(ratchet, '_activated_height', None)
-            shares_since = (chain_height - activated_height) if activated_height else 0
+            shares_since = max(0, chain_height - activated_height) if activated_height else 0
             status = 'confirming'
             message = 'V36 ACTIVATED — confirmation in progress: %d/%d shares (%d%% V36 format)' % (
                 shares_since, confirm_window, v36_format_pct)
