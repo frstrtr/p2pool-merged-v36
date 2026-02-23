@@ -391,9 +391,16 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
         
         # Step 2: Determine finder script (share creator's merged address)
         share_pubkey_hash = share.share_data.get('pubkey_hash')
+        share_pubkey_type = share.share_data.get('pubkey_type')
         merged_addrs = share.share_info.get('merged_addresses')
+        # P2SH addresses can't auto-convert to merged-chain P2PKH;
+        # must use Tier 1 (merged_addresses) or Tier 3 (pool distribution)
+        if share_pubkey_type == PUBKEY_TYPE_P2SH:
+            canonical_pubkey_hash = None
+        else:
+            canonical_pubkey_hash = share_pubkey_hash
         finder_script = get_canonical_merged_finder_script(
-            share_pubkey_hash, merged_addrs, chain_id, merged_addr_net)
+            canonical_pubkey_hash, merged_addrs, chain_id, merged_addr_net)
         
         # Step 3: Re-derive canonical coinbase
         canonical_coinbase = build_canonical_merged_coinbase(
@@ -417,8 +424,9 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
             print >>sys.stderr, '[VERIFY-DEBUG] coinbase_value=%d block_height=%d' % (coinbase_value, block_height)
             print >>sys.stderr, '[VERIFY-DEBUG] finder_script=%s' % (
                 finder_script.encode('hex') if finder_script else 'None')
-            print >>sys.stderr, '[VERIFY-DEBUG] share_pubkey_hash=%s merged_addrs=%s' % (
+            print >>sys.stderr, '[VERIFY-DEBUG] share_pubkey_hash=%s pubkey_type=%s merged_addrs=%s' % (
                 '%040x' % share_pubkey_hash if share_pubkey_hash is not None else 'None',
+                share_pubkey_type,
                 repr([(e['chain_id'], e['script'].encode('hex')) for e in merged_addrs]) if merged_addrs else 'None')
             print >>sys.stderr, '[VERIFY-DEBUG] weights: %d entries, total=%d, donation=%d' % (
                 len(weights), total_weight, donation_weight)
