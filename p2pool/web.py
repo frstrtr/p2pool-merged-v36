@@ -217,7 +217,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             if total_shares > 0 and v36_share_count * 100 // total_shares < 50:
                 effective_ratchet_state = 'voting'  # stale confirmed, override
         ratchet_confirmed = effective_ratchet_state == 'confirmed'
-        show_transition = is_transitioning and not ratchet_confirmed
+        ratchet_active = effective_ratchet_state in ('voting', 'activated')
+        show_transition = (is_transitioning or ratchet_active) and not ratchet_confirmed
         
         # The effective target is the SUCCESSOR version when we're in successor transition
         effective_target = successor_version if successor_transition else target_version
@@ -253,10 +254,21 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         time_to_window_seconds = shares_to_window * node.net.SHARE_PERIOD  # 10 sec per share
         
         # Determine status and message
-        if not is_transitioning:
+        if not is_transitioning and not ratchet_active:
             status = 'no_transition'
             message = 'No version transition in progress'
             transition_progress = 100
+        elif not is_transitioning and ratchet_active:
+            # Share type already switched to V36 but ratchet still needs confirmation
+            v36_format_count = sum(c for v, c in share_type_counts.iteritems() if v >= 36)
+            v36_format_pct = (v36_format_count * 100 // total_shares) if total_shares > 0 else 0
+            confirm_window = chain_length * 2
+            activated_height = getattr(ratchet, '_activated_height', None)
+            shares_since = (chain_height - activated_height) if activated_height else 0
+            status = 'confirming'
+            message = 'V36 ACTIVATED — confirmation in progress: %d/%d shares (%d%% V36 format)' % (
+                shares_since, confirm_window, v36_format_pct)
+            transition_progress = min(shares_since * 100.0 / confirm_window, 100) if confirm_window > 0 else 0
         elif chain_height < chain_length:
             status = 'building_chain'
             shares_remaining = chain_length - chain_height
