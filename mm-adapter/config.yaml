@@ -33,3 +33,8 @@ logging:
   level: "DEBUG"  # Show all activity for testing
   format: "text"  # Human readable for testing
   file: null
+
+# Background template poller (adapter polls dogecoind independently)
+# P2Pool gets instant responses from cache instead of waiting for daemon
+polling:
+  interval: 1.0  # seconds between daemon polls (1s = fresh mempool)
