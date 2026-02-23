@@ -675,14 +675,16 @@ class SigningKeyRegistry(object):
 class ShareMessage(object):
     """A single message embedded in a p2pool share's ref_data."""
 
-    __slots__ = ['msg_type', 'flags', 'timestamp', 'payload', 'signature',
-                 'signing_id', 'sender_address', 'share_hash', 'verified']
+    __slots__ = ['msg_type', 'flags', '_wire_flags', 'timestamp', 'payload',
+                 'signature', 'signing_id', 'sender_address', 'share_hash',
+                 'verified']
 
     def __init__(self, msg_type, payload, flags=FLAG_BROADCAST | FLAG_PERSISTENT,
                  timestamp=None, signature=b'', signing_id=None,
                  sender_address=None, share_hash=None):
         self.msg_type = msg_type
         self.flags = flags
+        self._wire_flags = flags  # For message_hash(); overwritten by unpack()
         self.timestamp = timestamp or int(time.time())
         self.payload = payload if isinstance(payload, bytes) else payload.encode('utf-8')
         self.signature = signature
@@ -719,8 +721,15 @@ class ShareMessage(object):
         """
         Double-SHA256 of message content.
         Used for signing, verification, and deduplication.
+
+        Uses the original wire flags (including FLAG_PROTOCOL_AUTHORITY if
+        present) so the hash matches what the signer computed.  The public
+        self.flags has the authority bit stripped for security (must be
+        earned via verify), but the hash must be computed over the same
+        flag byte that was signed.
         """
-        data = struct.pack('<BBI', self.msg_type, self.flags, self.timestamp) + \
+        flags = getattr(self, '_wire_flags', self.flags)
+        data = struct.pack('<BBI', self.msg_type, flags, self.timestamp) + \
             self.payload
         return hashlib.sha256(hashlib.sha256(data).digest()).digest()
 
@@ -730,6 +739,7 @@ class ShareMessage(object):
         Sets the signature, signing_id, and FLAG_HAS_SIGNATURE flag.
         """
         self.flags |= FLAG_HAS_SIGNATURE
+        self._wire_flags = self.flags  # Keep in sync for message_hash()
         self.signing_id = derived_key.signing_id
         self.signature = derived_key.sign(self.message_hash())
 
@@ -881,6 +891,9 @@ class ShareMessage(object):
             signature=signature,
             signing_id=signing_id,
         )
+        # Preserve original wire flags for message_hash() so signature
+        # verification uses the same flags value the signer used.
+        msg._wire_flags = flags
 
         return msg, offset
 
