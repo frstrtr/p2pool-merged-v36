@@ -1129,15 +1129,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         if ',' in user:
             # Split merged addresses
+            # Format: ltc_addr,doge_addr[.worker] or ltc_addr,doge_addr[_worker]
             parts = user.split(',', 1)  # Only split on first comma
             user = parts[0]  # Primary address (Litecoin)
             if len(parts) > 1:
                 merged_addr = parts[1]
-                # Check if worker name is attached to merged address
+                # Strip worker name: split on '.' first, then '_'
+                # Both are valid worker separators and may co-exist
                 if '.' in merged_addr:
                     merged_addr, worker = merged_addr.split('.', 1)
-                elif '_' in merged_addr:
-                    merged_addr, worker = merged_addr.split('_', 1)
+                if '_' in merged_addr:
+                    # '_' separates addr from worker (e.g. "addr_worker")
+                    merged_addr = merged_addr.split('_', 1)[0]
+                    # Only set worker if not already parsed from '.'
+                    if not worker:
+                        worker = parts[1].split('_', 1)[1].split('.')[0] if '_' in parts[1] else ''
                 
                 # Validate the merged address against the CURRENT merged chain network only.
                 # Reject addresses that don't match — don't try other networks.
@@ -1161,7 +1167,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 if not validated:
                     # Address failed validation on the current DOGE network.
                     # Do NOT store it — fallback to auto-conversion from parent address.
-                    print >>sys.stderr, '[MERGED] WARNING: Invalid DOGE address from stratum: %s (rejected by %s network, will auto-convert from LTC address)' % (merged_addr, chain_name)
+                    # If parent address is also invalid, merged reward goes to random PPLNS miner.
+                    print >>sys.stderr, '[MERGED] WARNING: Invalid DOGE address "%s" from stratum (rejected by %s network). Merged reward will be distributed to a random PPLNS miner with a valid merged address, probabilistically according to work share.' % (merged_addr, chain_name)
                     # Still store unvalidated for current-work display, but NOT for share storage
                     merged_addresses['dogecoin'] = merged_addr
                     merged_addresses['_validated'] = None  # Signals: do not store in share
