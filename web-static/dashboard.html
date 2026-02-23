@@ -494,6 +494,7 @@
             display: flex;
             flex-direction: column;
             height: 580px;   /* fixed height keeps all three columns aligned */
+            overflow: hidden; /* only inner .table-scroll scrolls, never the panel itself */
         }
         .table-panel .table-scroll {
             flex: 1 1 0;
