@@ -50,7 +50,7 @@ The installation guide covers:
 
 | Document | Description |
 |----------|-------------|
-| [mm-adapter/README.md](mm-adapter/README.md) | Merged mining adapter setup |
+| [mm-adapter/README.md](mm-adapter/README.md) | Merged mining adapter setup & config reference |
 | [MULTIADDRESS_MINING_GUIDE.md](MULTIADDRESS_MINING_GUIDE.md) | Multi-address mining configuration |
 | [CUSTOM_NETWORK_GUIDE.md](CUSTOM_NETWORK_GUIDE.md) | Adding support for new cryptocurrencies |
 | [ASIC_SUPPORT_COMPLETE.md](ASIC_SUPPORT_COMPLETE.md) | BIP320 version-rolling & Scrypt ASIC support details |
@@ -122,19 +122,25 @@ pip install -r requirements.txt
 cp config.example.yaml config.yaml
 ```
 
-Edit `config.yaml`:
+Edit `config.yaml` (see [mm-adapter/config.example.yaml](mm-adapter/config.example.yaml) for all options):
 ```yaml
-adapter:
+server:
   host: "127.0.0.1"
   port: 44556
   rpc_user: "dogecoinrpc"
   rpc_password: "YOUR_SECURE_PASSWORD"
 
-dogecoin:
+upstream:
   host: "127.0.0.1"
   port: 22555
   rpc_user: "dogecoinrpc"
   rpc_password: "YOUR_SECURE_PASSWORD"
+  timeout: 30
+
+chain:
+  name: "dogecoin"
+  chain_id: 98
+  network_magic: "c0c0c0c0"
 ```
 
 Start the adapter:

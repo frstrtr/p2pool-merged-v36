@@ -370,18 +370,66 @@ sudo systemctl status p2pool
 
 ## MM-Adapter Setup
 
-The MM-Adapter bridges P2Pool and Dogecoin Core for merged mining. See [mm-adapter/README.md](mm-adapter/README.md) for detailed setup instructions.
+The MM-Adapter bridges P2Pool and Dogecoin Core for merged mining. See [mm-adapter/README.md](mm-adapter/README.md) for the full reference.
 
-Quick start:
+### Installation
+
 ```bash
 cd mm-adapter
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
+
+### Configuration
+
+Copy the appropriate example config:
+
+```bash
+# Mainnet
 cp config.example.yaml config.yaml
-# Edit config.yaml with your Dogecoin RPC credentials
+
+# Or testnet
+cp config.example.testnet.yaml config.yaml
+```
+
+Edit `config.yaml` — the key sections are:
+
+```yaml
+# Adapter server (P2Pool connects here)
+server:
+  host: "127.0.0.1"
+  port: 44556                 # --merged-coind-rpc-port in P2Pool
+  rpc_user: "dogecoinrpc"    # --merged-coind-rpc-user in P2Pool
+  rpc_password: "CHANGE_ME"  # --merged-coind-rpc-password in P2Pool
+
+# Upstream Dogecoin daemon
+upstream:
+  host: "127.0.0.1"
+  port: 22555                 # dogecoin.conf rpcport (testnet: 44555)
+  rpc_user: "dogecoinrpc"    # dogecoin.conf rpcuser
+  rpc_password: "CHANGE_ME"  # dogecoin.conf rpcpassword
+  timeout: 30
+
+# Chain identification
+chain:
+  name: "dogecoin"
+  chain_id: 98
+  network_magic: "c0c0c0c0"  # mainnet: c0c0c0c0 | testnet: fcc1b7dc
+```
+
+**Credential alignment** — credentials must match on both sides:
+- `server.rpc_user` / `server.rpc_password` must match P2Pool's `--merged-coind-rpc-user` / `--merged-coind-rpc-password`
+- `upstream.rpc_user` / `upstream.rpc_password` must match `rpcuser` / `rpcpassword` in `dogecoin.conf`
+
+### Running the Adapter
+
+```bash
+source venv/bin/activate
 python3 adapter.py --config config.yaml
 ```
+
+**Tip**: Start the adapter before P2Pool. P2Pool will connect to it on startup.
 
 ---
 
