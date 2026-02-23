@@ -2163,9 +2163,10 @@
                     }
                 }
                 
-                // Store all blocks and current display count
-                window.allBlocks = blocks;
-                window.blocksDisplayCount = Math.min(5, blocks.length);
+                // Store only 10 most recent blocks for table display
+                // (graph chart fetches recent_blocks separately and gets full history)
+                window.allBlocks = blocks.slice(0, 10);
+                window.blocksDisplayCount = Math.min(5, window.allBlocks.length);
                 
                 // Function to render blocks
                 function renderBlocks() {
@@ -2337,9 +2338,9 @@
                 // Clear existing rows
                 d3.select('#merged_blocks tbody').selectAll('tr').remove();
                 
-                // Store all blocks and current display count
-                window.allMergedBlocks = blocks;
-                window.mergedBlocksDisplayCount = Math.min(5, blocks.length);
+                // Store only 10 most recent merged blocks for table display
+                window.allMergedBlocks = blocks.slice(0, 10);
+                window.mergedBlocksDisplayCount = Math.min(5, window.allMergedBlocks.length);
                 
                 // Block explorer URLs for different merged mining chains
                 var merged_explorers = {
