@@ -136,12 +136,12 @@ class UpstreamRPC:
         self._session: Optional[aiohttp.ClientSession] = None
     
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create HTTP session."""
+        """Get or create persistent HTTP session (connection pooling)."""
         if self._session is None or self._session.closed:
+            # keepalive_timeout=60 keeps TCP connection alive between calls
+            conn = aiohttp.TCPConnector(limit=4, keepalive_timeout=60)
             self._session = aiohttp.ClientSession(
-                auth=self.auth,
-                timeout=self.timeout
-            )
+                auth=self.auth, timeout=self.timeout, connector=conn)
         return self._session
     
     async def close(self):
@@ -256,6 +256,17 @@ class MultiAddressMergedMiningAdapter:
         self._current_template: Optional[BlockTemplate] = None
         self._template_lock = asyncio.Lock()
         
+        # --- Cached state (updated by background poller) ---
+        self.cached_tip_hash: Optional[str] = None       # getbestblockhash result
+        self.cached_response: Optional[Dict] = None      # Full GBT response for P2Pool
+        self.cached_response_time: float = 0             # When last built
+        
+        # Background poller settings
+        poll_cfg = config.get('polling', {})
+        self.poll_interval: float = poll_cfg.get('interval', 1.0)  # seconds
+        self._poller_task: Optional[asyncio.Task] = None
+        self._running = False
+        
         # Stats
         self.stats = {
             'templates_served': 0,
@@ -264,7 +275,97 @@ class MultiAddressMergedMiningAdapter:
             'blocks_rejected': 0,
             'last_template_time': None,
             'last_submit_time': None,
+            'polls': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
         }
+    
+    # ---- Background poller ----
+    async def start_poller(self):
+        """Start the background template poller."""
+        self._running = True
+        self._poller_task = asyncio.ensure_future(self._poll_loop())
+        log.info(f"Background poller started (interval={self.poll_interval}s)")
+    
+    async def stop_poller(self):
+        """Stop the background poller."""
+        self._running = False
+        if self._poller_task:
+            self._poller_task.cancel()
+            try:
+                await self._poller_task
+            except asyncio.CancelledError:
+                pass
+    
+    async def _poll_loop(self):
+        """Background loop: poll daemon for new work every poll_interval seconds."""
+        while self._running:
+            try:
+                await self._refresh_template()
+                self.stats['polls'] += 1
+            except Exception as e:
+                log.error(f"Poller error: {e}")
+            await asyncio.sleep(self.poll_interval)
+    
+    async def _refresh_template(self):
+        """Fetch fresh template and update cache.
+        
+        Optimization: first check getbestblockhash. If the tip hasn't
+        changed and cache is fresh (<5s), skip the expensive getblocktemplate.
+        Full refresh is forced every 5s for mempool freshness.
+        """
+        FULL_REFRESH_INTERVAL = 5.0
+
+        try:
+            tip_hash = await self.rpc.call('getbestblockhash')
+        except Exception:
+            tip_hash = None
+
+        now = time.time()
+        tip_changed = (tip_hash != self.cached_tip_hash)
+        needs_full = (tip_changed
+                      or self.cached_response is None
+                      or now - self.cached_response_time >= FULL_REFRESH_INTERVAL)
+
+        if not needs_full:
+            return  # Tip unchanged, cache fresh enough — skip heavy work
+
+        # Fetch new template
+        try:
+            try:
+                template_raw = await self.rpc.call('getblocktemplate', {'rules': ['segwit']})
+            except JsonRpcError as e:
+                if 'segwit' in str(e.message).lower():
+                    template_raw = await self.rpc.call('getblocktemplate')
+                else:
+                    raise
+
+            async with self._template_lock:
+                self._current_template = BlockTemplate(
+                    version=template_raw['version'],
+                    previous_block_hash=template_raw['previousblockhash'],
+                    transactions=template_raw.get('transactions', []),
+                    coinbase_value=template_raw.get('coinbasevalue', 0),
+                    target=template_raw.get('target', ''),
+                    bits=template_raw['bits'],
+                    cur_time=template_raw['curtime'],
+                    min_time=template_raw.get('mintime', template_raw['curtime']),
+                    height=template_raw.get('height', 0),
+                    mutable=template_raw.get('mutable', ['time', 'transactions', 'prevblock']),
+                    rules=template_raw.get('rules', []),
+                    chainid=self.chainid,
+                )
+                self.cached_tip_hash = tip_hash
+                self.cached_response_time = now
+                self.stats['last_template_time'] = now
+
+            if tip_changed:
+                log.info(f"[POLLER] New tip: {tip_hash[:16]}... height={self._current_template.height}")
+            else:
+                log.debug(f"[POLLER] Refreshed template (mempool update)")
+
+        except Exception as e:
+            log.error(f"[POLLER] Template fetch failed: {e}")
     
     async def initialize(self):
         """Initialize adapter - detect chain info."""
@@ -301,40 +402,23 @@ class MultiAddressMergedMiningAdapter:
             raise
     
     async def get_block_template(self) -> BlockTemplate:
-        """Fetch fresh block template from upstream daemon."""
+        """Return cached block template (kept fresh by background poller).
+        
+        Falls back to synchronous fetch if poller hasn't populated cache yet.
+        """
         async with self._template_lock:
-            # Check if we have a recent template (< 1 second old)
-            if (self._current_template and 
-                time.time() - self._current_template.fetched_at < 1.0):
+            if self._current_template is not None:
+                self.stats['cache_hits'] += 1
                 return self._current_template
-            
-            # Fetch new template
-            try:
-                # Try with segwit rules first
-                template = await self.rpc.call('getblocktemplate', {'rules': ['segwit']})
-            except JsonRpcError as e:
-                if 'segwit' in str(e.message).lower():
-                    # Fallback without segwit
-                    template = await self.rpc.call('getblocktemplate')
-                else:
-                    raise
-            
-            self._current_template = BlockTemplate(
-                version=template['version'],
-                previous_block_hash=template['previousblockhash'],
-                transactions=template.get('transactions', []),
-                coinbase_value=template.get('coinbasevalue', 0),
-                target=template.get('target', ''),
-                bits=template['bits'],
-                cur_time=template['curtime'],
-                min_time=template.get('mintime', template['curtime']),
-                height=template.get('height', 0),
-                mutable=template.get('mutable', ['time', 'transactions', 'prevblock']),
-                rules=template.get('rules', []),
-                chainid=self.chainid,
-            )
-            
-            self.stats['last_template_time'] = time.time()
+        
+        # Cache miss — first call before poller has run
+        self.stats['cache_misses'] += 1
+        log.info("Template cache miss — fetching synchronously")
+        await self._refresh_template()
+        
+        async with self._template_lock:
+            if self._current_template is None:
+                raise JsonRpcError(-1, "Failed to fetch block template")
             return self._current_template
     
     async def handle_getblocktemplate(self, params: List) -> Dict:
@@ -438,6 +522,8 @@ class MultiAddressMergedMiningAdapter:
             if result is None:
                 log.info("Block ACCEPTED by daemon!")
                 self.stats['blocks_accepted'] += 1
+                # Trigger immediate template refresh after block acceptance
+                asyncio.ensure_future(self._refresh_template())
                 return None
             else:
                 log.warning(f"Block rejected: {result}")
@@ -495,7 +581,14 @@ class MultiAddressMergedMiningAdapter:
         log.debug(f"Handling RPC: {method}")
         
         # Merged mining methods
-        if method == 'getblocktemplate':
+        if method == 'getbestblockhash':
+            # Return cached tip hash instantly (zero upstream cost)
+            if self.cached_tip_hash:
+                self.stats['cache_hits'] += 1
+                return self.cached_tip_hash
+            return await self.rpc.call('getbestblockhash')
+        
+        elif method == 'getblocktemplate':
             return await self.handle_getblocktemplate(params)
         
         elif method == 'submitblock':
@@ -543,6 +636,7 @@ class MultiAddressMergedMiningAdapter:
     
     async def close(self):
         """Cleanup resources."""
+        await self.stop_poller()
         await self.rpc.close()
 
 
@@ -735,6 +829,9 @@ async def main():
     except Exception as e:
         log.error(f"Failed to initialize adapter: {e}")
         sys.exit(1)
+    
+    # Start background poller
+    await adapter.start_poller()
     
     # Create and run server
     server = RPCServer(adapter, config)

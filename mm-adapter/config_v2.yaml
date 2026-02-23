@@ -29,6 +29,10 @@ chain:
 # Can be overridden per-request via {"coinbase_text": "custom"} in getblocktemplate params
 coinbase_text: "c2poolmerged"
 
+# Background polling (pre-fetches template for instant P2Pool responses)
+polling:
+  interval: 1.0  # seconds between polls (tip check is lightweight)
+
 # Logging
 logging:
   level: "DEBUG"  # DEBUG for testing, INFO for production
