@@ -250,7 +250,6 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                 print ''
             except Exception as e:
                 print '    ...block broadcaster failed to start (continuing without it): %s' % e
-                import traceback
                 traceback.print_exc()
                 broadcaster = None
         else:
@@ -455,9 +454,14 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         
         
         if hasattr(signal, 'SIGALRM'):
-            signal.signal(signal.SIGALRM, lambda signum, frame: reactor.callFromThread(
-                sys.stderr.write, 'Watchdog timer went off at:\n' + ''.join(traceback.format_stack())
-            ))
+            _traceback = traceback  # bind module-level traceback for signal handler closure
+            def _watchdog_handler(signum, frame):
+                try:
+                    msg = 'Watchdog timer went off at:\n' + ''.join(_traceback.format_stack(frame))
+                except Exception:
+                    msg = 'Watchdog timer went off (stack unavailable)\n'
+                reactor.callFromThread(sys.stderr.write, msg)
+            signal.signal(signal.SIGALRM, _watchdog_handler)
             signal.siginterrupt(signal.SIGALRM, False)
             deferral.RobustLoopingCall(signal.alarm, 30).start(1)
         
