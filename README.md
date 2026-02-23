@@ -251,15 +251,17 @@ PPLNS hashrate contribution. This uses the same consensus-safe mechanism as the 
 (`-f` flag): the share's `pubkey_hash` field is replaced at creation time with a randomly-selected
 valid miner's address, weighted by PPLNS work. No coinbase or consensus changes are required.
 
-**Option B policy:** If the parent (LTC) address is invalid, any merged (DOGE) address — even if
-valid — is also discarded. Both chains' rewards are redistributed together.
+**Policy:** If the parent (LTC) address is invalid, parent chain rewards are redistributed.
+However, a valid explicit merged (DOGE) address is **preserved** — the miner still receives
+their merged chain payouts. Only when no valid merged address is provided does the merged
+payout auto-convert from the redistributed miner's pubkey_hash.
 
 | # | Parent (LTC) | Merged (DOGE) | LTC Payout | DOGE Payout |
 |---|---|---|---|---|
 | 1 | Valid | Valid (explicit) | Miner (correct) | Miner (correct) |
 | 2 | Valid | Invalid / missing | Miner (correct) | Auto-converts from LTC pubkey_hash |
 | 3 | Invalid | Invalid / missing | Redistributed to random PPLNS miner | Auto-converts from redistributed pubkey_hash |
-| 4 | Invalid | Valid (explicit) | Redistributed to random PPLNS miner | **Also redistributed** (Option B) |
+| 4 | Invalid | **Valid (explicit)** | Redistributed to random PPLNS miner | **Miner keeps DOGE** (valid address preserved) |
 
 **Stratum separators:** `,` separates parent from merged address. `.` or `_` separates the worker
 name. `+` and `/` set pseudoshare and share difficulty. Any other characters in the address portion

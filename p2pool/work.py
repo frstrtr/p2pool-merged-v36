@@ -1193,9 +1193,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         else:
             try:
                 if not user or not user.strip():
-                    # Empty address: redistribute to random PPLNS miner
+                    # Empty address: redistribute parent chain to random PPLNS miner
+                    # Valid merged addresses (if any) are preserved
                     pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
-                    merged_addresses = {}  # Option B: discard any merged address too
                     print >>sys.stderr, '[POOL] Empty miner address - share credited to random PPLNS miner'
                 else:
                     addr_result = is_pubkey_hash_address(user, self.node.net.PARENT)
@@ -1252,8 +1252,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                         pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
             except: # Invalid/unparseable address - probabilistic redistribution
+                # Parent chain: redistribute to random PPLNS miner
+                # Merged chain: preserve valid explicit address if provided
                 pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
-                merged_addresses = {}  # Option B: discard any merged address too
                 print >>sys.stderr, '[POOL] Invalid miner address %s - share credited to random PPLNS miner' % (
                     user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)')
         
