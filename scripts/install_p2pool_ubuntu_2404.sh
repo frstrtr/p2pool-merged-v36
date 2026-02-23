@@ -66,15 +66,13 @@ else
     echo "p2pool-dash repository already exists at $REPO_DIR"
 fi
 
-# Install dash_hash
-if [ -d "$REPO_DIR/dash_hash" ]; then
-    echo "Installing dash_hash module..."
-    cd "$REPO_DIR/dash_hash"
-    $PYPY_BIN setup.py install
-    cd "$INSTALL_DIR"
-else
-    echo "Warning: dash_hash directory not found in $REPO_DIR"
-fi
+# Install dash_hash (legacy Dash X11 — no longer needed for LTC/DOGE)
+# if [ -d "$REPO_DIR/dash_hash" ]; then
+#     echo "Installing dash_hash module..."
+#     cd "$REPO_DIR/dash_hash"
+#     $PYPY_BIN setup.py install
+#     cd "$INSTALL_DIR"
+# fi
 
 # 6. Create Systemd Service
 echo "Creating systemd service..."

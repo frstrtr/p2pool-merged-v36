@@ -268,7 +268,7 @@ git submodule init && git submodule update
 
 # 3. Build Scrypt module for LTC/DOGE
 # (if ltc_scrypt needed for CPU mining tests)
-cd dash_hash
+cd litecoin_scrypt
 pypy setup.py install --user
 cd ..
 

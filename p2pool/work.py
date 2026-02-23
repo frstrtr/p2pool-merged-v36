@@ -284,8 +284,35 @@ class WorkerBridge(worker_interface.WorkerBridge):
             merged_daemon_warnings_last_poll = 0
             MERGED_WARNING_POLL_INTERVAL = 5 * 60  # 5 minutes
             
+            # Lightweight pre-check: skip expensive GBT+coinbase rebuild when
+            # the merged chain tip hasn't changed.  getbestblockhash returns a
+            # single 64-char hex string and is orders of magnitude cheaper than
+            # a full getblocktemplate call + PPLNS + coinbase + merkle rebuild.
+            # We still do a full refresh every MERGED_FULL_REFRESH_INTERVAL
+            # seconds so that transaction fees stay reasonably up-to-date.
+            _cached_best_block_hash = None
+            _last_full_refresh = 0
+            MERGED_FULL_REFRESH_INTERVAL = 30  # seconds between full template refreshes
+            
             while self.running:
                 try:
+                    # --- Lightweight tip check (skip heavy work if nothing changed) ---
+                    now = time.time()
+                    try:
+                        _tip_hash = yield merged_proxy.rpc_getbestblockhash()
+                    except Exception:
+                        _tip_hash = None  # RPC failed; fall through to full refresh
+                    
+                    if (_tip_hash is not None
+                            and _tip_hash == _cached_best_block_hash
+                            and now - _last_full_refresh < MERGED_FULL_REFRESH_INTERVAL):
+                        # Tip unchanged and we refreshed recently — skip heavy work
+                        yield deferral.sleep(1)
+                        continue
+                    
+                    # Tip changed or periodic refresh due — do full GBT cycle
+                    _cached_best_block_hash = _tip_hash
+                    
                     # Poll merged daemon warnings periodically
                     if time.time() - merged_daemon_warnings_last_poll > MERGED_WARNING_POLL_INTERVAL:
                         try:
@@ -672,6 +699,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 # New DOGE block found (previousblockhash changed).
                                 # Fire merged_work.changed → new_work_event for all miners.
                                 self.merged_work.set(math.merge_dicts(self.merged_work.value, {chainid: new_merged_entry}))
+                                _last_full_refresh = time.time()
                                 print '[MERGED-REFRESH] NEW BLOCK height=%d prev=%s hash=%064x' % (template.get('height', 0), new_prev[:16], doge_block_hash)
                             else:
                                 # Same DOGE block, template refreshed (timestamp/txns).
@@ -681,6 +709,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 if chainid in self.merged_work.value:
                                     for key, val in new_merged_entry.items():
                                         self.merged_work.value[chainid][key] = val
+                                _last_full_refresh = time.time()
                             pass  # Suppressed: print '[MERGED-REFRESH] Template height=%d prev=%s hash=%064x' % (template.get('height', 0), template.get('previousblockhash', 'None')[:16], doge_block_hash)
                         else:
                             # getblocktemplate succeeded but no auxpow - shouldn't happen
@@ -831,6 +860,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         # New DOGE block found (previousblockhash changed).
                         # Fire merged_work.changed → new_work_event → _send_work().
                         self.merged_work.set(math.merge_dicts(self.merged_work.value, {auxblock['chainid']: new_merged_entry}))
+                        _last_full_refresh = time.time()
                         print '[MERGED-REFRESH-SINGLE] NEW BLOCK hash=%s prev=%s height=%s' % (auxblock['hash'][:16], new_prev[:16] if new_prev else '?', auxblock.get('height', '?'))
                     else:
                         # Same DOGE block, template refreshed (timestamp/txns).
@@ -840,6 +870,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         if auxblock['chainid'] in self.merged_work.value:
                             for key, val in new_merged_entry.items():
                                 self.merged_work.value[auxblock['chainid']][key] = val
+                        _last_full_refresh = time.time()
                 
                 yield deferral.sleep(1)
         

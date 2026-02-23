@@ -53,7 +53,6 @@ try:
             dll_excludes=['w9xpopen.exe', "mswsock.dll", "MSWSOCK.dll"],
             includes=['twisted.web.resource', 
                       'scrypt',
-                      'dash_hash',
                       'zope.interface',
                       'win32api',
                       'p2pool.dash',

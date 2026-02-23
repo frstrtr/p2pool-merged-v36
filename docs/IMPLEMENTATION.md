@@ -23,7 +23,7 @@
 - **Dependencies**:
   - Twisted 19.10.0
   - pycryptodome 3.23.0
-  - dash_hash (compiled C extension from https://github.com/dashpay/dash_hash)
+  - litecoin_scrypt (compiled C extension for LTC scrypt PoW)
 
 ### P2Pool Configuration
 - **Branch**: master (commit e9b5f57 + ASICBOOST upgrade)
@@ -114,7 +114,7 @@ p2pool.util.jsonrpc.NarrowError: -12345 p2pool is not connected to any peers
 - [x] Wallet created with mining address
 - [x] SSH passwordless access configured
 - [x] PyPy and Python dependencies installed
-- [x] dash_hash module compiled and installed
+- [x] litecoin_scrypt module compiled and installed
 - [x] Fixed 5 critical p2pool bugs
 - [x] **UPGRADED STRATUM WITH ASICBOOST SUPPORT** (jtoomim's implementation)
 - [x] **ASICBOOST VERIFIED OPERATIONAL** (mining.configure responds correctly)
@@ -214,7 +214,7 @@ cd /home/user0/Github/cpuminer-multi
   - System requirements and dependencies
   - Dash Core installation from source
   - PyPy/Python2 setup for modern systems
-  - dash_hash compilation and troubleshooting
+  - litecoin_scrypt compilation and troubleshooting
   - Configuration modes (PERSIST True/False)
   - All common issues and solutions
   - Performance tuning and security
