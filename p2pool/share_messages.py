@@ -43,6 +43,7 @@ Envelope Format (in share ref_type.message_data):
 
 from __future__ import division
 
+import os
 import struct
 import time
 import hashlib
@@ -73,7 +74,7 @@ FLAG_PROTOCOL_AUTHORITY = 0x08    # Signed by a donation script key (forrestv or
 MAX_MESSAGE_PAYLOAD = 220       # bytes per message payload
 MAX_MESSAGES_PER_SHARE = 3      # max messages embedded in one share
 MAX_TOTAL_MESSAGE_BYTES = 512   # total bytes for all messages in one share
-MAX_MESSAGE_AGE = 86400         # 24 hours -- messages older than this are pruned
+MAX_MESSAGE_AGE = 86400         # fallback -- actual lifetime tied to sharechain window
 MAX_MESSAGE_HISTORY = 1000      # max messages to keep in memory
 
 # Message Weight Units (MWU) -- share-cost economics
@@ -1114,21 +1115,194 @@ def compute_message_data_hash(packed_message_data):
 # Message Store
 # ============================================================================
 
+# ============================================================================
+# BanList — node-local content filtering
+# ============================================================================
+
+class BanList(object):
+    """
+    Node-local ban list for filtering messages displayed to this node's users.
+
+    Bans are LOCAL ONLY — they do NOT affect share validation or propagation.
+    A banned message is still relayed to peers; it is simply hidden from the
+    local API, dashboard, and BBS display.
+
+    Ban types:
+      - signing_id:  Ban all messages from a specific signing key
+      - address:     Ban all messages from a miner address
+      - keyword:     Ban messages containing a keyword (case-insensitive)
+      - msg_type:    Ban entire message types (e.g. suppress all chat)
+
+    Persistence:
+      Saved to data/<net>/banned_senders.json on change.
+      Loaded on startup.
+    """
+
+    def __init__(self, persist_path=None):
+        self.banned_signing_ids = set()     # hex-encoded signing_id strings
+        self.banned_addresses = set()       # miner address strings
+        self.banned_keywords = set()        # lowercase keyword strings
+        self.banned_types = set()           # msg_type ints (e.g. 0x02)
+        self._persist_path = persist_path
+        if persist_path:
+            self._load()
+
+    def _load(self):
+        """Load ban list from disk."""
+        if not self._persist_path:
+            return
+        try:
+            with open(self._persist_path, 'r') as f:
+                data = json.load(f)
+            self.banned_signing_ids = set(data.get('signing_ids', []))
+            self.banned_addresses = set(data.get('addresses', []))
+            self.banned_keywords = set(data.get('keywords', []))
+            self.banned_types = set(data.get('types', []))
+        except (IOError, OSError, ValueError):
+            pass  # No file or corrupt — start fresh
+
+    def _save(self):
+        """Persist ban list to disk."""
+        if not self._persist_path:
+            return
+        try:
+            data = {
+                'signing_ids': sorted(self.banned_signing_ids),
+                'addresses': sorted(self.banned_addresses),
+                'keywords': sorted(self.banned_keywords),
+                'types': sorted(self.banned_types),
+            }
+            tmp = self._persist_path + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(data, f, indent=2)
+            os.rename(tmp, self._persist_path)
+        except (IOError, OSError):
+            pass
+
+    def ban_signing_id(self, signing_id_hex):
+        """Ban a signing_id (hex string)."""
+        self.banned_signing_ids.add(signing_id_hex)
+        self._save()
+
+    def ban_address(self, address):
+        """Ban a miner address."""
+        self.banned_addresses.add(address)
+        self._save()
+
+    def ban_keyword(self, keyword):
+        """Ban a keyword (case-insensitive)."""
+        self.banned_keywords.add(keyword.lower())
+        self._save()
+
+    def ban_type(self, msg_type):
+        """Ban an entire message type."""
+        self.banned_types.add(msg_type)
+        self._save()
+
+    def unban_signing_id(self, signing_id_hex):
+        self.banned_signing_ids.discard(signing_id_hex)
+        self._save()
+
+    def unban_address(self, address):
+        self.banned_addresses.discard(address)
+        self._save()
+
+    def unban_keyword(self, keyword):
+        self.banned_keywords.discard(keyword.lower())
+        self._save()
+
+    def unban_type(self, msg_type):
+        self.banned_types.discard(msg_type)
+        self._save()
+
+    def is_banned(self, msg):
+        """
+        Check if a ShareMessage should be hidden from this node's display.
+
+        Protocol-authority messages (FLAG_PROTOCOL_AUTHORITY) are NEVER banned,
+        regardless of ban list contents — they are system-critical.
+
+        Returns True if the message should be hidden.
+        """
+        # Authority messages are always shown
+        if msg.flags & FLAG_PROTOCOL_AUTHORITY:
+            return False
+
+        # Check type ban
+        if msg.msg_type in self.banned_types:
+            return True
+
+        # Check address ban
+        if msg.sender_address and msg.sender_address in self.banned_addresses:
+            return True
+
+        # Check signing_id ban
+        if msg.signing_id:
+            sid_hex = msg.signing_id.encode('hex') if isinstance(
+                msg.signing_id, bytes) else msg.signing_id
+            if sid_hex in self.banned_signing_ids:
+                return True
+
+        # Check keyword ban (in payload text)
+        if self.banned_keywords:
+            try:
+                text = msg.payload.decode('utf-8').lower()
+            except (UnicodeDecodeError, AttributeError):
+                text = ''
+            for kw in self.banned_keywords:
+                if kw in text:
+                    return True
+
+        return False
+
+    def to_json(self):
+        """Serialize for API."""
+        return {
+            'signing_ids': sorted(self.banned_signing_ids),
+            'addresses': sorted(self.banned_addresses),
+            'keywords': sorted(self.banned_keywords),
+            'types': sorted(self.banned_types),
+            'type_names': [MESSAGE_TYPE_NAMES.get(t, '0x%02x' % t)
+                           for t in sorted(self.banned_types)],
+        }
+
+
+# ============================================================================
+# Message Store — sharechain-aware persistence
+# ============================================================================
+
 class ShareMessageStore(object):
     """
     In-memory store for share messages with deduplication, pruning,
-    and integrated signing key registry.
+    integrated signing key registry, and node-local ban filtering.
 
-    Messages are indexed by share_hash, sender, type, and timestamp.
-    The SigningKeyRegistry is automatically maintained from share announcements.
+    Persistence model:
+      - Regular messages live as long as their carrying share is in the
+        active sharechain (CHAIN_LENGTH window).  When a share falls off
+        the chain tail, its messages are pruned automatically.
+      - Authority messages (FLAG_PROTOCOL_AUTHORITY) and messages from
+        donation script signers persist beyond the sharechain window
+        into a separate authority_messages list with configurable TTL.
+      - On restart, messages are re-populated from shares still in the
+        tracker — no separate disk store needed for regular messages.
+
+    Node control:
+      - BanList filters messages from API/display (not from relay).
+      - Authority messages bypass the ban list entirely.
     """
 
-    def __init__(self, max_messages=MAX_MESSAGE_HISTORY, max_age=MAX_MESSAGE_AGE):
+    def __init__(self, max_messages=MAX_MESSAGE_HISTORY, max_age=MAX_MESSAGE_AGE,
+                 ban_list=None):
         self.messages = []          # ordered newest first
         self.message_hashes = set() # for deduplication
         self.max_messages = max_messages
         self.max_age = max_age
         self.key_registry = SigningKeyRegistry()
+        self.ban_list = ban_list or BanList()
+        # share_hash -> [messages] index for sharechain-aware pruning
+        self._share_messages = {}   # {share_hash_int: [ShareMessage, ...]}
+        # Authority messages with extended retention
+        self.authority_messages = []  # never pruned by sharechain, only by max_age
 
     def process_share(self, share_hash, sender_address, packed_message_data):
         """
@@ -1187,6 +1361,17 @@ class ShareMessageStore(object):
 
         self.messages.append(msg)
         self.message_hashes.add(msg_hash_hex)
+
+        # Index by share_hash for sharechain-aware pruning
+        if msg.share_hash is not None:
+            if msg.share_hash not in self._share_messages:
+                self._share_messages[msg.share_hash] = []
+            self._share_messages[msg.share_hash].append(msg)
+
+        # Authority messages get extended retention
+        if msg.is_protocol_authority:
+            self.authority_messages.append(msg)
+
         self.messages.sort(key=lambda m: m.timestamp, reverse=True)
         self._prune()
         return True
@@ -1200,6 +1385,29 @@ class ShareMessageStore(object):
             msg.sender_address = sender_address
         return self._add_message(msg)
 
+    def prune_by_sharechain(self, active_share_hashes):
+        """
+        Remove messages whose carrying share has fallen off the sharechain.
+
+        Called periodically or when chain tip advances.  Takes a set of
+        share hashes currently in the active chain.
+
+        Authority messages are preserved regardless of sharechain status.
+        """
+        if not active_share_hashes:
+            return
+
+        expired_shares = set(self._share_messages.keys()) - active_share_hashes
+        for sh in expired_shares:
+            msgs = self._share_messages.pop(sh, [])
+            for m in msgs:
+                # Keep authority messages in the extended store
+                if m.is_protocol_authority:
+                    continue
+                if m in self.messages:
+                    self.messages.remove(m)
+                    self.message_hashes.discard(m.message_hash().encode('hex'))
+
     def _prune(self):
         """Remove old and excess messages."""
         cutoff = time.time() - self.max_age
@@ -1209,14 +1417,58 @@ class ShareMessageStore(object):
             self.messages.remove(m)
             self.message_hashes.discard(m.message_hash().encode('hex'))
 
+        # Also prune old authority messages
+        authority_cutoff = time.time() - (self.max_age * 7)  # 7x normal TTL
+        expired_auth = [m for m in self.authority_messages
+                        if m.timestamp < authority_cutoff]
+        for m in expired_auth:
+            self.authority_messages.remove(m)
+            if m in self.messages:
+                self.messages.remove(m)
+                self.message_hashes.discard(m.message_hash().encode('hex'))
+
         while len(self.messages) > self.max_messages:
             oldest = self.messages.pop()
             self.message_hashes.discard(oldest.message_hash().encode('hex'))
 
+    def rebuild_from_tracker(self, tracker, best_share, chain_length):
+        """
+        Rebuild message store from shares currently in the tracker.
+
+        Called on startup or after a reorg.  Walks the sharechain from
+        best_share backward for chain_length shares and re-processes
+        any message_data found.
+        """
+        count = 0
+        try:
+            for share in tracker.get_chain(best_share, chain_length):
+                if not hasattr(share, '_message_data') or not share._message_data:
+                    continue
+                if not hasattr(share, '_parsed_messages') or not share._parsed_messages:
+                    continue
+                for msg in share._parsed_messages:
+                    msg.share_hash = share.hash
+                    msg.sender_address = getattr(share, 'address', None)
+                    if self._add_message(msg):
+                        count += 1
+        except Exception:
+            pass
+        return count
+
     def get_messages(self, msg_type=None, sender=None, since=None,
-                     verified_only=False, limit=50):
-        """Query messages with optional filters."""
+                     verified_only=False, limit=50, apply_bans=True,
+                     authority_only=False):
+        """Query messages with optional filters and ban-list enforcement.
+
+        Args:
+            authority_only: If True, only return messages with
+                FLAG_PROTOCOL_AUTHORITY set. Used by default display
+                when --enable-miner-messages is not set.
+        """
         results = self.messages
+
+        if authority_only:
+            results = [m for m in results if m.is_protocol_authority]
 
         if msg_type is not None:
             results = [m for m in results if m.msg_type == msg_type]
@@ -1227,11 +1479,15 @@ class ShareMessageStore(object):
         if verified_only:
             results = [m for m in results if m.verified]
 
+        # Apply node-local ban list
+        if apply_bans and self.ban_list:
+            results = [m for m in results if not self.ban_list.is_banned(m)]
+
         return results[:limit]
 
     def get_recent(self, limit=20):
         """Get most recent messages of all types."""
-        return self.messages[:limit]
+        return self.get_messages(limit=limit)
 
     def get_chat(self, limit=50):
         """Get miner-to-miner chat messages (signed and verified only)."""
@@ -1272,6 +1528,8 @@ class ShareMessageStore(object):
 
         return {
             'total_messages': len(self.messages),
+            'authority_messages': len(self.authority_messages),
+            'tracked_shares': len(self._share_messages),
             'unique_senders': len(unique_senders),
             'senders': list(unique_senders),
             'by_type': type_counts,
@@ -1281,6 +1539,7 @@ class ShareMessageStore(object):
             'verified_count': sum(1 for m in self.messages if m.verified),
             'known_signing_keys': len(self.key_registry.id_to_address),
             'key_registry': self.key_registry.to_json(),
+            'ban_list': self.ban_list.to_json() if self.ban_list else None,
         }
 
 

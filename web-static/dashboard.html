@@ -167,6 +167,11 @@
             content: "⚠️";
             font-size: 1.2rem;
         }
+
+        /* Share Messages — display deferred to BBS page (Phase 4)
+         * Messages are available via /msg/* REST API only.
+         * See: SHARE_MESSAGING_API.md
+         */
         
         /* Version Signaling */
         .version-signaling {
@@ -1126,6 +1131,7 @@
     <main class="container">
         <div class="last-update" id="last-update">Last update: loading...</div>
         <div class="warnings" id="warnings"></div>
+        <!-- Share messages: API-only (/msg/*), no dashboard display -->
         
         <!-- Version Signaling Status -->
         <div id="version-signaling" class="version-signaling" style="display: none;">
@@ -1974,6 +1980,8 @@
                     .attr('class', 'warning-item')
                     .text(function(w) { return w; });
                 warnings.exit().remove();
+
+                // Share messages: available via /msg/* API only (no dashboard display)
                 
                 // Version Signaling Status - Universal transition display
                 d3.json('../version_signaling', function(vs) {

@@ -45,7 +45,8 @@ def _atomic_write(filename, data):
         os.remove(filename)
         os.rename(filename + '.new', filename)
 
-def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Event(), static_dir=None):
+def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Event(), static_dir=None,
+                 enable_miner_messages=False):
     node = wb.node
     start_time = time.time()
     
@@ -203,7 +204,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         classic_transition = current_share_type is not None and target_version is not None and current_share_type != target_version
         successor_transition = successor_version is not None
         is_transitioning = classic_transition or successor_transition
-        show_transition = is_transitioning
+        
+        # Hide transition widget when AutoRatchet is CONFIRMED — the
+        # V35->V36 transition is complete, all tasks done.
+        ratchet = getattr(wb, 'auto_ratchet', None)
+        ratchet_confirmed = ratchet is not None and getattr(ratchet, 'state', '') == 'confirmed'
+        show_transition = is_transitioning and not ratchet_confirmed
         
         # The effective target is the SUCCESSOR version when we're in successor transition
         effective_target = successor_version if successor_transition else target_version
@@ -435,7 +441,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             attempts_to_merged_block=get_attempts_to_merged_block(wb),
             block_value=node.bitcoind_work.value['subsidy']*1e-8,
             warnings=p2pool_data.get_warnings(node.tracker, node.best_share_var.value, node.net, bitcoind_getinfo_var.value, node.bitcoind_work.value,
-                merged_work=wb.merged_work.value if hasattr(wb, 'merged_work') and wb.merged_work and hasattr(wb.merged_work, 'value') and wb.merged_work.value else None),
+                merged_work=wb.merged_work.value if hasattr(wb, 'merged_work') and wb.merged_work and hasattr(wb.merged_work, 'value') and wb.merged_work.value else None,
+                auto_ratchet=getattr(wb, 'auto_ratchet', None)),
             donation_proportion=wb.donation_percentage/100,
             version=p2pool.__version__,
             protocol_version=p2p.Protocol.VERSION,
@@ -2558,6 +2565,249 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         return hd.datastreams[source].dataviews[view].get_data(time.time())
     
     new_root.putChild('graph_data', WebInterface(get_graph_data))
+    
+    # ====================================================================
+    # /msg/* — Share Messaging API
+    # ====================================================================
+    #
+    # Provides REST access to PoW-protected share messages.
+    # Messages live as long as their carrying share is in the sharechain.
+    # Authority messages (from COMBINED_DONATION_SCRIPT signers) persist longer.
+    # Node-local BanList filters messages from display (not from relay).
+    #
+    # GET  /msg/recent          — recent messages (all types)
+    # GET  /msg/chat            — miner-to-miner chat (verified)
+    # GET  /msg/announcements   — pool operator announcements
+    # GET  /msg/alerts          — emergency alerts
+    # GET  /msg/status          — node status reports
+    # GET  /msg/stats           — store statistics
+    # GET  /msg/bans            — current ban list
+    # POST /msg/ban             — add a ban (signing_id, address, keyword, type)
+    # POST /msg/unban           — remove a ban
+    # ====================================================================
+    
+    msg_root = resource.Resource()
+    web_root.putChild('msg', msg_root)
+    
+    def _get_message_store():
+        """Get or lazily create the ShareMessageStore on the node."""
+        store = getattr(node, '_message_store', None)
+        if store is None:
+            from p2pool.share_messages import ShareMessageStore, BanList
+            ban_path = os.path.join(datadir_path, 'banned_senders.json')
+            ban_list = BanList(persist_path=ban_path)
+            store = ShareMessageStore(ban_list=ban_list)
+            node._message_store = store
+            # Rebuild from current sharechain
+            if node.best_share_var.value is not None:
+                try:
+                    chain_len = min(node.net.CHAIN_LENGTH,
+                                    node.tracker.get_height(node.best_share_var.value))
+                    rebuilt = store.rebuild_from_tracker(
+                        node.tracker, node.best_share_var.value, chain_len)
+                    if rebuilt > 0:
+                        print('Messaging: rebuilt %d messages from sharechain' % rebuilt)
+                except Exception:
+                    pass
+        return store
+    
+    from p2pool.share_messages import MSG_EMERGENCY
+    
+    # GET /msg/config — display policy for dashboard
+    class MsgConfigResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            return json.dumps({
+                'enable_miner_messages': enable_miner_messages,
+                'authority_only': not enable_miner_messages,
+            })
+    
+    msg_root.putChild('config', MsgConfigResource())
+    
+    # GET /msg/recent?limit=20&since=<timestamp>
+    # Without --enable-miner-messages: returns only authority messages
+    class MsgRecentResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            try:
+                store = _get_message_store()
+                limit = int(request.args.get('limit', ['20'])[0])
+                since = request.args.get('since', [None])[0]
+                since = float(since) if since else None
+                msgs = store.get_messages(since=since, limit=min(limit, 200),
+                                          authority_only=not enable_miner_messages)
+                return json.dumps([m.to_dict() for m in msgs])
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('recent', MsgRecentResource())
+    
+    # GET /msg/chat?limit=50&verified=1
+    # Returns empty unless --enable-miner-messages is set
+    class MsgChatResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            if not enable_miner_messages:
+                return json.dumps([])
+            try:
+                store = _get_message_store()
+                limit = int(request.args.get('limit', ['50'])[0])
+                verified = request.args.get('verified', ['1'])[0] == '1'
+                if verified:
+                    msgs = store.get_chat(limit=min(limit, 200))
+                else:
+                    msgs = store.get_all_chat(limit=min(limit, 200))
+                return json.dumps([m.to_dict() for m in msgs])
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('chat', MsgChatResource())
+    
+    # GET /msg/announcements?limit=10
+    # Returns empty unless --enable-miner-messages is set
+    # (pool announcements are non-authority miner messages)
+    class MsgAnnouncementsResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            if not enable_miner_messages:
+                return json.dumps([])
+            try:
+                store = _get_message_store()
+                limit = int(request.args.get('limit', ['10'])[0])
+                msgs = store.get_announcements(limit=min(limit, 50))
+                return json.dumps([m.to_dict() for m in msgs])
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('announcements', MsgAnnouncementsResource())
+    
+    # GET /msg/alerts?limit=5
+    # Returns only authority alerts by default;
+    # all alerts when --enable-miner-messages is set
+    class MsgAlertsResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            try:
+                store = _get_message_store()
+                limit = int(request.args.get('limit', ['5'])[0])
+                msgs = store.get_messages(msg_type=MSG_EMERGENCY,
+                                          limit=min(limit, 20),
+                                          authority_only=not enable_miner_messages)
+                return json.dumps([m.to_dict() for m in msgs])
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('alerts', MsgAlertsResource())
+    
+    # GET /msg/status?limit=20
+    # Returns empty unless --enable-miner-messages is set
+    class MsgStatusResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            if not enable_miner_messages:
+                return json.dumps([])
+            try:
+                store = _get_message_store()
+                limit = int(request.args.get('limit', ['20'])[0])
+                msgs = store.get_node_statuses(limit=min(limit, 100))
+                return json.dumps([m.to_dict() for m in msgs])
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('status', MsgStatusResource())
+    
+    # GET /msg/stats
+    class MsgStatsResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            try:
+                store = _get_message_store()
+                return json.dumps(store.stats)
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('stats', MsgStatsResource())
+    
+    # GET /msg/bans
+    class MsgBansResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            try:
+                store = _get_message_store()
+                return json.dumps(store.ban_list.to_json())
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('bans', MsgBansResource())
+    
+    # POST /msg/ban — add a ban
+    # Body: {"signing_id": "hex"} or {"address": "addr"} or
+    #       {"keyword": "word"} or {"type": 2}
+    class MsgBanResource(resource.Resource):
+        def render_POST(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            try:
+                store = _get_message_store()
+                body = json.loads(request.content.read())
+                actions = []
+                if 'signing_id' in body:
+                    store.ban_list.ban_signing_id(body['signing_id'])
+                    actions.append('banned signing_id %s' % body['signing_id'])
+                if 'address' in body:
+                    store.ban_list.ban_address(body['address'])
+                    actions.append('banned address %s' % body['address'])
+                if 'keyword' in body:
+                    store.ban_list.ban_keyword(body['keyword'])
+                    actions.append('banned keyword "%s"' % body['keyword'])
+                if 'type' in body:
+                    store.ban_list.ban_type(int(body['type']))
+                    actions.append('banned type 0x%02x' % int(body['type']))
+                if not actions:
+                    return json.dumps({'error': 'no ban target specified'})
+                return json.dumps({'ok': True, 'actions': actions})
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('ban', MsgBanResource())
+    
+    # POST /msg/unban — remove a ban
+    # Body: same format as /msg/ban
+    class MsgUnbanResource(resource.Resource):
+        def render_POST(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            try:
+                store = _get_message_store()
+                body = json.loads(request.content.read())
+                actions = []
+                if 'signing_id' in body:
+                    store.ban_list.unban_signing_id(body['signing_id'])
+                    actions.append('unbanned signing_id %s' % body['signing_id'])
+                if 'address' in body:
+                    store.ban_list.unban_address(body['address'])
+                    actions.append('unbanned address %s' % body['address'])
+                if 'keyword' in body:
+                    store.ban_list.unban_keyword(body['keyword'])
+                    actions.append('unbanned keyword "%s"' % body['keyword'])
+                if 'type' in body:
+                    store.ban_list.unban_type(int(body['type']))
+                    actions.append('unbanned type 0x%02x' % int(body['type']))
+                if not actions:
+                    return json.dumps({'error': 'no unban target specified'})
+                return json.dumps({'ok': True, 'actions': actions})
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('unban', MsgUnbanResource())
     
     if static_dir is None:
         static_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'web-static')

@@ -2246,7 +2246,7 @@ def compute_merged_payout_hash(tracker, previous_share_hash, block_target, net):
     return bitcoin_data.hash256(payload)
 
 
-def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value, merged_work=None):
+def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value, merged_work=None, auto_ratchet=None):
     res = []
     
     # Parent coin symbol for clear daemon identification
@@ -2293,6 +2293,13 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
     # Scan recent shares for authority-signed transition signals
     # These are TRANSITION_SIGNAL messages embedded in V36 shares,
     # signed by one of the COMBINED_DONATION_SCRIPT keys (forrestv or maintainer).
+    # Skip when AutoRatchet is CONFIRMED — the V35->V36 transition is complete,
+    # so V36 transition signals are no longer relevant.
+    ratchet_confirmed = False
+    if auto_ratchet is not None:
+        ratchet_confirmed = getattr(auto_ratchet, 'state', '') == 'confirmed'
+    if ratchet_confirmed:
+        return res
     try:
         from p2pool.share_messages import MSG_TRANSITION_SIGNAL, FLAG_PROTOCOL_AUTHORITY
         scan_depth = min(
