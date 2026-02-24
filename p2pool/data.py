@@ -760,7 +760,7 @@ class BaseShare(object):
 
             if all_transaction_stripped_size + this_stripped_size + 80 + cls.gentx_size +  500 > net.BLOCK_MAX_SIZE:
                 break
-            if all_transaction_weight + this_weight + 4*80 + cls.gentx_weight + 2000 > net.BLOCK_MAX_WEIGHT:
+            if all_transaction_weight + this_weight + 4*80 + cls.gentx_weight + 2000 > net.BLOCK_MAX_WEIGHT and not getattr(net, 'IMMUTABLE_BLOCKS', False):
                 break
 
             if tx_hash in tx_hash_to_this:
