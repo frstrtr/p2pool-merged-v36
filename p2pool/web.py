@@ -347,7 +347,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             message=message,
             # Confirmation tracking (ACTIVATED state)
             confirmation_window=chain_length * 2,
-            shares_since_activation=max(0, chain_height - getattr(ratchet, '_activated_height', chain_height)) if ratchet else 0,
+            shares_since_activation=max(0, chain_height - (getattr(ratchet, '_activated_height', None) or chain_height)) if ratchet else 0,
             # AutoRatchet state
             auto_ratchet=ratchet_info,
             # Transition message from share messaging system

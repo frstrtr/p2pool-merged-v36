@@ -941,6 +941,10 @@ def run():
         print "  This is normal and does not affect P2Pool functionality."
         print "  P2Pool will use HTTP for all RPC connections."
         print "  If you need HTTPS RPC support in the future, install: pyopenssl and cryptography"
+        # Pre-cache a dummy module so Twisted's HTTP client handleStatus_301
+        # doesn't re-trigger the import chain (and FIPS_mode error) on every 301
+        import types as _types
+        sys.modules.setdefault('twisted.internet.ssl', _types.ModuleType('twisted.internet.ssl'))
     print
     
     class SSLErrorFilter(object):
