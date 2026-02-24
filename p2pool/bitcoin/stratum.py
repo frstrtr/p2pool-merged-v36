@@ -399,7 +399,7 @@ class StratumRPCMiningProvider(object):
             self.authorized = username
         self.username = username.strip()
         
-        self.user, self.address, self.pubkey_type, self.desired_share_target, self.desired_pseudoshare_target, self.merged_addresses = self.wb.get_user_details(username)
+        self.user, self.address, self.pubkey_type, self.desired_share_target, self.desired_pseudoshare_target, self.merged_addresses = self.wb.get_user_details(username, peer_addr=self.worker_ip)
         reactor.callLater(0, self._send_work)
         return True
 
@@ -426,7 +426,7 @@ class StratumRPCMiningProvider(object):
 
     def _send_work(self):
         try:
-            x, got_response = self.wb.get_work(*self.wb.preprocess_request('' if self.username is None else self.username))
+            x, got_response = self.wb.get_work(*self.wb.preprocess_request('' if self.username is None else self.username, peer_addr=self.worker_ip))
         except:
             log.err()
             self.transport.loseConnection()

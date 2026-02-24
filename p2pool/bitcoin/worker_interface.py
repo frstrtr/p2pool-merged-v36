@@ -82,7 +82,7 @@ class WorkerInterface(object):
                 yield self.worker_bridge.new_work_event.get_deferred()
             self.worker_views[request_id] = self.worker_bridge.new_work_event.times
         
-        x, handler = self.worker_bridge.get_work(*self.worker_bridge.preprocess_request(request.getUser() if request.getUser() is not None else ''))
+        x, handler = self.worker_bridge.get_work(*self.worker_bridge.preprocess_request(request.getUser() if request.getUser() is not None else '', peer_addr=request.getClientIP()))
         res = getwork.BlockAttempt(
             version=x['version'],
             previous_block=x['previous_block'],

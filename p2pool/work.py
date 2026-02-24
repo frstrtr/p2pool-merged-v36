@@ -540,8 +540,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                     skipped_addresses.append((parent_address[:20] + '...', error_msg))
                                                     continue
                                                 
-                                                # Re-encode as merged chain address (P2PKH or P2SH)
-                                                if addr_type == 'p2sh':
+                                                # Node operator override: if --merged-operator-address is set,
+                                                # use it for the operator's own share of merged chain payout
+                                                # instead of auto-converting from parent chain address.
+                                                if parent_address == self.args.address and self.merged_operator_address:
+                                                    override_addr = self._get_validated_merged_operator_address(merged_addr_net, chainid)
+                                                    if override_addr is not None:
+                                                        merged_address = override_addr
+                                                    else:
+                                                        # Validation failed — fall through to normal auto-conversion
+                                                        if addr_type == 'p2sh':
+                                                            merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
+                                                        else:
+                                                            merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                                # Standard auto-conversion from parent chain address
+                                                elif addr_type == 'p2sh':
                                                     merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
                                                 else:
                                                     merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
@@ -1090,6 +1103,32 @@ class WorkerBridge(worker_interface.WorkerBridge):
         
         return message_data
 
+    def _get_validated_merged_operator_address(self, merged_addr_net, chainid):
+        """Validate --merged-operator-address against the merged chain network.
+
+        Returns the address string if valid, None if invalid. Caches result
+        so validation and logging happen only once per (address, chainid).
+        """
+        cache_key = (self.merged_operator_address, chainid)
+        if not hasattr(self, '_merged_op_addr_cache'):
+            self._merged_op_addr_cache = {}
+        cached = self._merged_op_addr_cache.get(cache_key)
+        if cached is not None:
+            return cached if cached != '' else None
+
+        try:
+            pubkey_hash, version, witver = bitcoin_data.address_to_pubkey_hash(
+                self.merged_operator_address, merged_addr_net)
+            self._merged_op_addr_cache[cache_key] = self.merged_operator_address
+            print >>sys.stderr, '[MERGED] Node operator override: using --merged-operator-address %s for chain_id %d fee payout (instead of auto-converted parent address)' % (
+                self.merged_operator_address, chainid)
+            return self.merged_operator_address
+        except Exception as e:
+            print >>sys.stderr, '[MERGED] WARNING: --merged-operator-address %s is not valid for chain_id %d: %s. Falling back to auto-conversion from parent address.' % (
+                self.merged_operator_address, chainid, e)
+            self._merged_op_addr_cache[cache_key] = ''  # Cache the negative result
+            return None
+
     def _pick_random_pplns_miner(self):
         """Pick a random miner (pubkey_hash, pubkey_type) weighted by PPLNS hashrate.
 
@@ -1148,7 +1187,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Fallback (shouldn't reach here)
         return entries[-1][2], entries[-1][3]
 
-    def get_user_details(self, username):
+    def get_user_details(self, username, peer_addr=None):
         # Debug: Uncomment to trace user details lookup
         #print '[DEBUG] get_user_details called with username:', repr(username)
         contents = re.split('([+/])', username)
@@ -1264,7 +1303,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     # Empty address: redistribute parent chain to random PPLNS miner
                     # Valid merged addresses (if any) are preserved
                     pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
-                    print >>sys.stderr, '[POOL] Empty miner address - share credited to random PPLNS miner'
+                    print >>sys.stderr, '[POOL] Empty miner address from %s - share credited to random PPLNS miner' % (peer_addr or 'unknown',)
                 else:
                     # Cache miner address resolution — same address produces same result every time
                     cached_addr = self._miner_addr_cache.get(user)
@@ -1339,8 +1378,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 # Parent chain: redistribute to random PPLNS miner
                 # Merged chain: preserve valid explicit address if provided
                 pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
-                print >>sys.stderr, '[POOL] Invalid miner address %s - share credited to random PPLNS miner' % (
-                    user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)')
+                print >>sys.stderr, '[POOL] Invalid miner address %s from %s - share credited to random PPLNS miner' % (
+                    user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown')
         
         # Append worker name to user for identification
         if worker:
@@ -1350,13 +1389,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
         #print '[DEBUG] get_user_details returning: user=%r, merged_addresses=%r' % (user, merged_addresses)
         return user, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses
 
-    def preprocess_request(self, user):
+    def preprocess_request(self, user, peer_addr=None):
         # Debug: Uncomment to trace preprocess flow
         #print '[DEBUG] preprocess_request called with user:', repr(user)
         # Removed peer connection check - allow solo mining
         if time.time() > self.current_work.value['last_update'] + 60:
             raise jsonrpc.Error_for_code(-12345)(u'lost contact with coind')
-        username, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses = self.get_user_details(user)
+        username, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses = self.get_user_details(user, peer_addr=peer_addr)
         #print '[DEBUG] preprocess_request returning 6 values: username=%r' % (username,)
         return username, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses
 
