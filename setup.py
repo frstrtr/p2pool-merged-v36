@@ -45,6 +45,9 @@ try:
                 'web-static/index.html',
                 'web-static/share.html',
             ]),
+            ('transition_messages', [
+                'transition_messages/transition_v35_v36_mainnet.hex',
+            ]),
         ],
 
         console=['run_p2pool.py'],

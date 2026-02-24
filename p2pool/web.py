@@ -383,6 +383,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     n = store.load_bootstrap_blobs(bootstrap_dir)
                     if n > 0:
                         print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bootstrap_dir))
+                # Load shipped blobs from <repo>/transition_messages/
+                shipped_dir = os.path.join(os.path.dirname(sys.argv[0]), 'transition_messages')
+                if os.path.isdir(shipped_dir):
+                    n = store.load_bootstrap_blobs(shipped_dir)
+                    if n > 0:
+                        print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
                 # Load --transition-message CLI blob
                 if transition_message:
                     blob_hex = transition_message
@@ -2720,6 +2726,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 n = store.load_bootstrap_blobs(bootstrap_dir)
                 if n > 0:
                     print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bootstrap_dir))
+            # Load shipped blobs from <repo>/transition_messages/
+            shipped_dir = os.path.join(os.path.dirname(sys.argv[0]), 'transition_messages')
+            if os.path.isdir(shipped_dir):
+                n = store.load_bootstrap_blobs(shipped_dir)
+                if n > 0:
+                    print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
             # Load --transition-message CLI blob
             if transition_message:
                 blob_hex = transition_message
