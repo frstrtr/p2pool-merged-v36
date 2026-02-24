@@ -186,6 +186,8 @@ python run_p2pool.py \
     ... \
     --merged-coind-address 127.0.0.1 \
     --merged-coind-rpc-port 44556 \
+    --merged-coind-p2p-port 22556 \
+    --merged-coind-p2p-address DOGECOIN_DAEMON_IP \
     --merged-coind-rpc-user dogecoinrpc \
     --merged-coind-rpc-password YOUR_SECURE_PASSWORD \
     ...
