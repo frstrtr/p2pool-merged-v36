@@ -350,8 +350,58 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             shares_since_activation=max(0, chain_height - getattr(ratchet, '_activated_height', chain_height)) if ratchet else 0,
             # AutoRatchet state
             auto_ratchet=ratchet_info,
+            # Transition message from share messaging system
+            transition_message=_get_transition_message(),
         )
     
+    def _get_transition_message():
+        """Extract the latest TRANSITION_SIGNAL from the share messaging system.
+        
+        Returns dict with msg, url, urgency, from_ver, to_ver if found, else None.
+        Called on every version_signaling API request (cheap — message store is cached).
+        """
+        try:
+            store = getattr(node, '_message_store', None)
+            if store is None:
+                # Lazily create the message store (same as _get_message_store in msg API)
+                from p2pool.share_messages import ShareMessageStore, BanList
+                ban_path = os.path.join(datadir_path, 'banned_senders.json') if datadir_path else None
+                ban_list = BanList(persist_path=ban_path) if ban_path else BanList()
+                store = ShareMessageStore(ban_list=ban_list)
+                node._message_store = store
+                if node.best_share_var.value is not None:
+                    try:
+                        chain_len = min(node.net.CHAIN_LENGTH,
+                                        node.tracker.get_height(node.best_share_var.value))
+                        store.rebuild_from_tracker(
+                            node.tracker, node.best_share_var.value, chain_len)
+                    except Exception:
+                        pass
+
+            from p2pool.share_messages import MSG_TRANSITION_SIGNAL
+            signals = store.get_messages(
+                msg_type=MSG_TRANSITION_SIGNAL, authority_only=True, limit=5)
+            if not signals:
+                return None
+            # Return the most recent authority-signed transition signal
+            msg = signals[0]
+            try:
+                data = json.loads(msg.payload)
+            except (ValueError, TypeError):
+                return None
+            return dict(
+                msg=data.get('msg', ''),
+                url=data.get('url', ''),
+                urgency=data.get('urg', 'info'),
+                from_ver=data.get('from', ''),
+                to_ver=data.get('to', ''),
+                timestamp=msg.timestamp,
+                verified=msg.verified,
+                authority=msg.is_protocol_authority,
+            )
+        except Exception:
+            return None
+
     def format_eta(seconds):
         """Format seconds into human-readable ETA."""
         if seconds <= 0:

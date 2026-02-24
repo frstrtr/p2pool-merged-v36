@@ -1224,6 +1224,18 @@
                         Confirmation requires 2× chain length (<span id="confirm-window-size">800</span> shares) of ≥95% V36 format — ensures the upgrade is sustained and irreversible before locking in.
                     </div>
                 </div>
+                <!-- Transition message from share messaging system -->
+                <div id="transition-message-section" style="display: none; margin-top: 12px; padding: 10px 14px; border-radius: 6px; border-left: 4px solid #2196F3; background: rgba(33, 150, 243, 0.08);">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                        <span style="font-size: 1.1em;">📢</span>
+                        <span id="transition-msg-label" style="font-weight: 600; font-size: 0.9em; color: #2196F3;">Transition Signal</span>
+                        <span id="transition-msg-urgency" style="font-size: 0.75em; padding: 1px 8px; border-radius: 10px; background: rgba(33,150,243,0.2); color: #2196F3;">info</span>
+                    </div>
+                    <div id="transition-msg-text" style="color: #ddd; font-size: 0.88em; line-height: 1.4;"></div>
+                    <div id="transition-msg-url-row" style="margin-top: 6px; display: none;">
+                        <a id="transition-msg-url" href="#" target="_blank" rel="noopener" style="color: #4FC3F7; font-size: 0.85em; text-decoration: underline;">Get latest release →</a>
+                    </div>
+                </div>
                 <div class="signaling-stats">
                     <span class="signaling-message" id="signaling-message" style="font-size: 0.9em;"></span>
                 </div>
@@ -2144,6 +2156,43 @@
                     
                     // Update message
                     d3.select('#signaling-message').text(vs.message);
+                    
+                    // Update transition message from share messaging system
+                    var tmsg = vs.transition_message;
+                    if (tmsg && tmsg.msg) {
+                        d3.select('#transition-message-section').style('display', 'block');
+                        d3.select('#transition-msg-text').text(tmsg.msg);
+                        // Label shows version range
+                        var label = 'Transition Signal';
+                        if (tmsg.from_ver && tmsg.to_ver) {
+                            label = 'V' + tmsg.from_ver + ' → V' + tmsg.to_ver + ' Transition Signal';
+                        }
+                        d3.select('#transition-msg-label').text(label);
+                        // Urgency badge
+                        var urg = tmsg.urgency || 'info';
+                        var urgColors = {
+                            'info': { bg: 'rgba(33,150,243,0.2)', fg: '#2196F3', border: '#2196F3' },
+                            'recommended': { bg: 'rgba(255,152,0,0.2)', fg: '#FF9800', border: '#FF9800' },
+                            'required': { bg: 'rgba(244,67,54,0.2)', fg: '#F44336', border: '#F44336' }
+                        };
+                        var uc = urgColors[urg] || urgColors['info'];
+                        d3.select('#transition-msg-urgency')
+                            .text(urg.toUpperCase())
+                            .style('background', uc.bg)
+                            .style('color', uc.fg);
+                        d3.select('#transition-message-section')
+                            .style('border-left-color', uc.border);
+                        d3.select('#transition-msg-label').style('color', uc.fg);
+                        // URL link
+                        if (tmsg.url) {
+                            d3.select('#transition-msg-url-row').style('display', 'block');
+                            d3.select('#transition-msg-url').attr('href', tmsg.url).text(tmsg.url + ' →');
+                        } else {
+                            d3.select('#transition-msg-url-row').style('display', 'none');
+                        }
+                    } else {
+                        d3.select('#transition-message-section').style('display', 'none');
+                    }
                     
                     // Update version breakdown
                     var versionsDiv = d3.select('#signaling-versions');
