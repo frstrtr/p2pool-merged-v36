@@ -2086,6 +2086,13 @@ class AutoRatchet(object):
                     vote_pct, self.DEACTIVATION_THRESHOLD)
                 self._save()
             elif self._activated_height is not None:
+                if self._activated_height > height:
+                    # activated_height is stale (from a previous session with a taller chain).
+                    # Reset to current height so confirmation countdown restarts from now.
+                    print '[AutoRatchet] Adjusting stale activated_height %d -> %d (chain rebuilt after restart)' % (
+                        self._activated_height, height)
+                    self._activated_height = height
+                    self._save()
                 shares_since = height - self._activated_height
                 if shares_since >= confirmation_window and share_pct >= self.ACTIVATION_THRESHOLD:
                     self._state = self.STATE_CONFIRMED
