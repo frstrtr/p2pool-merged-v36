@@ -996,17 +996,29 @@ def run():
             # For non-SSL errors, do nothing - let the default observer handle them
             # (We don't re-print here to avoid duplication)
     
-    # Replace Twisted's default error observer with our filtered version
-    # Monkey-patch DefaultObserver.emit to suppress entire SSL error events
-    _orig_default_emit = log.DefaultObserver.emit
-    def _filtered_default_emit(self_obs, eventDict):
-        if SSLErrorFilter.is_ssl_error(eventDict):
-            return
-        return _orig_default_emit(self_obs, eventDict)
-    log.DefaultObserver.emit = _filtered_default_emit
+    # Find the actual DefaultObserver instance in the observer list and replace
+    # its emit. Patching the class method doesn't work because the bound method
+    # was registered before we can patch it, and Python 2 bound methods hold
+    # a reference to the original im_func.
+    _ssl_filter = SSLErrorFilter()
+    for _obs in list(log.theLogPublisher.observers):
+        if hasattr(_obs, 'im_self') and isinstance(_obs.im_self, log.DefaultObserver):
+            _orig_obs_emit = _obs
+            log.removeObserver(_obs)
+            def _make_filtered_default_emit(original):
+                def filtered_emit(eventDict):
+                    if SSLErrorFilter.is_ssl_error(eventDict):
+                        if not SSLErrorFilter._ssl_warning_shown:
+                            SSLErrorFilter._ssl_warning_shown = True
+                            print >>sys.stderr, '[SSL] OpenSSL/cryptography incompatibility detected - suppressing (does not affect mining)'
+                        return
+                    return original(eventDict)
+                return filtered_emit
+            log.addObserver(_make_filtered_default_emit(_orig_obs_emit))
+            break
     
-    # Install our SSL error filter as an observer
-    log.addObserver(SSLErrorFilter().emit)
+    # Also install as a named observer for any future DefaultObserver instances
+    log.addObserver(_ssl_filter.emit)
     
     class ErrorReporter(object):
         def __init__(self):
