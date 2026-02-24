@@ -423,7 +423,36 @@ human_address_type = ChecksummedType(pack.ComposedType([
     ('pubkey_hash', pack.IntType(160)),
 ]))
 
+# --- Address conversion caches ---
+# These are pure functions: same input always produces same output.
+# Caching avoids repeated base58/bech32 encode/decode on every share/template.
+_cache_addr_to_pubkey_hash = {}   # (address, net_id) -> (pubkey_hash, version, witver)
+_cache_addr_to_script2 = {}       # (address, net_id) -> script2
+_cache_pubkey_hash_to_addr = {}   # (pubkey_hash, addr_ver, bech32_ver, net_id) -> address
+_cache_pubkey_hash_to_script = {} # (pubkey_hash, version, bech32_version, net_id) -> script2
+
+def _net_id(net):
+    """Stable identity for a network object (used as cache key component)."""
+    return id(net)
+
+def clear_address_caches():
+    """Clear all address conversion caches (for testing)."""
+    _cache_addr_to_pubkey_hash.clear()
+    _cache_addr_to_script2.clear()
+    _cache_pubkey_hash_to_addr.clear()
+    _cache_pubkey_hash_to_script.clear()
+    _cache_script2_to_addr.clear()
+
 def pubkey_hash_to_address(pubkey_hash, addr_ver, bech32_ver, net):
+    cache_key = (pubkey_hash, addr_ver, bech32_ver, _net_id(net))
+    cached = _cache_pubkey_hash_to_addr.get(cache_key)
+    if cached is not None:
+        return cached
+    result = _pubkey_hash_to_address_impl(pubkey_hash, addr_ver, bech32_ver, net)
+    _cache_pubkey_hash_to_addr[cache_key] = result
+    return result
+
+def _pubkey_hash_to_address_impl(pubkey_hash, addr_ver, bech32_ver, net):
     if addr_ver == -1:
         if hasattr(net, 'padding_bugfix') and net.padding_bugfix:
             thash = '{:040x}'.format(pubkey_hash)
@@ -445,10 +474,25 @@ class AddrError(Exception):
     __slots__ = ()
 
 def address_to_script2(address, net):
+    cache_key = (address, _net_id(net))
+    cached = _cache_addr_to_script2.get(cache_key)
+    if cached is not None:
+        return cached
     res = address_to_pubkey_hash(address, net)
-    return pubkey_hash_to_script2(res[0], res[1], res[2], net)
+    result = pubkey_hash_to_script2(res[0], res[1], res[2], net)
+    _cache_addr_to_script2[cache_key] = result
+    return result
 
 def address_to_pubkey_hash(address, net):
+    cache_key = (address, _net_id(net))
+    cached = _cache_addr_to_pubkey_hash.get(cache_key)
+    if cached is not None:
+        return cached
+    result = _address_to_pubkey_hash_impl(address, net)
+    _cache_addr_to_pubkey_hash[cache_key] = result
+    return result
+
+def _address_to_pubkey_hash_impl(address, net):
     try:
         return get_legacy_pubkey_hash(address, net)
     except AddrError:
@@ -530,6 +574,15 @@ def pubkey_to_script2(pubkey):
     return (chr(len(pubkey)) + pubkey) + '\xac'
 
 def pubkey_hash_to_script2(pubkey_hash, version, bech32_version, net):
+    cache_key = (pubkey_hash, version, bech32_version, _net_id(net))
+    cached = _cache_pubkey_hash_to_script.get(cache_key)
+    if cached is not None:
+        return cached
+    result = _pubkey_hash_to_script2_impl(pubkey_hash, version, bech32_version, net)
+    _cache_pubkey_hash_to_script[cache_key] = result
+    return result
+
+def _pubkey_hash_to_script2_impl(pubkey_hash, version, bech32_version, net):
     if version == -1 and bech32_version >= 0:
         if hasattr(net, 'padding_bugfix') and net.padding_bugfix:
             decoded = '{:040x}'.format(pubkey_hash)
@@ -557,7 +610,18 @@ def pubkey_hash_to_script2(pubkey_hash, version, bech32_version, net):
         return ('\xa9\x14' + pack.IntType(160).pack(pubkey_hash)) + '\x87'
     return '\x76\xa9' + ('\x14' + pack.IntType(160).pack(pubkey_hash)) + '\x88\xac'
 
+_cache_script2_to_addr = {}  # (script2, addr_ver, bech32_ver, net_id) -> address
+
 def script2_to_address(script2, addr_ver, bech32_ver, net):
+    cache_key = (script2, addr_ver, bech32_ver, _net_id(net))
+    cached = _cache_script2_to_addr.get(cache_key)
+    if cached is not None:
+        return cached
+    result = _script2_to_address_impl(script2, addr_ver, bech32_ver, net)
+    _cache_script2_to_addr[cache_key] = result
+    return result
+
+def _script2_to_address_impl(script2, addr_ver, bech32_ver, net):
     try:
         return script2_to_pubkey_address(script2, net)
     except AddrError:

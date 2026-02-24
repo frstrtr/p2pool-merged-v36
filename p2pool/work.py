@@ -240,6 +240,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Track recently found merged mined blocks
         self.recent_merged_blocks = []
 
+        # --- Miner address caches ---
+        # Avoids re-parsing the same address on every get_work() call.
+        # Keyed by (user_string, merged_addr_key) — invalidated when miner reconnects with different address.
+        self._miner_addr_cache = {}      # user -> (pubkey_hash, pubkey_type, is_convertible, addr_type, error_msg)
+        self._miner_merged_cache = {}    # user -> list of {chain_id, script} entries (auto-generated)
+        self._merged_net_cache = {}      # chain_id -> net object (constant for entire run)
+        self._merged_chain_name_cache = {} # chain_id -> name string (constant for entire run)
+
         self.address_throttle = 0
         self.address = None  # Dynamic address, set later if --dynamic-address used
         self.share_rate = args.share_rate  # Stratum vardiff target (seconds per pseudoshare)
@@ -1258,57 +1266,73 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
                     print >>sys.stderr, '[POOL] Empty miner address - share credited to random PPLNS miner'
                 else:
-                    addr_result = is_pubkey_hash_address(user, self.node.net.PARENT)
-                    is_convertible = addr_result[0]
-                    validated_pubkey_hash = addr_result[1]
-                    error_msg = addr_result[2]
-                    addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
-                    if is_convertible:
-                        pubkey_hash = validated_pubkey_hash
-                        # Detect V36 pubkey_type from miner's address
-                        try:
-                            _, _v, _wv = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
-                            pubkey_type = p2pool_data.get_pubkey_type(_v, _wv, self.node.net.PARENT)
-                        except:
+                    # Cache miner address resolution — same address produces same result every time
+                    cached_addr = self._miner_addr_cache.get(user)
+                    if cached_addr is not None:
+                        pubkey_hash, pubkey_type, is_convertible, addr_type, error_msg = cached_addr
+                    else:
+                        addr_result = is_pubkey_hash_address(user, self.node.net.PARENT)
+                        is_convertible = addr_result[0]
+                        validated_pubkey_hash = addr_result[1]
+                        error_msg = addr_result[2]
+                        addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
+                        if is_convertible:
+                            pubkey_hash = validated_pubkey_hash
+                            try:
+                                _, _v, _wv = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
+                                pubkey_type = p2pool_data.get_pubkey_type(_v, _wv, self.node.net.PARENT)
+                            except:
+                                pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
+                        else:
+                            pubkey_hash = validated_pubkey_hash
                             pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
+                        self._miner_addr_cache[user] = (pubkey_hash, pubkey_type, is_convertible, addr_type, error_msg)
+                    if is_convertible:
                         # Auto-generate merged chain address when miner provides
                         # no explicit merged address via stratum.
                         # Priority: explicit (already in _validated) > auto-convert > pool distribution
                         if not merged_addresses.get('_validated'):
-                            auto_entries = self._auto_generate_merged_addresses(pubkey_hash, addr_type)
-                            if auto_entries:
-                                merged_addresses['_validated'] = auto_entries
-                                # Log full details of auto-converted addresses
-                                # Use pubkey_type for accurate source type label
-                                src_type_names = {
-                                    p2pool_data.PUBKEY_TYPE_P2PKH: 'P2PKH',
-                                    p2pool_data.PUBKEY_TYPE_P2WPKH: 'BECH32',
-                                    p2pool_data.PUBKEY_TYPE_P2SH: 'P2SH',
-                                }
-                                src_label = src_type_names.get(pubkey_type, addr_type.upper())
-                                for ae in auto_entries:
-                                    try:
-                                        ae_net = self._get_merged_address_net(ae['chain_id'])
-                                        ae_chain = self._get_merged_chain_name(ae['chain_id'])
-                                        # Use pubkey_hash_to_address for reliable address derivation
-                                        if addr_type == 'p2sh':
-                                            ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_P2SH_VERSION, -1, ae_net)
-                                            dst_label = 'P2SH'
-                                        else:
-                                            ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_VERSION, -1, ae_net)
-                                            dst_label = 'P2PKH'
-                                        print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> %s %s (chain: %s, script: %s)' % (
-                                            src_label, user, ae_addr, dst_label,
-                                            ae_chain, ae['script'].encode('hex'))
-                                    except Exception:
-                                        print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> script %s (chain_id: %d)' % (
-                                            src_label, user, ae['script'].encode('hex'), ae['chain_id'])
+                            # Cache auto-generated merged addresses per miner
+                            if user in self._miner_merged_cache:
+                                cached_merged = self._miner_merged_cache[user]
+                                if cached_merged is not None:
+                                    merged_addresses['_validated'] = cached_merged
                             else:
-                                # Tier 3: unconvertible - merged rewards go to pool distribution
-                                print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain - pool distribution' % (
-                                    user[:30] + '...' if len(user) > 30 else user, addr_type)
+                                auto_entries = self._auto_generate_merged_addresses(pubkey_hash, addr_type)
+                                if auto_entries:
+                                    merged_addresses['_validated'] = auto_entries
+                                    self._miner_merged_cache[user] = auto_entries
+                                    # Log once on first auto-conversion
+                                    src_type_names = {
+                                        p2pool_data.PUBKEY_TYPE_P2PKH: 'P2PKH',
+                                        p2pool_data.PUBKEY_TYPE_P2WPKH: 'BECH32',
+                                        p2pool_data.PUBKEY_TYPE_P2SH: 'P2SH',
+                                    }
+                                    src_label = src_type_names.get(pubkey_type, addr_type.upper())
+                                    for ae in auto_entries:
+                                        try:
+                                            ae_net = self._get_merged_address_net(ae['chain_id'])
+                                            ae_chain = self._get_merged_chain_name(ae['chain_id'])
+                                            if addr_type == 'p2sh':
+                                                ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_P2SH_VERSION, -1, ae_net)
+                                                dst_label = 'P2SH'
+                                            else:
+                                                ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_VERSION, -1, ae_net)
+                                                dst_label = 'P2PKH'
+                                            print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> %s %s (chain: %s, script: %s)' % (
+                                                src_label, user, ae_addr, dst_label,
+                                                ae_chain, ae['script'].encode('hex'))
+                                        except Exception:
+                                            print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> script %s (chain_id: %d)' % (
+                                                src_label, user, ae['script'].encode('hex'), ae['chain_id'])
+                                else:
+                                    # Tier 3: unconvertible - merged rewards go to pool distribution
+                                    self._miner_merged_cache[user] = None  # cache the negative result too
+                                    print >>sys.stderr, '[MERGED] Address %s (%s) not convertible to merged chain - pool distribution' % (
+                                        user[:30] + '...' if len(user) > 30 else user, addr_type)
                     else:
-                        print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
+                        if cached_addr is None:  # Only warn once per miner address
+                            print >>sys.stderr, '[WARN] Miner address %s is not convertible for merged mining: %s' % (user[:30] + '...' if len(user) > 30 else user, error_msg)
                         pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                         pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
             except: # Invalid/unparseable address - probabilistic redistribution
@@ -1500,6 +1524,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
         return entries if entries else None
 
     def _get_merged_address_net(self, chainid):
+        """Return the network object for the active merged chain (cached)."""
+        cached = self._merged_net_cache.get(chainid)
+        if cached is not None:
+            return cached
+        result = self._get_merged_address_net_impl(chainid)
+        self._merged_net_cache[chainid] = result
+        return result
+
+    def _get_merged_address_net_impl(self, chainid):
         """Return the network object for the active merged chain.
         
         Uses the same detection logic as the MergedMiningBroadcaster:
@@ -1522,6 +1555,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
         return self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
 
     def _get_merged_chain_name(self, chainid):
+        """Return a human-readable name for the active merged chain (cached)."""
+        cached = self._merged_chain_name_cache.get(chainid)
+        if cached is not None:
+            return cached
+        result = self._get_merged_chain_name_impl(chainid)
+        self._merged_chain_name_cache[chainid] = result
+        return result
+
+    def _get_merged_chain_name_impl(self, chainid):
         """Return a human-readable name for the active merged chain."""
         if chainid == 98:  # Dogecoin
             parent_symbol = getattr(self.node.net.PARENT, 'SYMBOL', '') if hasattr(self.node.net, 'PARENT') else ''
