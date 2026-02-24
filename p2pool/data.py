@@ -2215,7 +2215,7 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
         weights, total_weight, donation_weight = tracker.get_v36_merged_cumulative_weights(
             chain_id, best_share_hash, chain_length, max_weight)
         _last = getattr(get_v36_merged_weights, '_last_log_key', None)
-        _cur = (len(weights), total_weight)
+        _cur = len(weights)
         if _last != _cur:
             get_v36_merged_weights._last_log_key = _cur
             print 'Merged mining weights: %d addresses (weight=%d, donation=%d) via skip list' % (

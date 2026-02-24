@@ -2254,7 +2254,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
             #     print >>sys.stderr, '[DEBUG] Checking aux_work target=%064x, meets=%s' % (aux_work['target'], pow_hash <= aux_work['target'])
             
             if mm_later and pow_hash <= mm_later[0][0]['target']:
-                print >>sys.stderr, '[MERGED SUBMIT] Share meets merged target! pow_hash=%064x target=%064x' % (pow_hash, mm_later[0][0]['target'])
+                pass  # Logged by MergedBroadcaster below
 
             for aux_work, index, hashes in mm_later:
                 try:
@@ -2266,35 +2266,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     
                     # Log when parent block found - check if merged block should also be submitted
                     if pow_hash <= header['bits'].target:
-                        print >>sys.stderr, '[MERGED CHECK] Parent block found! Checking merged chain...'
-                        print >>sys.stderr, '[MERGED CHECK] pow_hash=%064x' % pow_hash
-                        print >>sys.stderr, '[MERGED CHECK] parent_target=%064x (met: %s)' % (header['bits'].target, pow_hash <= header['bits'].target)
-                        print >>sys.stderr, '[MERGED CHECK] merged_target=%064x (met: %s)' % (aux_work['target'], pow_hash <= aux_work['target'])
+                        # Debug: Uncomment for merged check diagnostics
+                        # print >>sys.stderr, '[MERGED CHECK] Parent block found! pow=%064x parent_target=%064x merged_target=%064x' % (pow_hash, header['bits'].target, aux_work['target'])
                         
                         # TWIN BLOCK DETECTION: Same POW hash accepted by BOTH chains!
                         if pow_hash <= aux_work['target']:
                             merged_net_name = aux_work.get('merged_net_name', 'Merged Chain')
                             merged_net_symbol = aux_work.get('merged_net_symbol', 'MERGED')
-                            print
-                            print '*' * 70
-                            print '*** TWIN BLOCK FOUND! ***'
-                            print '*** Same POW hash accepted by BOTH chains! ***'
-                            print '*' * 70
-                            print 'Time:         %s' % time.strftime('%Y-%m-%d %H:%M:%S')
-                            print 'Miner:        %s' % user
-                            print 'POW Hash:     %064x' % pow_hash
-                            print
-                            print 'Parent Chain: %s (%s)' % (self.node.net.PARENT.NAME, self.node.net.PARENT.SYMBOL)
-                            print '  Block hash: %064x' % header_hash
-                            print '  Target:     %064x' % header['bits'].target
-                            print
-                            print 'Merged Chain: %s (%s)' % (merged_net_name, merged_net_symbol)
-                            print '  Block hash: %064x' % aux_work['hash']
-                            print '  Target:     %064x' % aux_work['target']
-                            print '*' * 70
-                            print 'This proves merged mining is working - one hash, two blockchains!'
-                            print '*' * 70
-                            print
+                            print '*** TWIN BLOCK! %s (%s) + %s (%s) | POW: %064x ***' % (
+                                self.node.net.PARENT.NAME, self.node.net.PARENT.SYMBOL,
+                                merged_net_name, merged_net_symbol, pow_hash)
                     
                     # Debug: Uncomment to trace merged block candidates
                     # if pow_hash <= aux_work['target']:
@@ -2303,7 +2284,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     
                     if pow_hash <= aux_work['target']:
                         # Hash meets Dogecoin difficulty - submit auxpow block
-                        print >>sys.stderr, '[MERGED] Hash meets merged target! multiaddress=%s pow_hash=%064x target=%064x' % (aux_work.get('multiaddress', False), pow_hash, aux_work['target'])
+                        # Logged by MergedBroadcaster below
                         # Check if this is multiaddress merged mining (getblocktemplate with auxpow)
                         if aux_work.get('multiaddress'):
                             # Build complete Dogecoin block with auxpow proof
@@ -2587,21 +2568,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             except Exception as e:
                                                 print >>sys.stderr, 'Merged broadcaster error: %s' % e
                                         print
-                                        print '#' * 70
-                                        print '### MERGED NETWORK BLOCK FOUND! ###'
-                                        # Get merged network info from aux_work
                                         merged_net_name = aux_work.get('merged_net_name', 'Unknown')
                                         merged_net_symbol = aux_work.get('merged_net_symbol', 'UNKNOWN')
-                                        print '### Network: %s (%s) ###' % (merged_net_name, merged_net_symbol)
-                                        print '#' * 70
-                                        print 'Time:        %s' % time.strftime('%Y-%m-%d %H:%M:%S')
-                                        print 'Miner:       %s' % user
-                                        print 'Block hash:  %064x' % aux_work['hash']
-                                        print 'POW hash:    %064x' % pow_hash
-                                        print 'Target:      %064x' % aux_work['target']
-                                        print 'Txs:         %d' % len(merged_block['txs'])
-                                        print 'Block size:  %d bytes' % len(complete_block)
-                                        print '#' * 70
+                                        print '### MERGED BLOCK FOUND! %s (%s) height=%d hash=%064x miner=%s txs=%d size=%d ###' % (
+                                            merged_net_name, merged_net_symbol,
+                                            merged_template.get('height', aux_work.get('height', 0)),
+                                            aux_work['hash'], user,
+                                            len(merged_block['txs']), len(complete_block))
                                         print
                                         
                                         # Record merged block find
@@ -2686,7 +2659,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                 @verify_df.addCallback
                                                 def on_verify(block_info):
                                                     block_rec['verified'] = True
-                                                    print 'Merged block VERIFIED in chain: %064x' % block_hash
                                                 @verify_df.addErrback
                                                 def on_verify_fail(err):
                                                     block_rec['verified'] = False
@@ -2733,7 +2705,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 if result != (pow_hash <= aux_work['target']):
                                     print >>sys.stderr, 'Merged block submittal result: %s Expected: %s' % (result, pow_hash <= aux_work['target'])
                                 else:
-                                    print 'Merged block submittal result: %s' % (result,)
                                     # Record merged block find if successful
                                     if result == True:
                                         # Get network info - for single-address mode we may not have full info
@@ -2803,7 +2774,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                 def on_verify(block_info):
                                                     # Block found in chain - mark as verified
                                                     block_rec['verified'] = True
-                                                    print 'Merged block VERIFIED in chain: %064x' % block_hash
                                                 @verify_df.addErrback
                                                 def on_verify_fail(err):
                                                     # Block not found - mark as orphaned
