@@ -1210,7 +1210,7 @@
                         <div class="signaling-threshold" style="left: 95%"><span>95%</span></div>
                     </div>
                 </div>
-                <!-- Confirmation progress bar - shown during ACTIVATED -->
+                <!-- V36 Chain Fill bar - shown during ACTIVATED while chain has mixed versions -->
                 <div id="confirmation-bar-section" style="display: none;">
                     <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
                         V36 Chain Fill: <span id="confirmation-text" style="color: #2196F3;">-</span>
@@ -1221,7 +1221,19 @@
                         <div class="signaling-threshold" style="left: 95%; border-color: #4CAF50;"><span style="color: #4CAF50;">95%</span></div>
                     </div>
                     <div style="color: #666; font-size: 0.78em; margin-top: 4px; font-style: italic;">
-                        Confirmation requires 2× chain length (<span id="confirm-window-size">800</span> shares) of ≥95% V36 format — ensures the upgrade is sustained and irreversible before locking in.
+                        V36 shares are replacing older V35 shares in the chain. Once 100% V36, the confirmation countdown begins.
+                    </div>
+                </div>
+                <!-- Confirmation countdown bar - shown when chain is 100% V36, counting X/800 -->
+                <div id="countdown-bar-section" style="display: none;">
+                    <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
+                        Confirmation Countdown: <span id="countdown-text" style="color: #4CAF50;">-</span>
+                    </div>
+                    <div class="signaling-bar-container">
+                        <div class="signaling-bar" id="countdown-bar" style="width: 0%; background: linear-gradient(90deg, #4CAF50, #00E676);"></div>
+                    </div>
+                    <div style="color: #666; font-size: 0.78em; margin-top: 4px; font-style: italic;">
+                        All shares are V36 format. Counting 2× chain length (<span id="countdown-window-size">800</span> shares) of sustained ≥95% V36 — ensures the upgrade is irreversible before locking in.
                     </div>
                 </div>
                 <!-- Transition message from share messaging system -->
@@ -2107,10 +2119,7 @@
                     var isConfirming = vs.auto_ratchet && vs.auto_ratchet.state === 'activated';
                     
                     if (isConfirming) {
-                        // ACTIVATED: show V36 chain fill progress bar
-                        d3.select('#signaling-bar-section').style('display', 'none');
-                        d3.select('#confirmation-bar-section').style('display', 'block');
-                        
+                        // ACTIVATED state — compute chain fill stats
                         var v36FormatPct = 0, v36Cnt = 0, totalCnt = 0;
                         if (vs.share_types) {
                             for (var v in vs.share_types) {
@@ -2121,24 +2130,48 @@
                         }
                         var confirmWindow = vs.confirmation_window || (vs.chain_length_required * 2);
                         var sharesSince = vs.shares_since_activation || 0;
-                        var fillPct = Math.min(100, v36FormatPct);
+                        var chainFull = (totalCnt > 0 && v36Cnt >= totalCnt);
                         
-                        d3.select('#confirmation-bar').style('width', fillPct + '%');
-                        // Color based on whether >95%
-                        if (v36FormatPct >= 95) {
-                            d3.select('#confirmation-bar').style('background', 'linear-gradient(90deg, #4CAF50, #00E676)');
+                        d3.select('#signaling-bar-section').style('display', 'none');
+                        
+                        if (chainFull) {
+                            // Phase 3: Chain is 100% V36 — show confirmation countdown (X/800)
+                            d3.select('#confirmation-bar-section').style('display', 'none');
+                            d3.select('#countdown-bar-section').style('display', 'block');
+                            var countdownPct = confirmWindow > 0 ? Math.min(100, sharesSince * 100 / confirmWindow) : 0;
+                            d3.select('#countdown-bar').style('width', countdownPct + '%');
+                            // ETA calculation
+                            var sharesRemaining = Math.max(0, confirmWindow - sharesSince);
+                            var etaSec = sharesRemaining * 10; // ~10 sec per share
+                            var etaMin = Math.round(etaSec / 60);
+                            var etaH = Math.floor(etaMin / 60);
+                            var etaM = etaMin % 60;
+                            var etaStr = etaH > 0 ? etaH + 'h ' + etaM + 'm' : etaM + 'm';
+                            d3.select('#countdown-text').text(
+                                sharesSince + '/' + confirmWindow + ' shares elapsed' +
+                                (sharesRemaining > 0 ? ' \u2014 ~' + etaStr + ' remaining' : ' \u2014 CONFIRMING'));
+                            d3.select('#countdown-window-size').text(confirmWindow);
                         } else {
-                            d3.select('#confirmation-bar').style('background', 'linear-gradient(90deg, #2196F3, #00BCD4)');
+                            // Phase 2: Chain has mixed V35+V36 — show chain fill bar
+                            d3.select('#confirmation-bar-section').style('display', 'block');
+                            d3.select('#countdown-bar-section').style('display', 'none');
+                            var fillPct = Math.min(100, v36FormatPct);
+                            d3.select('#confirmation-bar').style('width', fillPct + '%');
+                            if (v36FormatPct >= 95) {
+                                d3.select('#confirmation-bar').style('background', 'linear-gradient(90deg, #4CAF50, #00E676)');
+                            } else {
+                                d3.select('#confirmation-bar').style('background', 'linear-gradient(90deg, #2196F3, #00BCD4)');
+                            }
+                            d3.select('#confirmation-text').text(
+                                d3.format('.1f')(v36FormatPct) + '% V36 format in chain (' + 
+                                v36Cnt + '/' + totalCnt + ' shares). ' +
+                                'Confirmation: ' + sharesSince + '/' + confirmWindow + ' shares elapsed.');
                         }
-                        d3.select('#confirmation-text').text(
-                            d3.format('.1f')(v36FormatPct) + '% V36 format in chain (' + 
-                            v36Cnt + '/' + totalCnt + ' shares). ' +
-                            'Confirmation: ' + sharesSince + '/' + confirmWindow + ' shares elapsed.');
-                        d3.select('#confirm-window-size').text(confirmWindow);
                     } else {
                         // VOTING/other: show sampling window signaling bar
                         d3.select('#signaling-bar-section').style('display', 'block');
                         d3.select('#confirmation-bar-section').style('display', 'none');
+                        d3.select('#countdown-bar-section').style('display', 'none');
                         
                         var sigPct = vs.sampling_signaling;
                         d3.select('#signaling-bar').style('width', Math.min(100, sigPct) + '%');
