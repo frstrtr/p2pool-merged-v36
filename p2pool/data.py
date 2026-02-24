@@ -2214,10 +2214,11 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
     if hasattr(tracker, 'get_v36_merged_cumulative_weights'):
         weights, total_weight, donation_weight = tracker.get_v36_merged_cumulative_weights(
             chain_id, best_share_hash, chain_length, max_weight)
-        _last = getattr(get_v36_merged_weights, '_last_log_key', None)
-        _cur = len(weights)
-        if _last != _cur:
-            get_v36_merged_weights._last_log_key = _cur
+        import time as _time
+        _now = _time.time()
+        _last_t = getattr(get_v36_merged_weights, '_last_log_time', 0)
+        if _now - _last_t >= 60:
+            get_v36_merged_weights._last_log_time = _now
             print 'Merged mining weights: %d addresses (weight=%d, donation=%d) via skip list' % (
                 len(weights), total_weight, donation_weight)
         return weights, total_weight, donation_weight
