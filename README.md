@@ -155,6 +155,9 @@ python3 adapter.py --config config.yaml
 litecoin-cli getnewaddress "" legacy
 
 # Start P2Pool with merged mining
+# Replace IPs with 127.0.0.1 if all daemons run on the same machine,
+# or use LAN IPs if daemons run on separate machines.
+# --merged-coind-address always points to the local MM-Adapter (127.0.0.1).
 pypy run_p2pool.py \
     --net litecoin \
     --coind-address 127.0.0.1 \

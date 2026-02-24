@@ -67,18 +67,63 @@ sudo make install
 ```
 
 ### 3. Configure Litecoin Core
+
+> **Deployment topology**: Litecoin Core can run on the **same machine** as P2Pool
+> or on a **separate machine** on your LAN. If separate, add `rpcallowip` for
+> your P2Pool machine's subnet and set `rpcbind=0.0.0.0`. The examples below
+> show both options.
+
 Create `~/.litecoin/litecoin.conf`:
-```bash
-mkdir -p ~/.litecoin
-cat > ~/.litecoin/litecoin.conf << EOF
+
+**Same-machine setup** (Litecoin Core and P2Pool on one box):
+```ini
+# ~/.litecoin/litecoin.conf — same machine as P2Pool
 server=1
 daemon=1
-rpcuser=litecoinrpc
-rpcpassword=$(openssl rand -hex 32)
-rpcallowip=127.0.0.1
-rpcport=9332
 txindex=1
-EOF
+
+rpcuser=litecoinrpc
+rpcpassword=CHANGE_ME
+rpcallowip=127.0.0.1
+listen=1
+maxconnections=50
+
+[main]
+port=9333
+rpcport=9332
+rpcbind=127.0.0.1
+dbcache=4000
+par=0
+
+# RPC capacity (increase if P2Pool polls heavily)
+rpcworkqueue=512
+rpcthreads=32
+```
+
+**Separate-machine setup** (verified production config from node 192.168.86.26):
+```ini
+# ~/.litecoin/litecoin.conf — separate machine, P2Pool on LAN
+server=1
+daemon=1
+txindex=1
+
+rpcuser=litecoinrpc
+rpcpassword=CHANGE_ME
+rpcallowip=127.0.0.1
+rpcallowip=192.168.0.0/16       # Allow LAN P2Pool nodes
+listen=1
+maxconnections=50
+
+[main]
+port=9333
+rpcport=9332
+rpcbind=0.0.0.0                 # Listen on all interfaces for LAN RPC
+dbcache=4000                    # Increase if RAM allows (production: 64000)
+par=0                           # Use all CPU cores for verification
+
+# RPC capacity
+rpcworkqueue=512
+rpcthreads=32
 ```
 
 ### 4. Start Litecoin Core and Sync
@@ -104,18 +149,54 @@ sudo install -m 0755 dogecoin-1.14.9/bin/* /usr/local/bin/
 ```
 
 ### 2. Configure Dogecoin Core
+
+> **Deployment topology**: Dogecoin Core can run on the same machine as P2Pool
+> or on a separate machine. If separate, the **MM-Adapter** must run on the
+> same machine as P2Pool (it proxies RPC on `127.0.0.1:44556`), and the
+> Dogecoin daemon must allow RPC from the adapter's IP.
+
 Create `~/.dogecoin/dogecoin.conf`:
-```bash
-mkdir -p ~/.dogecoin
-cat > ~/.dogecoin/dogecoin.conf << EOF
+
+**Same-machine setup** (Dogecoin Core, MM-Adapter, and P2Pool on one box):
+```ini
+# ~/.dogecoin/dogecoin.conf — same machine as P2Pool
 server=1
 daemon=1
+
 rpcuser=dogecoinrpc
-rpcpassword=$(openssl rand -hex 32)
+rpcpassword=CHANGE_ME
 rpcallowip=127.0.0.1
+rpcbind=127.0.0.1
 rpcport=22555
-txindex=1
-EOF
+
+port=22556
+listen=1
+maxconnections=50
+
+dbcache=2000
+par=4
+```
+
+**Separate-machine setup** (verified production config from node 192.168.86.27):
+```ini
+# ~/.dogecoin/dogecoin.conf — separate machine, adapter/P2Pool on LAN
+server=1
+daemon=1
+
+rpcuser=dogecoinrpc
+rpcpassword=CHANGE_ME
+rpcallowip=127.0.0.1
+rpcallowip=192.168.0.0/16       # Allow LAN adapter/P2Pool
+rpcbind=0.0.0.0
+rpcport=22555
+
+port=22556
+bind=0.0.0.0
+listen=1
+maxconnections=50
+
+dbcache=2000
+par=4
 ```
 
 ### 3. Start Dogecoin Core and Sync
@@ -298,6 +379,12 @@ pypy run_p2pool.py \
 ### Start P2Pool with Merged Mining (Litecoin + Dogecoin)
 
 See the main README for full merged mining startup with MM-Adapter.
+
+> **Note on addresses**: `--coind-address` and `--merged-coind-p2p-address`
+> point to the actual daemon IPs. Use `127.0.0.1` if daemons are local, or
+> the LAN IP if they are on separate machines (e.g., `192.168.86.26` for LTC,
+> `192.168.86.27` for DOGE). The `--merged-coind-address` always points to
+> the MM-Adapter, which runs on the same machine as P2Pool (`127.0.0.1`).
 
 ```bash
 pypy run_p2pool.py \
@@ -535,10 +622,22 @@ tail -f ~/p2pool-merged-v36/p2pool.log | grep -E "(shares|Local:|Peers:)"
 
 ### Litecoin Core Optimizations
 
-Add to `~/.litecoin/litecoin.conf`:
+Add to `~/.litecoin/litecoin.conf` (already included in the verified configs above):
+```ini
+dbcache=4000            # More RAM = faster IBD and reorg handling
+maxconnections=50       # Production value; reduce if bandwidth limited
+rpcworkqueue=512        # Prevent RPC queue exhaustion under P2Pool polling
+rpcthreads=32           # Match P2Pool's template polling concurrency
+par=0                   # Use all available CPU cores for block verification
+```
+
+### Dogecoin Core Optimizations
+
+Add to `~/.dogecoin/dogecoin.conf`:
 ```ini
 dbcache=2000
-maxconnections=125
+maxconnections=50
+par=4
 ```
 
 ### System Optimizations

@@ -2,8 +2,16 @@
 set -e
 
 # P2Pool Merged Mining Installer for Ubuntu 24.04
-# Sets up PyPy2, P2Pool dependencies, and optional systemd service
-# for Litecoin + Dogecoin merged mining.
+# Sets up PyPy2, P2Pool dependencies, and optionally creates
+# coin daemon configs and a systemd service.
+#
+# Deployment topology:
+#   All-in-one  — LTC Core + DOGE Core + MM-Adapter + P2Pool on one machine
+#   Distributed — daemons on separate LAN machines, P2Pool on another
+#
+# This script installs P2Pool itself. Coin daemon installation is covered
+# in INSTALL.md. If daemons are already running (same or separate machine),
+# this script can generate matching config files.
 
 echo "=== P2Pool Merged Mining (V36) Installer ==="
 echo ""
@@ -64,26 +72,183 @@ cd "$REPO_DIR"
 }
 
 echo ""
-echo "=== Installation complete! ==="
+echo "=== P2Pool Installation complete! ==="
 echo ""
 echo "PyPy:   $PYPY_BIN"
 echo "P2Pool: $REPO_DIR"
 echo ""
-echo "Quick start:"
-echo "  cd $REPO_DIR"
-echo "  $PYPY_BIN run_p2pool.py \\"
-echo "      --net litecoin \\"
-echo "      --coind-address 127.0.0.1 \\"
-echo "      --coind-rpc-port 9332 \\"
-echo "      --address YOUR_LTC_ADDRESS \\"
-echo "      litecoinrpc YOUR_LTC_RPC_PASSWORD"
+
+# ------------------------------------------------------------------
+# 6. Optional: Generate coin daemon configs
+# ------------------------------------------------------------------
+echo "--- Coin Daemon Configuration ---"
 echo ""
-echo "For merged mining (LTC+DOGE), see README.md for full setup with MM-Adapter."
+echo "P2Pool needs Litecoin Core and Dogecoin Core (for merged mining)."
+echo "They can run on THIS machine or on SEPARATE LAN machines."
 echo ""
 
-# 6. Optional: Create systemd service
+read -p "Generate example litecoin.conf? [y/N]: " GEN_LTC
+if [[ "$GEN_LTC" =~ ^[Yy]$ ]]; then
+    read -p "Will Litecoin Core run on this machine? [Y/n]: " LTC_LOCAL
+    LTC_LOCAL=${LTC_LOCAL:-Y}
+
+    LTC_RPC_PASS=$(openssl rand -hex 16)
+    LTC_CONF_DIR="$HOME/.litecoin"
+    mkdir -p "$LTC_CONF_DIR"
+
+    if [[ "$LTC_LOCAL" =~ ^[Yy]$ ]]; then
+        cat > "$LTC_CONF_DIR/litecoin.conf" <<LTCEOF
+# Litecoin Core — same machine as P2Pool
+server=1
+daemon=1
+txindex=1
+
+rpcuser=litecoinrpc
+rpcpassword=$LTC_RPC_PASS
+rpcallowip=127.0.0.1
+listen=1
+maxconnections=50
+
+[main]
+port=9333
+rpcport=9332
+rpcbind=127.0.0.1
+dbcache=4000
+par=0
+
+rpcworkqueue=512
+rpcthreads=32
+LTCEOF
+        echo "  Written: $LTC_CONF_DIR/litecoin.conf (localhost-only RPC)"
+    else
+        cat > "$LTC_CONF_DIR/litecoin.conf" <<LTCEOF
+# Litecoin Core — separate machine, P2Pool on LAN
+server=1
+daemon=1
+txindex=1
+
+rpcuser=litecoinrpc
+rpcpassword=$LTC_RPC_PASS
+rpcallowip=127.0.0.1
+rpcallowip=192.168.0.0/16
+listen=1
+maxconnections=50
+
+[main]
+port=9333
+rpcport=9332
+rpcbind=0.0.0.0
+dbcache=4000
+par=0
+
+rpcworkqueue=512
+rpcthreads=32
+LTCEOF
+        echo "  Written: $LTC_CONF_DIR/litecoin.conf (LAN RPC enabled)"
+    fi
+    echo "  RPC password: $LTC_RPC_PASS"
+    echo ""
+fi
+
+read -p "Generate example dogecoin.conf? [y/N]: " GEN_DOGE
+if [[ "$GEN_DOGE" =~ ^[Yy]$ ]]; then
+    read -p "Will Dogecoin Core run on this machine? [Y/n]: " DOGE_LOCAL
+    DOGE_LOCAL=${DOGE_LOCAL:-Y}
+
+    DOGE_RPC_PASS=$(openssl rand -hex 16)
+    DOGE_CONF_DIR="$HOME/.dogecoin"
+    mkdir -p "$DOGE_CONF_DIR"
+
+    if [[ "$DOGE_LOCAL" =~ ^[Yy]$ ]]; then
+        cat > "$DOGE_CONF_DIR/dogecoin.conf" <<DOGEEOF
+# Dogecoin Core — same machine as P2Pool
+server=1
+daemon=1
+
+rpcuser=dogecoinrpc
+rpcpassword=$DOGE_RPC_PASS
+rpcallowip=127.0.0.1
+rpcbind=127.0.0.1
+rpcport=22555
+
+port=22556
+listen=1
+maxconnections=50
+
+dbcache=2000
+par=4
+DOGEEOF
+        echo "  Written: $DOGE_CONF_DIR/dogecoin.conf (localhost-only RPC)"
+    else
+        cat > "$DOGE_CONF_DIR/dogecoin.conf" <<DOGEEOF
+# Dogecoin Core — separate machine, adapter/P2Pool on LAN
+server=1
+daemon=1
+
+rpcuser=dogecoinrpc
+rpcpassword=$DOGE_RPC_PASS
+rpcallowip=127.0.0.1
+rpcallowip=192.168.0.0/16
+rpcbind=0.0.0.0
+rpcport=22555
+
+port=22556
+bind=0.0.0.0
+listen=1
+maxconnections=50
+
+dbcache=2000
+par=4
+DOGEEOF
+        echo "  Written: $DOGE_CONF_DIR/dogecoin.conf (LAN RPC enabled)"
+    fi
+    echo "  RPC password: $DOGE_RPC_PASS"
+    echo ""
+fi
+
+# ------------------------------------------------------------------
+# 7. Quick start summary
+# ------------------------------------------------------------------
+echo ""
+echo "--- Quick Start ---"
+echo ""
+echo "  Litecoin only (no merged mining):"
+echo "    cd $REPO_DIR"
+echo "    $PYPY_BIN run_p2pool.py \\"
+echo "        --net litecoin \\"
+echo "        --coind-address 127.0.0.1 \\"
+echo "        --coind-rpc-port 9332 \\"
+echo "        --address YOUR_LTC_ADDRESS \\"
+echo "        litecoinrpc YOUR_LTC_RPC_PASSWORD"
+echo ""
+echo "  With Dogecoin merged mining (requires MM-Adapter):"
+echo "    cd $REPO_DIR"
+echo "    $PYPY_BIN run_p2pool.py \\"
+echo "        --net litecoin \\"
+echo "        --coind-address LTC_DAEMON_IP \\"
+echo "        --coind-rpc-port 9332 \\"
+echo "        --coind-p2p-port 9333 \\"
+echo "        --merged-coind-address 127.0.0.1 \\"
+echo "        --merged-coind-rpc-port 44556 \\"
+echo "        --merged-coind-p2p-port 22556 \\"
+echo "        --merged-coind-p2p-address DOGE_DAEMON_IP \\"
+echo "        --merged-coind-rpc-user dogecoinrpc \\"
+echo "        --merged-coind-rpc-password YOUR_DOGE_RPC_PASSWORD \\"
+echo "        --address YOUR_LEGACY_LTC_ADDRESS \\"
+echo "        --give-author 1 \\"
+echo "        --disable-upnp \\"
+echo "        litecoinrpc YOUR_LTC_RPC_PASSWORD"
+echo ""
+echo "  See README.md for full MM-Adapter setup."
+echo ""
+
+# ------------------------------------------------------------------
+# 8. Optional: Create systemd service
+# ------------------------------------------------------------------
 read -p "Create systemd service? [y/N]: " CREATE_SERVICE
 if [[ "$CREATE_SERVICE" =~ ^[Yy]$ ]]; then
+    read -p "Litecoin daemon IP [127.0.0.1]: " LTC_HOST
+    LTC_HOST=${LTC_HOST:-127.0.0.1}
     read -p "Litecoin RPC user [litecoinrpc]: " RPC_USER
     RPC_USER=${RPC_USER:-litecoinrpc}
     read -p "Litecoin RPC password: " RPC_PASS
@@ -100,7 +265,7 @@ User=$USER
 WorkingDirectory=$REPO_DIR
 ExecStart=$PYPY_BIN $REPO_DIR/run_p2pool.py \\
     --net litecoin \\
-    --coind-address 127.0.0.1 \\
+    --coind-address $LTC_HOST \\
     --coind-rpc-port 9332 \\
     --coind-p2p-port 9333 \\
     --address $PAYOUT_ADDR \\
