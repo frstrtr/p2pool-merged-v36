@@ -997,16 +997,13 @@ def run():
             # (We don't re-print here to avoid duplication)
     
     # Replace Twisted's default error observer with our filtered version
-    # First, stop the default observer from printing SSL errors
-    original_stderr_write = log.DefaultObserver.stderr.write
-    def filtered_stderr_write(data):
-        # Suppress SSL/OpenSSL traceback lines
-        if 'OpenSSL' in data or 'FIPS_mode' in data or '_openssl' in data:
+    # Monkey-patch DefaultObserver.emit to suppress entire SSL error events
+    _orig_default_emit = log.DefaultObserver.emit
+    def _filtered_default_emit(self_obs, eventDict):
+        if SSLErrorFilter.is_ssl_error(eventDict):
             return
-        if 'from cryptography' in data:
-            return
-        return original_stderr_write(data)
-    log.DefaultObserver.stderr.write = filtered_stderr_write
+        return _orig_default_emit(self_obs, eventDict)
+    log.DefaultObserver.emit = _filtered_default_emit
     
     # Install our SSL error filter as an observer
     log.addObserver(SSLErrorFilter().emit)
