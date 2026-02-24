@@ -29,12 +29,12 @@ try:
     if im64:
         bundle = bundle + 2
     sys.argv[1:] = ['py2exe']
-    setup(name='p2pool-dash',
+    setup(name='p2pool-merged-v36',
         version=version,
-        description='Peer-to-peer Dash mining pool',
+        description='Peer-to-peer Litecoin+Dogecoin merged mining pool',
         author='Forrest Voight',
         author_email='forrest@forre.st',
-        url='https://github.com/dashpay/p2pool-dash/',
+        url='https://github.com/frstrtr/p2pool-merged-v36/',
         data_files=[
             ('', ['README.md']),
 #            ("Microsoft.VC90.MFC", mfcfiles),
@@ -71,7 +71,7 @@ win = '32'
 if im64:
     win = '64'
 
-dir_name = 'p2pool_dash_win' + win + '_' + version
+dir_name = 'p2pool_ltc_win' + win + '_' + version
 
 if os.path.exists(dir_name):
     shutil.rmtree(dir_name)

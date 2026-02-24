@@ -2,7 +2,7 @@
 """
 Analyze coinbase space allocation with extranonce support
 
-Coinbase transaction structure in P2Pool-Dash:
+Coinbase transaction structure in P2Pool:
 1. Coinbase input script (share_data['coinbase']) - contains block height, merged mining data
 2. Coinbase outputs:
    - worker_tx: Multiple worker payouts (multi-payout feature)

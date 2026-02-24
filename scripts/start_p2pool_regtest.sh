@@ -1,5 +1,5 @@
 #!/bin/bash
-# P2Pool-Dash REGTEST start script for testing
+# P2Pool-LTC REGTEST start script for testing
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

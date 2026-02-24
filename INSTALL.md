@@ -30,7 +30,7 @@ Complete installation guide for P2Pool on Ubuntu/Debian systems with Litecoin (s
 - **22556**: Dogecoin P2P (incoming connections)
 - **22555**: Dogecoin RPC (localhost only)
 - **9327**: P2Pool Stratum (for miners)
-- **9338**: P2Pool P2P (for peer connections)
+- **9326**: P2Pool P2P (for peer connections)
 - **44556**: MM-Adapter RPC (internal, localhost)
 
 ---
@@ -568,7 +568,7 @@ pypy run_p2pool.py --net litecoin --bitcoind-address 127.0.0.1 --bitcoind-rpc-po
 ```bash
 sudo ufw allow 9333/tcp   # Litecoin P2P
 sudo ufw allow 22556/tcp  # Dogecoin P2P
-sudo ufw allow 9338/tcp   # P2Pool P2P
+sudo ufw allow 9326/tcp   # P2Pool P2P
 sudo ufw allow 9327/tcp   # Stratum (if mining remotely)
 sudo ufw enable
 ```

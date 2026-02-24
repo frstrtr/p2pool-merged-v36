@@ -1,5 +1,5 @@
 #!/bin/bash
-# P2Pool-Dash start script with auto-kill of existing instances
+# P2Pool-LTC start script with auto-kill of existing instances
 # Supports: foreground mode, background mode (--daemon), and SSH launching
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
