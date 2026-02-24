@@ -163,7 +163,16 @@ class Protocol(p2protocol.Protocol):
         ('best_share_hash', pack.PossiblyNoneType(0, pack.IntType(256))),
     ])
     def handle_version(self, version, services, addr_to, addr_from, nonce, sub_version, mode, best_share_hash):
-        print "Peer %s:%s says protocol version is %s, client version %s" % (addr_from['address'], addr_from['port'], version, sub_version)
+        # Throttle peer version logging: only log each unique peer IP once per 5 minutes
+        import time as _time
+        _peer_key = addr_from['address']
+        _now = _time.time()
+        if not hasattr(self.node, '_peer_version_log_times'):
+            self.node._peer_version_log_times = {}
+        _last = self.node._peer_version_log_times.get(_peer_key, 0)
+        if _now - _last >= 300:
+            self.node._peer_version_log_times[_peer_key] = _now
+            print "Peer %s:%s says protocol version is %s, client version %s" % (addr_from['address'], addr_from['port'], version, sub_version)
         if self.other_version is not None:
             # This can happen during simultaneous connection attempts - just disconnect, don't ban
             print 'Peer %s:%i sent duplicate version message, disconnecting (will not ban)' % self.addr
