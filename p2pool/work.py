@@ -2570,6 +2570,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         print
                                         merged_net_name = aux_work.get('merged_net_name', 'Unknown')
                                         merged_net_symbol = aux_work.get('merged_net_symbol', 'UNKNOWN')
+                                        merged_template = aux_work.get('template', {})
                                         print '### MERGED BLOCK FOUND! %s (%s) height=%d hash=%064x miner=%s txs=%d size=%d ###' % (
                                             merged_net_name, merged_net_symbol,
                                             merged_template.get('height', aux_work.get('height', 0)),
@@ -2578,7 +2579,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         print
                                         
                                         # Record merged block find
-                                        merged_template = aux_work.get('template', {})
                                         total_reward = merged_template.get('coinbasevalue', aux_work.get('coinbasevalue', 0))
                                         
                                         # Calculate miner's estimated payout from PPLNS shareholders
