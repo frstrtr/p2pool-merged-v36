@@ -389,13 +389,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 data = json.loads(msg.payload)
             except (ValueError, TypeError):
                 return None
-            # Normalize legacy org name in URLs
-            url = data.get('url', '')
-            if url:
-                url = url.replace('mining4people', 'frstrtr')
             return dict(
                 msg=data.get('msg', ''),
-                url=url,
+                url=data.get('url', ''),
                 urgency=data.get('urg', 'info'),
                 from_ver=data.get('from', ''),
                 to_ver=data.get('to', ''),
