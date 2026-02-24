@@ -46,7 +46,7 @@ def _atomic_write(filename, data):
         os.rename(filename + '.new', filename)
 
 def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Event(), static_dir=None,
-                 enable_miner_messages=False):
+                 enable_miner_messages=False, transition_message=None):
     node = wb.node
     start_time = time.time()
     
@@ -377,6 +377,25 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                             node.tracker, node.best_share_var.value, chain_len)
                     except Exception:
                         pass
+                # Load bootstrap blobs from data/<net>/bootstrap_messages/
+                if datadir_path:
+                    bootstrap_dir = os.path.join(datadir_path, 'bootstrap_messages')
+                    n = store.load_bootstrap_blobs(bootstrap_dir)
+                    if n > 0:
+                        print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bootstrap_dir))
+                # Load --transition-message CLI blob
+                if transition_message:
+                    blob_hex = transition_message
+                    # Support file path
+                    if os.path.isfile(blob_hex):
+                        try:
+                            with open(blob_hex, 'r') as f:
+                                blob_hex = f.read().strip()
+                        except Exception:
+                            pass
+                    n = store.load_blob_hex(blob_hex)
+                    if n > 0:
+                        print('Messaging: loaded %d message(s) from --transition-message' % n)
 
             from p2pool.share_messages import MSG_TRANSITION_SIGNAL
             signals = store.get_messages(
@@ -2695,6 +2714,24 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         print('Messaging: rebuilt %d messages from sharechain' % rebuilt)
                 except Exception:
                     pass
+            # Load bootstrap blobs from data/<net>/bootstrap_messages/
+            if datadir_path:
+                bootstrap_dir = os.path.join(datadir_path, 'bootstrap_messages')
+                n = store.load_bootstrap_blobs(bootstrap_dir)
+                if n > 0:
+                    print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bootstrap_dir))
+            # Load --transition-message CLI blob
+            if transition_message:
+                blob_hex = transition_message
+                if os.path.isfile(blob_hex):
+                    try:
+                        with open(blob_hex, 'r') as f:
+                            blob_hex = f.read().strip()
+                    except Exception:
+                        pass
+                n = store.load_blob_hex(blob_hex)
+                if n > 0:
+                    print('Messaging: loaded %d message(s) from --transition-message' % n)
         return store
     
     from p2pool.share_messages import MSG_EMERGENCY

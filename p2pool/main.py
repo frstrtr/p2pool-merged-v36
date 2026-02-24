@@ -425,7 +425,8 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                                bitcoind, args.share_rate,
                                my_pubkey_type=my_pubkey_type)
         web_root = web.get_web_root(wb, datadir_path, bitcoind_getinfo_var, static_dir=args.web_static,
-                                     enable_miner_messages=getattr(args, 'enable_miner_messages', False))
+                                     enable_miner_messages=getattr(args, 'enable_miner_messages', False),
+                                     transition_message=getattr(args, 'transition_message', None))
         caching_wb = worker_interface.CachingWorkerBridge(wb)
         worker_interface.WorkerInterface(caching_wb).attach_to(web_root, get_handler=lambda request: request.redirect('/static/'))
         web_serverfactory = server.Site(web_root)

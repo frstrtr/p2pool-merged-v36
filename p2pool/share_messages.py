@@ -1468,6 +1468,80 @@ class ShareMessageStore(object):
             pass
         return count
 
+    def load_blob_hex(self, hex_string):
+        """
+        Load a pre-built encrypted message blob from a hex string.
+
+        This is used for:
+          1. --transition-message CLI argument
+          2. Bootstrap blob files in data/<net>/bootstrap_messages/
+
+        The blob is decrypted using known authority pubkeys (same as
+        share message_data).  Only authority-encrypted blobs are accepted.
+        After decryption, each message's signature is verified against
+        the authority pubkey that encrypted the envelope, restoring
+        FLAG_PROTOCOL_AUTHORITY (which unpack() strips by default).
+
+        Returns number of messages loaded (0 if decryption fails or no
+        valid messages found).
+        """
+        try:
+            raw = hex_string.strip().decode('hex')
+        except (ValueError, TypeError):
+            return 0
+
+        messages, signing_key_info = unpack_share_messages(raw)
+        if not messages:
+            return 0
+
+        # Get the authority pubkey that successfully decrypted this envelope
+        authority_pubkey = signing_key_info.get('authority_pubkey') if signing_key_info else None
+
+        added = 0
+        for msg in messages:
+            # Bootstrap messages have no carrying share
+            msg.share_hash = None
+            msg.sender_address = 'bootstrap'
+            # Verify signature against the authority pubkey that encrypted
+            # this envelope.  This restores FLAG_PROTOCOL_AUTHORITY which
+            # unpack() strips (authority must be "earned" via verification).
+            if authority_pubkey and msg.has_signature:
+                msg.verify_authority_direct(authority_pubkey)
+            if self._add_message(msg):
+                added += 1
+        return added
+
+    def load_bootstrap_blobs(self, bootstrap_dir):
+        """
+        Scan a directory for .hex and .blob files and load each as a
+        pre-built encrypted message blob.
+
+        Expected location: data/<net>/bootstrap_messages/
+        Files should contain a single hex-encoded encrypted envelope per
+        file (as produced by scripts/create_transition_message.py).
+
+        Returns total number of messages loaded across all files.
+        """
+        if not bootstrap_dir or not os.path.isdir(bootstrap_dir):
+            return 0
+
+        total = 0
+        for fname in sorted(os.listdir(bootstrap_dir)):
+            if not (fname.endswith('.hex') or fname.endswith('.blob')):
+                continue
+            fpath = os.path.join(bootstrap_dir, fname)
+            try:
+                with open(fpath, 'r') as f:
+                    hex_data = f.read().strip()
+                if not hex_data:
+                    continue
+                n = self.load_blob_hex(hex_data)
+                if n > 0:
+                    total += n
+            except Exception:
+                continue
+        return total
+
     def get_messages(self, msg_type=None, sender=None, since=None,
                      verified_only=False, limit=50, apply_bans=True,
                      authority_only=False):
