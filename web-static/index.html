@@ -75,6 +75,7 @@
                     if (!vs.chain_ready) {
                         d3.select('#index-chain-maturity').style('display', 'block');
                         d3.select('#index-chain-bar').style('width', vs.chain_maturity + '%');
+                        d3.select('#index-chain-bar-label').text(d3.format('.1f')(vs.chain_maturity) + '%');
                         d3.select('#index-chain-progress-text').text(
                             vs.chain_height + ' / ' + vs.chain_length_required + 
                             ' (' + d3.format('.1f')(vs.chain_maturity) + '%) \u2014 need ' +
@@ -85,6 +86,7 @@
                     if (vs.status === 'propagating') {
                         d3.select('#index-propagation').style('display', 'block');
                         d3.select('#index-propagation-bar').style('width', vs.propagation_pct + '%');
+                        d3.select('#index-propagation-bar-label').text(d3.format('.1f')(vs.overall_v36_vote_pct) + '% V36');
                         var etaMin = Math.round(vs.time_to_window_seconds / 60);
                         var etaH = Math.floor(etaMin / 60); var etaM = etaMin % 60;
                         var etaStr = etaH > 0 ? etaH + 'h ' + etaM + 'm' : etaM + 'm';
@@ -98,6 +100,21 @@
                     var sigPct = vs.sampling_signaling;
                     var barPct = vs.overall_v36_vote_pct > sigPct ? vs.overall_v36_vote_pct : sigPct;
                     d3.select('#version-signaling-bar').style('width', Math.min(100, barPct) + '%');
+                    var idxSigLabel = barPct >= 15 ? d3.format('.1f')(barPct) + '%' : '';
+                    if (vs.overall_v36_vote_pct > sigPct + 0.1 && barPct >= 20) {
+                        idxSigLabel = d3.format('.1f')(vs.overall_v36_vote_pct) + '% chain / ' + d3.format('.1f')(sigPct) + '% window';
+                    }
+                    d3.select('#index-signaling-bar-label').text(idxSigLabel);
+                    if (barPct < 15) {
+                        d3.select('#index-signaling-bar-label')
+                            .style('right', 'auto').style('left', 'calc(100% + 6px)')
+                            .style('color', '#555').style('text-shadow', 'none')
+                            .text(d3.format('.1f')(barPct) + '%');
+                    } else {
+                        d3.select('#index-signaling-bar-label')
+                            .style('left', null).style('right', '6px')
+                            .style('color', '#fff').style('text-shadow', '0 1px 2px rgba(0,0,0,0.5)');
+                    }
                     var samplingStr;
                     if (vs.chain_ready) {
                         if (vs.overall_v36_vote_pct > sigPct + 0.1) {
@@ -449,19 +466,19 @@
             </div>
             <div id="index-chain-maturity" style="display:none; margin-top:8px;">
                 <div style="font-size:0.85em; color:#555;">Chain Maturity: <span id="index-chain-progress-text">-</span></div>
-                <div style="background:#ddd; height:12px; border-radius:6px; margin-top:4px; overflow:hidden;">
-                    <div id="index-chain-bar" style="height:100%; background:linear-gradient(90deg, #FFC107, #FF9800); width:0%; transition:width 0.5s;"></div>
+                <div style="background:#ddd; height:20px; border-radius:10px; margin-top:4px; overflow:hidden; position:relative;">
+                    <div id="index-chain-bar" style="height:100%; background:linear-gradient(90deg, #FFC107, #FF9800); width:0%; transition:width 0.5s; position:relative; border-radius:10px;"><span id="index-chain-bar-label" style="position:absolute; right:6px; top:50%; transform:translateY(-50%); font-size:0.72em; font-weight:700; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.5); white-space:nowrap;"></span></div>
                 </div>
             </div>
             <div id="index-propagation" style="display:none; margin-top:8px;">
                 <div style="font-size:0.85em; color:#555;"><span id="index-propagation-text">-</span></div>
-                <div style="background:#ddd; height:12px; border-radius:6px; margin-top:4px; overflow:hidden;">
-                    <div id="index-propagation-bar" style="height:100%; background:linear-gradient(90deg, #2196F3, #03A9F4); width:0%; transition:width 0.5s;"></div>
+                <div style="background:#ddd; height:20px; border-radius:10px; margin-top:4px; overflow:visible; position:relative;">
+                    <div id="index-propagation-bar" style="height:100%; background:linear-gradient(90deg, #2196F3, #03A9F4); width:0%; transition:width 0.5s; position:relative; border-radius:10px;"><span id="index-propagation-bar-label" style="position:absolute; right:6px; top:50%; transform:translateY(-50%); font-size:0.72em; font-weight:700; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.5); white-space:nowrap;"></span></div>
                 </div>
             </div>
             <div style="margin-top:8px; font-size:0.85em; color:#555;">Sampling Window: <span id="index-sampling-text">-</span></div>
-            <div style="background:#ddd; height:12px; border-radius:6px; margin-top:4px; overflow:hidden;">
-                <div id="version-signaling-bar" style="height:100%; background:linear-gradient(90deg, #6f42c1, #28a745); width:0%; transition:width 0.5s;"></div>
+            <div style="background:#ddd; height:20px; border-radius:10px; margin-top:4px; overflow:visible; position:relative;">
+                <div id="version-signaling-bar" style="height:100%; background:linear-gradient(90deg, #6f42c1, #28a745); width:0%; transition:width 0.5s; position:relative; border-radius:10px;"><span id="index-signaling-bar-label" style="position:absolute; right:6px; top:50%; transform:translateY(-50%); font-size:0.72em; font-weight:700; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.5); white-space:nowrap;"></span></div>
             </div>
             <div style="margin-top:8px;">
                 <div style="font-size:0.85em; color:#555;" id="index-status-message"></div>

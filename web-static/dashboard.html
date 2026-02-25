@@ -255,6 +255,33 @@
             background: linear-gradient(90deg, var(--primary) 0%, var(--success) 100%);
             border-radius: 12px;
             transition: width 0.5s ease;
+            position: relative;
+            min-width: 0;
+        }
+        
+        .bar-label {
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        /* When bar is too narrow, show label outside on the right */
+        .bar-label-outside {
+            position: absolute;
+            left: calc(100% + 6px);
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            pointer-events: none;
         }
         
         .signaling-threshold {
@@ -1187,7 +1214,7 @@
                         Chain Maturity: <span id="chain-maturity-text" style="color: #FFC107;">-</span>
                     </div>
                     <div class="signaling-bar-container">
-                        <div class="signaling-bar" id="chain-maturity-bar" style="width: 0%; background: linear-gradient(90deg, #FFC107, #FF9800);"></div>
+                        <div class="signaling-bar" id="chain-maturity-bar" style="width: 0%; background: linear-gradient(90deg, #FFC107, #FF9800);"><span class="bar-label" id="chain-maturity-bar-label"></span></div>
                     </div>
                 </div>
                 <!-- Propagation bar (shares aging toward sampling window) -->
@@ -1196,7 +1223,7 @@
                         Vote Propagation: <span id="propagation-text" style="color: #2196F3;">-</span>
                     </div>
                     <div class="signaling-bar-container">
-                        <div class="signaling-bar" id="propagation-bar" style="width: 0%; background: linear-gradient(90deg, #2196F3, #03A9F4);"></div>
+                        <div class="signaling-bar" id="propagation-bar" style="width: 0%; background: linear-gradient(90deg, #2196F3, #03A9F4);"><span class="bar-label" id="propagation-bar-label"></span></div>
                     </div>
                 </div>
                 <!-- Signaling bar (sampling window) - shown during VOTING -->
@@ -1204,8 +1231,8 @@
                     <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
                         Sampling Window Signaling: <span id="sampling-signaling-text" style="color: #4CAF50;">-</span>
                     </div>
-                    <div class="signaling-bar-container">
-                        <div class="signaling-bar" id="signaling-bar" style="width: 0%"></div>
+                    <div class="signaling-bar-container" style="margin-top: 20px;">
+                        <div class="signaling-bar" id="signaling-bar" style="width: 0%"><span class="bar-label" id="signaling-bar-label"></span></div>
                         <div class="signaling-threshold" style="left: 60%"><span>60%</span></div>
                         <div class="signaling-threshold" style="left: 95%"><span>95%</span></div>
                     </div>
@@ -1215,8 +1242,8 @@
                     <div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">
                         V36 Chain Fill: <span id="confirmation-text" style="color: #2196F3;">-</span>
                     </div>
-                    <div class="signaling-bar-container">
-                        <div class="signaling-bar" id="confirmation-bar" style="width: 0%; background: linear-gradient(90deg, #2196F3, #00BCD4);"></div>
+                    <div class="signaling-bar-container" style="margin-top: 20px;">
+                        <div class="signaling-bar" id="confirmation-bar" style="width: 0%; background: linear-gradient(90deg, #2196F3, #00BCD4);"><span class="bar-label" id="confirmation-bar-label"></span></div>
                         <div class="signaling-threshold" style="left: 50%"><span>50%</span></div>
                         <div class="signaling-threshold" style="left: 95%; border-color: #4CAF50;"><span style="color: #4CAF50;">95%</span></div>
                     </div>
@@ -1230,7 +1257,7 @@
                         Confirmation Countdown: <span id="countdown-text" style="color: #4CAF50;">-</span>
                     </div>
                     <div class="signaling-bar-container">
-                        <div class="signaling-bar" id="countdown-bar" style="width: 0%; background: linear-gradient(90deg, #4CAF50, #00E676);"></div>
+                        <div class="signaling-bar" id="countdown-bar" style="width: 0%; background: linear-gradient(90deg, #4CAF50, #00E676);"><span class="bar-label" id="countdown-bar-label"></span></div>
                     </div>
                     <div style="color: #666; font-size: 0.78em; margin-top: 4px; font-style: italic;">
                         All shares are V36 format. Counting 2× chain length (<span id="countdown-window-size">800</span> shares) of sustained ≥95% V36 — ensures the upgrade is irreversible before locking in.
@@ -2091,6 +2118,7 @@
                     if (!vs.chain_ready) {
                         d3.select('#chain-maturity-section').style('display', 'block');
                         d3.select('#chain-maturity-bar').style('width', vs.chain_maturity + '%');
+                        d3.select('#chain-maturity-bar-label').text(d3.format('.1f')(vs.chain_maturity) + '%');
                         d3.select('#chain-maturity-text').text(
                             vs.chain_height + ' / ' + vs.chain_length_required + 
                             ' (' + d3.format('.1f')(vs.chain_maturity) + '%) \u2014 need ' + 
@@ -2103,6 +2131,7 @@
                     if (vs.status === 'propagating') {
                         d3.select('#propagation-section').style('display', 'block');
                         d3.select('#propagation-bar').style('width', vs.propagation_pct + '%');
+                        d3.select('#propagation-bar-label').text(d3.format('.1f')(vs.overall_v36_vote_pct) + '% V36');
                         var etaMin = Math.round(vs.time_to_window_seconds / 60);
                         var etaH = Math.floor(etaMin / 60);
                         var etaM = etaMin % 60;
@@ -2141,6 +2170,7 @@
                             d3.select('#countdown-bar-section').style('display', 'block');
                             var countdownPct = confirmWindow > 0 ? Math.min(100, sharesSince * 100 / confirmWindow) : 0;
                             d3.select('#countdown-bar').style('width', countdownPct + '%');
+                            d3.select('#countdown-bar-label').text(d3.format('.1f')(countdownPct) + '%');
                             // ETA calculation
                             var sharesRemaining = Math.max(0, confirmWindow - sharesSince);
                             var etaSec = sharesRemaining * 10; // ~10 sec per share
@@ -2158,6 +2188,7 @@
                             d3.select('#countdown-bar-section').style('display', 'none');
                             var fillPct = Math.min(100, v36FormatPct);
                             d3.select('#confirmation-bar').style('width', fillPct + '%');
+                            d3.select('#confirmation-bar-label').text(d3.format('.1f')(v36FormatPct) + '% V36');
                             if (v36FormatPct >= 95) {
                                 d3.select('#confirmation-bar').style('background', 'linear-gradient(90deg, #4CAF50, #00E676)');
                             } else {
@@ -2178,6 +2209,16 @@
                         // Use full-chain V36 percentage for the bar width (more representative)
                         var barPct = vs.overall_v36_vote_pct > sigPct ? vs.overall_v36_vote_pct : sigPct;
                         d3.select('#signaling-bar').style('width', Math.min(100, barPct) + '%');
+                        var sigLabel = d3.format('.1f')(barPct) + '%';
+                        if (vs.overall_v36_vote_pct > sigPct + 0.1) {
+                            sigLabel = d3.format('.1f')(vs.overall_v36_vote_pct) + '% chain / ' + d3.format('.1f')(sigPct) + '% window';
+                        }
+                        var sigLabelEl = d3.select('#signaling-bar-label');
+                        if (barPct >= 15) {
+                            sigLabelEl.attr('class', 'bar-label').text(sigLabel);
+                        } else {
+                            sigLabelEl.attr('class', 'bar-label-outside').text(sigLabel);
+                        }
                         if (vs.chain_ready) {
                             var samplingText;
                             if (vs.overall_v36_vote_pct > sigPct + 0.1) {
