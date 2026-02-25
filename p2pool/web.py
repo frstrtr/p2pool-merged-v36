@@ -509,8 +509,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 try:
                     with open(blob_hex, 'r') as f:
                         blob_hex = f.read().strip()
-                except Exception:
-                    pass
+                except Exception as e:
+                    print('Messaging: ERROR reading --transition-message file %s: %s' % (transition_message, e))
             n = store.load_blob_hex(blob_hex)
             if n > 0:
                 print('Messaging: loaded %d message(s) from --transition-message' % n)
@@ -3006,7 +3006,80 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 return json.dumps({'error': str(e)})
     
     msg_root.putChild('bans', MsgBansResource())
-    
+
+    # GET /msg/diag — blob loading diagnostics (helps operators debug
+    # why transition messages may not be showing)
+    class MsgDiagResource(resource.Resource):
+        def render_GET(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            try:
+                store = _get_message_store()
+                # Directories that _load_blob_dirs scans
+                _script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                _module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                _search_bases = list(dict.fromkeys([_script_dir, _module_dir]))
+
+                scanned_dirs = []
+                # data dir blobs
+                if datadir_path:
+                    for dirname in ('bootstrap_messages', 'transition_messages', 'transitional_messages'):
+                        d = os.path.join(datadir_path, dirname)
+                        exists = os.path.isdir(d)
+                        files = []
+                        if exists:
+                            for fn in sorted(os.listdir(d)):
+                                if fn.endswith('.hex') or fn.endswith('.blob'):
+                                    fp = os.path.join(d, fn)
+                                    try:
+                                        readable = os.access(fp, os.R_OK)
+                                        size = os.path.getsize(fp)
+                                    except Exception:
+                                        readable = False
+                                        size = -1
+                                    files.append({'name': fn, 'readable': readable, 'size': size})
+                        scanned_dirs.append({'path': d, 'exists': exists, 'files': files})
+
+                # shipped dirs
+                for _base in _search_bases:
+                    for _dname in ('transition_messages', 'transitional_messages'):
+                        d = os.path.join(_base, _dname)
+                        exists = os.path.isdir(d)
+                        files = []
+                        if exists:
+                            for fn in sorted(os.listdir(d)):
+                                if fn.endswith('.hex') or fn.endswith('.blob'):
+                                    fp = os.path.join(d, fn)
+                                    try:
+                                        readable = os.access(fp, os.R_OK)
+                                        size = os.path.getsize(fp)
+                                    except Exception:
+                                        readable = False
+                                        size = -1
+                                    files.append({'name': fn, 'readable': readable, 'size': size})
+                        scanned_dirs.append({'path': d, 'exists': exists, 'files': files})
+
+                # Store state
+                msg_count = len(store.messages) if hasattr(store, 'messages') else 0
+                transition_msgs = [m.to_dict() for m in store.messages
+                                   if hasattr(m, 'msg_type') and m.msg_type == 0x20]
+
+                return json.dumps({
+                    'blob_scan_count': _blob_scan_count[0],
+                    'last_blob_scan': _last_blob_scan[0],
+                    'seconds_since_scan': int(time.time() - _last_blob_scan[0]) if _last_blob_scan[0] else None,
+                    'cli_transition_message': transition_message or None,
+                    'scanned_dirs': scanned_dirs,
+                    'store_message_count': msg_count,
+                    'transition_signals': transition_msgs,
+                    'enable_miner_messages': enable_miner_messages,
+                })
+            except Exception as e:
+                import traceback
+                return json.dumps({'error': str(e), 'traceback': traceback.format_exc()})
+
+    msg_root.putChild('diag', MsgDiagResource())
+
     # POST /msg/ban — add a ban
     # Body: {"signing_id": "hex"} or {"address": "addr"} or
     #       {"keyword": "word"} or {"type": 2}

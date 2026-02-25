@@ -1563,7 +1563,8 @@ class ShareMessageStore(object):
                 n = self.load_blob_hex(hex_data)
                 if n > 0:
                     total += n
-            except Exception:
+            except Exception as e:
+                print('Messaging: ERROR reading blob %s: %s' % (fpath, e))
                 continue
         return total
 
