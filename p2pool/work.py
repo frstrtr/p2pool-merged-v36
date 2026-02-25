@@ -1240,7 +1240,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         # chain_id 98 = Dogecoin (0x62)
                         merged_addresses['_validated'] = [{'chain_id': 98, 'script': script}]
                         validated = True
-                        print >>sys.stderr, '[MERGED] Validated explicit DOGE address: %s (chain: %s, script: %s)' % (merged_addr, chain_name, script.encode('hex'))
+                        # Only log first validation per address to avoid log spam on every work unit
+                        if not hasattr(self, '_merged_validated_addrs'):
+                            self._merged_validated_addrs = set()
+                        if merged_addr not in self._merged_validated_addrs:
+                            self._merged_validated_addrs.add(merged_addr)
+                            print >>sys.stderr, '[MERGED] Validated explicit DOGE address: %s (chain: %s, script: %s)' % (merged_addr, chain_name, script.encode('hex'))
                     except (ValueError, Exception) as e:
                         pass  # falls through to !validated branch below
                 
