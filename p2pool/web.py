@@ -377,18 +377,31 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                             node.tracker, node.best_share_var.value, chain_len)
                     except Exception:
                         pass
-                # Load bootstrap blobs from data/<net>/bootstrap_messages/
+                # Load bootstrap blobs from data/<net>/{bootstrap_messages,transition_messages,transitional_messages}/
                 if datadir_path:
-                    bootstrap_dir = os.path.join(datadir_path, 'bootstrap_messages')
-                    n = store.load_bootstrap_blobs(bootstrap_dir)
-                    if n > 0:
-                        print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bootstrap_dir))
+                    for dirname in ('bootstrap_messages', 'transition_messages', 'transitional_messages'):
+                        bdir = os.path.join(datadir_path, dirname)
+                        if os.path.isdir(bdir):
+                            n = store.load_bootstrap_blobs(bdir)
+                            if n > 0:
+                                print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bdir))
                 # Load shipped blobs from <repo>/transition_messages/
-                shipped_dir = os.path.join(os.path.dirname(sys.argv[0]), 'transition_messages')
-                if os.path.isdir(shipped_dir):
-                    n = store.load_bootstrap_blobs(shipped_dir)
-                    if n > 0:
-                        print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
+                # Try multiple base paths: sys.argv[0] dir and web.py's parent dir
+                _script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                _module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                _search_bases = list(dict.fromkeys([_script_dir, _module_dir]))  # dedupe, preserve order
+                _found_shipped = False
+                for _base in _search_bases:
+                    for _dname in ('transition_messages', 'transitional_messages'):
+                        shipped_dir = os.path.join(_base, _dname)
+                        if os.path.isdir(shipped_dir):
+                            n = store.load_bootstrap_blobs(shipped_dir)
+                            if n > 0:
+                                print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
+                                _found_shipped = True
+                if not _found_shipped:
+                    print('Messaging: no shipped blobs found (searched %s)' % ', '.join(
+                        os.path.join(b, d) for b in _search_bases for d in ('transition_messages', 'transitional_messages')))
                 # Load --transition-message CLI blob
                 if transition_message:
                     blob_hex = transition_message
@@ -424,7 +437,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 verified=msg.verified,
                 authority=msg.is_protocol_authority,
             )
-        except Exception:
+        except Exception as e:
+            print('Messaging: _get_transition_message error: %s' % e)
             return None
 
     def format_eta(seconds):
@@ -2720,18 +2734,31 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         print('Messaging: rebuilt %d messages from sharechain' % rebuilt)
                 except Exception:
                     pass
-            # Load bootstrap blobs from data/<net>/bootstrap_messages/
+            # Load bootstrap blobs from data/<net>/{bootstrap_messages,transition_messages,transitional_messages}/
             if datadir_path:
-                bootstrap_dir = os.path.join(datadir_path, 'bootstrap_messages')
-                n = store.load_bootstrap_blobs(bootstrap_dir)
-                if n > 0:
-                    print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bootstrap_dir))
+                for dirname in ('bootstrap_messages', 'transition_messages', 'transitional_messages'):
+                    bdir = os.path.join(datadir_path, dirname)
+                    if os.path.isdir(bdir):
+                        n = store.load_bootstrap_blobs(bdir)
+                        if n > 0:
+                            print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bdir))
             # Load shipped blobs from <repo>/transition_messages/
-            shipped_dir = os.path.join(os.path.dirname(sys.argv[0]), 'transition_messages')
-            if os.path.isdir(shipped_dir):
-                n = store.load_bootstrap_blobs(shipped_dir)
-                if n > 0:
-                    print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
+            # Try multiple base paths: sys.argv[0] dir and web.py's parent dir
+            _script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            _module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            _search_bases = list(dict.fromkeys([_script_dir, _module_dir]))  # dedupe, preserve order
+            _found_shipped = False
+            for _base in _search_bases:
+                for _dname in ('transition_messages', 'transitional_messages'):
+                    shipped_dir = os.path.join(_base, _dname)
+                    if os.path.isdir(shipped_dir):
+                        n = store.load_bootstrap_blobs(shipped_dir)
+                        if n > 0:
+                            print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
+                            _found_shipped = True
+            if not _found_shipped:
+                print('Messaging: no shipped blobs found (searched %s)' % ', '.join(
+                    os.path.join(b, d) for b in _search_bases for d in ('transition_messages', 'transitional_messages')))
             # Load --transition-message CLI blob
             if transition_message:
                 blob_hex = transition_message

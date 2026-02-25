@@ -113,6 +113,31 @@
                         }
                         d3.select('#index-chain-types').text(parts.join(' | '));
                     }
+                    // Transition message from share messaging system
+                    var tmsg = vs.transition_message;
+                    if (tmsg && tmsg.msg) {
+                        d3.select('#index-transition-msg').style('display', 'block');
+                        d3.select('#index-tmsg-text').text(tmsg.msg);
+                        var label = 'Transition Signal';
+                        if (tmsg.from_ver && tmsg.to_ver) {
+                            label = 'V' + tmsg.from_ver + ' → V' + tmsg.to_ver + ' Transition Signal';
+                        }
+                        d3.select('#index-tmsg-label').text(label);
+                        var urg = tmsg.urgency || 'info';
+                        var urgColors = { 'info': '#2196F3', 'recommended': '#FF9800', 'required': '#F44336' };
+                        var urgBorder = urgColors[urg] || '#2196F3';
+                        d3.select('#index-transition-msg').style('border-left-color', urgBorder);
+                        d3.select('#index-tmsg-label').style('color', urgBorder);
+                        d3.select('#index-tmsg-urgency').text(urg.toUpperCase()).style('color', urgBorder);
+                        if (tmsg.url) {
+                            d3.select('#index-tmsg-url-row').style('display', 'block');
+                            d3.select('#index-tmsg-url').attr('href', tmsg.url).text(tmsg.url);
+                        } else {
+                            d3.select('#index-tmsg-url-row').style('display', 'none');
+                        }
+                    } else {
+                        d3.select('#index-transition-msg').style('display', 'none');
+                    }
                 });
                 
                 var time_to_share = local_stats.attempts_to_share/local;
@@ -421,6 +446,17 @@
                 <div style="font-size:0.8em; color:#888; margin-top:4px;">
                     Current: <span id="index-current-type">-</span>
                     &nbsp;|&nbsp; Chain: <span id="index-chain-types">-</span>
+                </div>
+            </div>
+            <!-- Transition Message -->
+            <div id="index-transition-msg" style="display:none; margin-top:8px; padding:8px 12px; border-left:3px solid #2196F3; background:#e8f4fd; border-radius:3px;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <strong id="index-tmsg-label" style="font-size:0.9em; color:#2196F3;">Transition Signal</strong>
+                    <span id="index-tmsg-urgency" style="font-size:0.75em; font-weight:bold; color:#2196F3;">INFO</span>
+                </div>
+                <div id="index-tmsg-text" style="font-size:0.85em; color:#333; margin-top:4px;"></div>
+                <div id="index-tmsg-url-row" style="display:none; margin-top:4px;">
+                    <a id="index-tmsg-url" href="#" target="_blank" rel="noopener" style="font-size:0.8em; color:#1976D2;">Get latest release</a>
                 </div>
             </div>
         </div>
