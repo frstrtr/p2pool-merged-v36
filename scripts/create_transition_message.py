@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-P2Pool V36 Transition Message Creator
+P2Pool V36 Authority Message Creator
 ======================================
 
 Standalone Python 3 utility for AUTHORITY KEY HOLDERS to create encrypted and
-signed transition messages for embedding in V36 shares.
+signed messages for the p2pool share messaging system.
+
+Supports:
+  - Transition signals (MSG_TRANSITION_SIGNAL 0x20) — protocol upgrade alerts
+  - Announcements (MSG_POOL_ANNOUNCE 0x03) — general authority announcements
+  - Emergency alerts (MSG_EMERGENCY 0x10) — critical alerts
 
 Messages are:
   1. SIGNED with an ECDSA secp256k1 key (proving authorship)
@@ -16,7 +21,7 @@ Only messages signed+encrypted by a COMBINED_DONATION_SCRIPT key holder
 WORKFLOW:
   1. Authority key holder creates the message (this tool) → gets a HEX STRING
   2. Authority distributes the hex string (GitHub release, website, etc.)
-  3. Node operators paste the hex string into --transition-message
+  3. Node operators paste the hex string into --transition-message or POST /msg/load_blob
   4. No private key is needed on operator nodes!
 
 USAGE (authority key holder):
@@ -83,6 +88,8 @@ DONATION_AUTHORITY_PUBKEYS = frozenset([
     DONATION_PUBKEY_FORRESTV, DONATION_PUBKEY_MAINTAINER])
 
 # Message type
+MSG_POOL_ANNOUNCE = 0x03
+MSG_EMERGENCY = 0x10
 MSG_TRANSITION_SIGNAL = 0x20
 
 # Message flags
@@ -281,6 +288,29 @@ def build_transition_signal(from_ver: str, to_ver: str, msg_text: str,
     return encoded
 
 
+def build_announcement_payload(msg_text: str, urgency: str = 'info',
+                                url: str = None) -> bytes:
+    """
+    Build a POOL_ANNOUNCE or EMERGENCY JSON payload.
+    Returns compact JSON bytes.
+    """
+    assert urgency in ('info', 'recommended', 'required', 'alert'), \
+        "urgency must be 'info', 'recommended', 'required', or 'alert'"
+
+    payload = {
+        'msg': msg_text,
+        'urg': urgency,
+    }
+    if url:
+        payload['url'] = url
+
+    encoded = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    if len(encoded) > MAX_MESSAGE_PAYLOAD:
+        raise ValueError(
+            f'Payload too large: {len(encoded)} > {MAX_MESSAGE_PAYLOAD} bytes')
+    return encoded
+
+
 def create_signed_encrypted_message(privkey_bytes: bytes,
                                     from_ver: str, to_ver: str,
                                     msg_text: str, urgency: str,
@@ -327,6 +357,46 @@ def create_signed_encrypted_message(privkey_bytes: bytes,
     inner = struct.pack('<BBBB', 1, 0, 1, 0) + packed_msg
 
     # 7. Encrypt with authority pubkey
+    encrypted = encrypt_message_data(inner, compressed_pubkey)
+
+    return encrypted, compressed_pubkey, ts, payload, signature
+
+
+def create_announcement_blob(privkey_bytes: bytes, msg_text: str,
+                             urgency: str = 'info', url: str = None,
+                             is_emergency: bool = False):
+    """
+    Create a signed+encrypted authority announcement or alert blob.
+
+    Returns (encrypted_bytes, pubkey, timestamp, payload, signature).
+    """
+    compressed_pubkey = derive_compressed_pubkey(privkey_bytes)
+    if compressed_pubkey not in DONATION_AUTHORITY_PUBKEYS:
+        raise ValueError(
+            f'Private key does not correspond to a COMBINED_DONATION_SCRIPT '
+            f'authority key.\n'
+            f'  Derived: {compressed_pubkey.hex()}\n'
+            f'  Expected one of:\n'
+            f'    forrestv:   {DONATION_PUBKEY_FORRESTV.hex()}\n'
+            f'    maintainer: {DONATION_PUBKEY_MAINTAINER.hex()}')
+
+    msg_type = MSG_EMERGENCY if is_emergency else MSG_POOL_ANNOUNCE
+    payload = build_announcement_payload(msg_text, urgency, url)
+
+    ts = int(time.time())
+    flags = FLAG_HAS_SIGNATURE | FLAG_BROADCAST | FLAG_PERSISTENT | FLAG_PROTOCOL_AUTHORITY
+    msg_hash = message_hash(msg_type, flags, ts, payload)
+    signature = ecdsa_sign(privkey_bytes, msg_hash)
+
+    if not ecdsa_verify(compressed_pubkey, msg_hash, signature):
+        raise RuntimeError('Self-verification failed')
+
+    packed_msg = pack_message(
+        msg_type, flags, ts, payload, signature,
+        signing_id=b'\x00' * 20
+    )
+
+    inner = struct.pack('<BBBB', 1, 0, 1, 0) + packed_msg
     encrypted = encrypt_message_data(inner, compressed_pubkey)
 
     return encrypted, compressed_pubkey, ts, payload, signature
@@ -597,8 +667,13 @@ def verify_message_file(input_path: str) -> None:
         offset += sig_len
 
         print(f'\n--- Message {i + 1} ---')
+        _type_names = {
+            MSG_POOL_ANNOUNCE: 'POOL_ANNOUNCE',
+            MSG_EMERGENCY: 'EMERGENCY',
+            MSG_TRANSITION_SIGNAL: 'TRANSITION_SIGNAL',
+        }
         print(f'  Type: 0x{msg_type:02x}'
-              f' ({"TRANSITION_SIGNAL" if msg_type == MSG_TRANSITION_SIGNAL else "unknown"})')
+              f' ({_type_names.get(msg_type, "unknown")})')
         print(f'  Flags: 0x{flags:02x}')
         print(f'  Timestamp: {timestamp}'
               f' ({time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(timestamp))} UTC)')
@@ -611,10 +686,11 @@ def verify_message_file(input_path: str) -> None:
         valid = ecdsa_verify(authority_pubkey, msg_h, signature)
         print(f'  Signature valid: {valid}')
 
-        if msg_type == MSG_TRANSITION_SIGNAL:
+        if msg_type in (MSG_TRANSITION_SIGNAL, MSG_POOL_ANNOUNCE, MSG_EMERGENCY):
             try:
                 j = json.loads(payload)
-                print(f'  Transition: v{j.get("from")} → v{j.get("to")}')
+                if msg_type == MSG_TRANSITION_SIGNAL:
+                    print(f'  Transition: v{j.get("from")} → v{j.get("to")}')
                 print(f'  Message: {j.get("msg")}')
                 print(f'  Urgency: {j.get("urg")}')
                 if 'url' in j:
@@ -635,9 +711,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 EXAMPLES:
-  # AUTHORITY: Create message with hex private key
+  # AUTHORITY: Create transition message with hex private key
   %(prog)s create --privkey <64-hex> \\
       --from 36 --to 37 --msg "Upgrade to V37" --urgency recommended
+
+  # AUTHORITY: Create announcement (shown on all dashboards)
+  %(prog)s announce --privkey <64-hex> \\
+      --msg "Maintenance window: Feb 28 00:00-02:00 UTC" --urgency info
+
+  # AUTHORITY: Create emergency alert
+  %(prog)s announce --privkey <64-hex> --emergency \\
+      --msg "Critical bug — upgrade immediately" --urgency required \\
+      --url "https://github.com/frstrtr/p2pool-merged-v36/releases"
 
   # AUTHORITY: Create message with key file
   %(prog)s create --privkey-file key.hex \\
@@ -716,6 +801,35 @@ AUTHORITY KEYS:
         'verify', help='Verify an existing encrypted message (hex string or file)')
     verify_parser.add_argument('--file', type=str, required=True,
                                help='Hex string, hex file path, or binary file path')
+
+    # --- announce command ---
+    announce_parser = subparsers.add_parser(
+        'announce', help='Create a signed+encrypted authority announcement')
+
+    ann_key_group = announce_parser.add_mutually_exclusive_group(required=True)
+    ann_key_group.add_argument('--privkey', type=str,
+                               help='Hex-encoded 32-byte private key')
+    ann_key_group.add_argument('--privkey-file', type=str,
+                               help='Path to file containing hex private key')
+    ann_key_group.add_argument('--seed-phrase', type=str,
+                               help='BIP39 mnemonic seed phrase')
+    ann_key_group.add_argument('--keystore', type=str,
+                               help='Path to encrypted keystore JSON file')
+
+    announce_parser.add_argument('--derivation-path', type=str,
+                                 default="m/44'/2'/0'/0/0",
+                                 help="BIP32 derivation path")
+    announce_parser.add_argument('--msg', type=str, required=True,
+                                 help='Announcement text')
+    announce_parser.add_argument('--urgency', type=str, default='info',
+                                 choices=['info', 'recommended', 'required', 'alert'],
+                                 help='Urgency level (default: info)')
+    announce_parser.add_argument('--url', type=str, default=None,
+                                 help='Optional URL')
+    announce_parser.add_argument('--emergency', action='store_true',
+                                 help='Create as MSG_EMERGENCY (0x10) instead of MSG_POOL_ANNOUNCE (0x03)')
+    announce_parser.add_argument('--output', '-o', type=str, default=None,
+                                 help='Output file base name')
 
     args = parser.parse_args()
 
@@ -839,6 +953,77 @@ AUTHORITY KEYS:
         print(f'    --transition-message {hex_path}')
 
         # Clear privkey from memory
+        privkey = b'\x00' * 32
+        del privkey
+
+    # ---- ANNOUNCE ----
+    if args.command == 'announce':
+        # Load private key
+        if args.privkey:
+            privkey = load_privkey_hex(args.privkey)
+        elif args.privkey_file:
+            privkey = load_privkey_file(args.privkey_file)
+        elif args.seed_phrase:
+            privkey = load_privkey_from_seed(
+                args.seed_phrase, args.derivation_path)
+        elif args.keystore:
+            privkey = load_privkey_from_keystore(args.keystore)
+        else:
+            print('ERROR: No key source specified', file=sys.stderr)
+            sys.exit(1)
+
+        pubkey = derive_compressed_pubkey(privkey)
+        if pubkey == DONATION_PUBKEY_FORRESTV:
+            key_name = 'forrestv'
+        elif pubkey == DONATION_PUBKEY_MAINTAINER:
+            key_name = 'maintainer'
+        else:
+            print('ERROR: Derived pubkey is NOT a COMBINED_DONATION_SCRIPT '
+                  'authority key.', file=sys.stderr)
+            sys.exit(1)
+
+        msg_type_name = 'EMERGENCY' if args.emergency else 'ANNOUNCEMENT'
+        print(f'Authority key: {key_name}')
+        print(f'Message type:  {msg_type_name}')
+        print()
+
+        encrypted, _, ts, payload, signature = create_announcement_blob(
+            privkey,
+            msg_text=args.msg,
+            urgency=args.urgency,
+            url=args.url,
+            is_emergency=args.emergency,
+        )
+
+        base_name = args.output or f'announcement_{int(ts)}'
+        hex_path = base_name + '.hex'
+        hex_string = encrypted.hex()
+
+        with open(hex_path, 'w') as f:
+            f.write(hex_string + '\n')
+
+        print(f'{msg_type_name} created successfully!')
+        print()
+        print(f'  Message:    {args.msg}')
+        print(f'  Urgency:    {args.urgency}')
+        if args.url:
+            print(f'  URL:        {args.url}')
+        print(f'  Timestamp:  {time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(ts))}')
+        print(f'  Authority:  {key_name}')
+        print(f'  Size:       {len(encrypted)} bytes')
+        print()
+        print(f'={""*71}')
+        print(f'HEX STRING (load via /msg/load_blob or --transition-message):')
+        print(f'={""*71}')
+        print(hex_string)
+        print(f'={""*71}')
+        print()
+        print(f'Saved to: {hex_path}')
+        print()
+        print(f'Load at runtime: curl -X POST http://localhost:9327/msg/load_blob \\')
+        print(f'  -H "Content-Type: application/json" \\')
+        print(f'  -d \'{{"blob_hex": "{hex_string[:40]}..."}}\'')
+
         privkey = b'\x00' * 32
         del privkey
 

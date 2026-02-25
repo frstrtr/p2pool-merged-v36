@@ -407,8 +407,56 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             auto_ratchet=ratchet_info,
             # Transition message from share messaging system
             transition_message=_get_transition_message(),
+            # Authority announcements (non-transition, always shown)
+            authority_announcements=_get_authority_announcements(),
         )
     
+    def _get_authority_announcements():
+        """Get authority announcements and alerts (non-transition messages).
+        
+        Returns a list of dicts with text, type, urgency, timestamp, etc.
+        These are always shown on the dashboard regardless of transition state.
+        Includes MSG_POOL_ANNOUNCE (0x03), MSG_EMERGENCY (0x10), and other
+        authority messages that are NOT MSG_TRANSITION_SIGNAL.
+        """
+        try:
+            store = getattr(node, '_message_store', None)
+            if store is None:
+                return []
+            from p2pool.share_messages import MSG_TRANSITION_SIGNAL
+            # Get all authority messages, exclude transition signals
+            msgs = store.get_messages(authority_only=True, limit=20)
+            msgs = [m for m in msgs if m.msg_type != MSG_TRANSITION_SIGNAL]
+            if not msgs:
+                return []
+            result = []
+            for msg in msgs[:10]:
+                entry = dict(
+                    type=msg.type_name,
+                    type_id=msg.msg_type,
+                    timestamp=msg.timestamp,
+                    age=int(msg.age),
+                    verified=msg.verified,
+                    authority=msg.is_protocol_authority,
+                )
+                # Text-based messages (POOL_ANNOUNCE, EMERGENCY)
+                if hasattr(msg, 'payload') and msg.payload:
+                    try:
+                        data = json.loads(msg.payload)
+                        entry['text'] = data.get('msg', data.get('text', ''))
+                        entry['urgency'] = data.get('urg', data.get('urgency', 'info'))
+                        entry['url'] = data.get('url', '')
+                    except (ValueError, TypeError):
+                        try:
+                            entry['text'] = msg.payload.decode('utf-8')
+                        except (UnicodeDecodeError, AttributeError):
+                            entry['text'] = ''
+                        entry['urgency'] = 'info'
+                result.append(entry)
+            return result
+        except Exception:
+            return []
+
     def _get_transition_message():
         """Extract the latest TRANSITION_SIGNAL from the share messaging system.
         

@@ -1275,6 +1275,8 @@
                         <a id="transition-msg-url" href="#" target="_blank" rel="noopener" style="color: #4FC3F7; font-size: 0.85em; text-decoration: underline;">Get latest release →</a>
                     </div>
                 </div>
+                <!-- Authority announcements (shown independent of transition state) -->
+                <div id="authority-announcements-section" style="display: none; margin-top: 12px;"></div>
                 <div class="signaling-stats">
                     <span class="signaling-message" id="signaling-message" style="font-size: 0.9em;"></span>
                 </div>
@@ -2278,6 +2280,66 @@
                         }
                     } else {
                         d3.select('#transition-message-section').style('display', 'none');
+                    }
+                    
+                    // Update authority announcements (shown independent of transition)
+                    var announcements = vs.authority_announcements || [];
+                    var announcementsDiv = d3.select('#authority-announcements-section');
+                    announcementsDiv.selectAll('*').remove();
+                    if (announcements.length > 0) {
+                        announcementsDiv.style('display', 'block');
+                        var urgStyles = {
+                            'info': { bg: 'rgba(33, 150, 243, 0.08)', border: '#2196F3', fg: '#2196F3', icon: '\uD83D\uDCE2' },
+                            'recommended': { bg: 'rgba(255, 152, 0, 0.08)', border: '#FF9800', fg: '#FF9800', icon: '\u26A0\uFE0F' },
+                            'required': { bg: 'rgba(244, 67, 54, 0.08)', border: '#F44336', fg: '#F44336', icon: '\uD83D\uDEA8' },
+                            'alert': { bg: 'rgba(244, 67, 54, 0.08)', border: '#F44336', fg: '#F44336', icon: '\uD83D\uDEA8' }
+                        };
+                        announcements.forEach(function(ann) {
+                            if (!ann.text) return;
+                            var urg = ann.urgency || 'info';
+                            var style = urgStyles[urg] || urgStyles['info'];
+                            if (ann.type_id === 16) { style = urgStyles['alert']; urg = 'alert'; } // MSG_EMERGENCY=0x10
+                            var card = announcementsDiv.append('div')
+                                .style('padding', '10px 14px')
+                                .style('border-radius', '6px')
+                                .style('border-left', '4px solid ' + style.border)
+                                .style('background', style.bg)
+                                .style('margin-bottom', '8px');
+                            var header = card.append('div')
+                                .style('display', 'flex').style('align-items', 'center')
+                                .style('gap', '8px').style('margin-bottom', '4px');
+                            header.append('span').style('font-size', '1.1em').text(style.icon);
+                            var typeLabel = ann.type || 'Announcement';
+                            header.append('span')
+                                .style('font-weight', '600').style('font-size', '0.9em')
+                                .style('color', style.fg).text(typeLabel);
+                            header.append('span')
+                                .style('font-size', '0.75em').style('padding', '1px 8px')
+                                .style('border-radius', '10px')
+                                .style('background', style.bg).style('color', style.fg)
+                                .text(urg.toUpperCase());
+                            if (ann.age != null) {
+                                var ageText = ann.age < 3600 ? Math.floor(ann.age/60) + 'm ago' :
+                                              ann.age < 86400 ? Math.floor(ann.age/3600) + 'h ago' :
+                                              Math.floor(ann.age/86400) + 'd ago';
+                                header.append('span')
+                                    .style('font-size', '0.72em').style('color', '#888')
+                                    .style('margin-left', 'auto').text(ageText);
+                            }
+                            card.append('div')
+                                .style('color', '#ddd').style('font-size', '0.88em')
+                                .style('line-height', '1.4').text(ann.text);
+                            if (ann.url) {
+                                card.append('div').style('margin-top', '6px')
+                                    .append('a').attr('href', ann.url)
+                                    .attr('target', '_blank').attr('rel', 'noopener')
+                                    .style('color', '#4FC3F7').style('font-size', '0.85em')
+                                    .style('text-decoration', 'underline')
+                                    .text(ann.url + ' \u2192');
+                            }
+                        });
+                    } else {
+                        announcementsDiv.style('display', 'none');
                     }
                     
                     // Update version breakdown — show FULL CHAIN desired_version votes
