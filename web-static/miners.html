@@ -672,8 +672,16 @@
                 // Fetch stratum_stats to get ONLY real connected miners
                 d3.json('../stratum_stats', function(stratum_stats) {
                     // Extract base address helper
+                    // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
                     function extractAddress(workerName) {
-                        return workerName.split('+')[0].split('/')[0].split('.')[0].split('_')[0];
+                        return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
+                    }
+
+                    // Extract merged mining (DOGE) address from worker name
+                    function extractMergedAddress(workerName) {
+                        var parts = workerName.split(',');
+                        if (parts.length < 2) return null;
+                        return parts[1].split('.')[0].split('+')[0].split('/')[0];
                     }
                     
                     // Group workers by base address - use stratum_stats as source
@@ -683,6 +691,7 @@
                     for (var workerName in stratumWorkers) {
                         var workerData = stratumWorkers[workerName];
                         var baseAddress = extractAddress(workerName);
+                        var mergedAddr = extractMergedAddress(workerName);
                         
                         // Get difficulty from connection_difficulties
                         var difficulty = 0;
@@ -706,6 +715,7 @@
                         if (!minerGroups[baseAddress]) {
                             minerGroups[baseAddress] = {
                                 address: baseAddress,
+                                mergedAddress: null,
                                 workers: [],
                                 totalHashrate: 0,
                                 totalDoa: 0,
@@ -713,6 +723,9 @@
                                 lastSeen: 0,
                                 totalConnections: 0
                             };
+                        }
+                        if (mergedAddr && !minerGroups[baseAddress].mergedAddress) {
+                            minerGroups[baseAddress].mergedAddress = mergedAddr;
                         }
                         
                         minerGroups[baseAddress].workers.push({
@@ -839,6 +852,13 @@
                     .attr('target', '_blank')
                     .attr('style', 'margin-left: 10px; font-size: 0.8rem;')
                     .text('↗');
+                
+                // Show merged mining (DOGE) address if present
+                if (miner.mergedAddress) {
+                    header.append('div')
+                        .attr('style', 'font-size: 0.8rem; color: #c3a634; margin-top: 4px; font-family: "Courier New", monospace;')
+                        .html('🐕 <a href="https://dogechain.info/address/' + miner.mergedAddress + '" target="_blank" style="color: #c3a634; text-decoration: none;">' + miner.mergedAddress + '</a> <a href="https://dogechain.info/address/' + miner.mergedAddress + '" target="_blank" style="margin-left: 5px; font-size: 0.7rem; color: #c3a634;">↗</a>');
+                }
                 
                 // Worker count badge
                 if (miner.workers.length > 1) {
@@ -989,9 +1009,10 @@
                 tbody.innerHTML = '';
                 
                 // Helper to extract base address
+                // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
                 function extractAddress(workerName) {
                     if (!workerName) return '-';
-                    return workerName.split('+')[0].split('/')[0].split('.')[0].split('_')[0];
+                    return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
                 }
                 
                 displayBlocks.forEach(function(block) {
@@ -1086,9 +1107,10 @@
                 };
                 
                 // Helper to extract base address
+                // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
                 function extractAddress(workerName) {
                     if (!workerName) return '-';
-                    return workerName.split('+')[0].split('/')[0].split('.')[0].split('_')[0];
+                    return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
                 }
                 
                 var tbody = document.getElementById('merged_blocks_tbody');

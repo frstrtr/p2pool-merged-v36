@@ -1749,6 +1749,13 @@
                 return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
             }
             
+            // Extract merged mining (DOGE) address from worker name
+            function extractMergedAddress(workerName) {
+                var parts = workerName.split(',');
+                if (parts.length < 2) return null;
+                return parts[1].split('.')[0].split('+')[0].split('/')[0];
+            }
+            
             // Estimate hashrate from difficulty: hashrate = difficulty * DUMB_SCRYPT_DIFF / target_seconds
             function estimateHashrate(difficulty) {
                 if (difficulty <= 0) return 0;
@@ -1765,6 +1772,7 @@
                 for (var workerName in stratumWorkers) {
                     var workerData = stratumWorkers[workerName];
                     var baseAddress = extractAddress(workerName);
+                    var mergedAddr = extractMergedAddress(workerName);
                     
                     // Get difficulty from connection_difficulties array (use first/current difficulty)
                     var difficulty = 0;
@@ -1789,6 +1797,7 @@
                     if (!minerGroups[baseAddress]) {
                         minerGroups[baseAddress] = {
                             address: baseAddress,
+                            mergedAddress: null,
                             workers: [],
                             totalHashrate: 0,
                             totalEstimatedHashrate: 0,
@@ -1798,6 +1807,9 @@
                             lastSeen: 0,
                             hasEstimatedHashrate: false
                         };
+                    }
+                    if (mergedAddr && !minerGroups[baseAddress].mergedAddress) {
+                        minerGroups[baseAddress].mergedAddress = mergedAddr;
                     }
                     
                     minerGroups[baseAddress].workers.push({
@@ -1900,6 +1912,11 @@
                         .attr('href', 'miner.html?address=' + miner.address)
                         .attr('onclick', 'event.stopPropagation()')
                         .text(miner.address);
+                    if (miner.mergedAddress) {
+                        addressCell.append('div')
+                            .attr('style', 'font-size: 0.7rem; color: #c3a634; margin-top: 2px; margin-left: 20px;')
+                            .html('🐕 <a href="https://dogechain.info/address/' + miner.mergedAddress + '" target="_blank" onclick="event.stopPropagation()" style="color: #c3a634; text-decoration: none;">' + miner.mergedAddress + '</a>');
+                    }
                     if (miner.workers.length > 1) {
                         addressCell.append('span')
                             .attr('class', 'worker-count-badge')

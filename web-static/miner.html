@@ -823,6 +823,18 @@
                     mergedGrid.style.display = 'grid';
                     mergedGrid.innerHTML = '';
                     
+                    // Show merged address(es) in the header
+                    var headerDiv = document.querySelector('.miner-header');
+                    stats.merged_payouts.forEach(function(mp) {
+                        if (mp.address) {
+                            var mergedAddrDiv = document.createElement('div');
+                            mergedAddrDiv.style.cssText = 'font-family: "Courier New", monospace; font-size: 0.9rem; color: #c3a634; margin-top: 4px;';
+                            mergedAddrDiv.innerHTML = '🐕 <a href="https://dogechain.info/address/' + mp.address + '" target="_blank" style="color: #c3a634; text-decoration: none;">' + mp.address + '</a>' +
+                                ' <span style="font-size: 0.75rem; color: #8888a0;">(' + (mp.symbol || 'DOGE') + ' merged mining)</span>';
+                            headerDiv.insertBefore(mergedAddrDiv, headerDiv.querySelector('.miner-status'));
+                        }
+                    });
+                    
                     stats.merged_payouts.forEach(function(mp) {
                         var card = document.createElement('div');
                         card.className = 'stat-card';
@@ -852,8 +864,9 @@
                         var count = 0;
                         
                         // Helper to extract base address
+                        // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
                         function extractBaseAddress(workerName) {
-                            return workerName.split('+')[0].split('/')[0].split('.')[0].split('_')[0];
+                            return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
                         }
                         
                         graph_data.forEach(function(point) {
@@ -1102,8 +1115,9 @@
             const doaData = [];
             
             // Helper to extract base address from worker name
+            // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
             function extractBaseAddress(workerName) {
-                return workerName.split('+')[0].split('/')[0].split('.')[0].split('_')[0];
+                return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
             }
             
             for (let i = 0; i < data.length; i++) {
