@@ -156,7 +156,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         overall_v36_shares = 0       # shares with VERSION >= 36 (actual format)
         overall_total = 0            # total shares scanned
         full_chain_desired = {}      # desired_version -> count (active chain, unweighted)
-        propagation_target = chain_length * 9 // 10  # 7776 for LTC
+        propagation_target = chain_length  # 8640 for LTC — full chain length
         v36_contiguous_from_tip = 0  # consecutive V36 votes from tip
         deepest_v36_pos = 0          # deepest position where V36 vote exists
         _contiguous = True

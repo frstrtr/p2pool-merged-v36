@@ -86,7 +86,7 @@ happens when the thresholds are met.
 | **Share VERSION** | The binary format of the share (V35 or V36). Determines what fields exist |
 | **desired_version** | A vote embedded in every share. "I want the network to run version X" |
 | **Sampling Window** | The last 864 shares of the chain — where activation votes are counted |
-| **Propagation Target** | Position 7776 in the chain — votes must age past this to enter the sampling window |
+| **Propagation Target** | Position 8640 in the chain (full chain length) — votes must age to the end of the chain to enter the sampling window |
 | **CHAIN_LENGTH** | 8640 shares — the full active sharechain window |
 | **AutoRatchet** | The state machine that decides when to switch from producing V35 to V36 shares |
 | **Weighted vote** | Each share's vote is multiplied by its difficulty (harder shares get more votes) |
@@ -120,7 +120,7 @@ proportionally.
 | Window | Formula | Shares (LTC) | Time Span (LTC) |
 |--------|---------|--------|-----------|
 | **Sampling Window** | CHAIN_LENGTH ÷ 10 | 864 | ~3.6 hours |
-| **Propagation Target** | CHAIN_LENGTH × 9 ÷ 10 | 7776 | ~32.4 hours |
+| **Propagation Target** | CHAIN_LENGTH | 8640 | ~36 hours |
 | **Confirmation Window** | REAL_CHAIN_LENGTH × 2 | 17,280 | ~72 hours |
 
 **Important**: `CHAIN_LENGTH = 24×60×60 ÷ 10 = 8640` was inherited from the
@@ -132,15 +132,15 @@ original Bitcoin P2Pool where shares were every 10 seconds. On Litecoin the
 The sharechain is a linked list from the tip (newest) to the genesis (oldest):
 
 ```
-Position:   0 .......... 7776 .......... 8640
-            ↑              ↑               ↑
-           TIP     Propagation target    Chain end
-
-            ←—— 7776 shares ——→←— 864 —→
-            Recent activity        SAMPLING
-            (not counted for       WINDOW
-             activation)           (votes counted
-                                    here)
+Position:   0 .......................... 7776 .. 8640
+            ↑                            ↑        ↑
+           TIP                     Sampling    Chain end
+                                   window
+            ←——— 7776 shares ———→←— 864 —→
+            Recent activity          SAMPLING
+            (not counted for         WINDOW
+             activation)             (votes counted
+                                      here)
 ```
 
 Shares enter at offset 0 (the tip) and age toward position 8640. Only when
@@ -148,8 +148,12 @@ a share reaches position 7776–8640 (the **sampling window**) are its votes
 counted for the 60%/95% thresholds.
 
 This design ensures that a sudden burst of shares cannot instantly trigger
-activation — votes must persist across **~32 hours** of aging before they
+activation — votes must persist across **~32–36 hours** of aging before they
 enter the sampling window.
+
+The propagation progress on the dashboard tracks how deep the oldest V36 vote
+is relative to the full chain length (8640), giving a clear picture of how
+far along the aging process is.
 
 ---
 
@@ -235,15 +239,15 @@ No miners have upgraded yet, or all upgraded shares have aged out.
 ### Stage 2: Propagating
 
 **When**: V36 votes exist in the chain, but the deepest (oldest) V36 vote hasn't
-reached position 7776 yet — it hasn't aged into the sampling window.
+reached position 8640 yet — it hasn't fully aged through the chain.
 
 This is the "patience" stage. V36 nodes are producing shares and voting, but those
-votes need to age ~32 hours before they enter the sampling window at the far end
-of the chain.
+votes need to age ~36 hours before they reach the end of the chain wavelength and
+enter the sampling window (positions 7776–8640).
 
 - **Status badge**: `PROPAGATING` (blue)
 - **Progress bar**: Propagation bar showing how deep the oldest V36 vote is
-- **Message**: "V36 votes propagating: N votes (X% of chain), deepest at position D/7776. Reach sampling window in ~Xh Xm"
+- **Message**: "V36 votes propagating: N votes (X% of chain), deepest at position D/8640. Reach sampling window in ~Xh Xm"
 - **ETA**: Estimated from shares remaining × `SHARE_PERIOD`
 
 ### Stage 3: Signaling (0–60%)
@@ -626,13 +630,13 @@ the sampling window).
 │ Vote Propagation:                            18.1% │
 │ █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   18.1% │
 │ V36 votes: 1566/8640 (18.1% of full chain).        │
-│ Deepest at position 5443/7776 — reach sampling     │
+│ Deepest at position 5443/8640 — reach sampling     │
 │ window in ~9h 44m                                  │
 └────────────────────────────────────────────────────┘
 ```
 
 - **Gradient**: Blue → Light Blue (#2196F3 → #03A9F4)
-- **Width**: `deepest_v36_position / propagation_target × 100%`
+- **Width**: `deepest_v36_position / chain_length × 100%`
 - **Embedded label**: Shows `"X% V36"`
 - **Detail text**: Shows vote count, chain percentage, deepest position, and ETA
 - **ETA**: Calculated as `shares_to_window × SHARE_PERIOD`, displayed as hours/minutes
@@ -842,7 +846,7 @@ Several factors:
 2. **Difficulty weighting**: Your shares may have lower difficulty than others,
    giving them less vote weight in the consensus count.
 3. **Sampling window lag**: The sampling window (positions 7776–8640) only shows
-   shares that are 32+ hours old. Your recent shares haven't reached it yet.
+   shares that are 32–36 hours old. Your recent shares haven't reached it yet.
 4. **The display shows unweighted counts**: The dashboard version tags show simple
    share counts, but the actual activation check uses difficulty-weighted votes.
 

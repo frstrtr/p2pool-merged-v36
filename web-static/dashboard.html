@@ -2141,7 +2141,7 @@
                         d3.select('#propagation-text').text(
                             'V' + vs.target_version + ' votes: ' + vs.overall_v36_votes + '/' + vs.overall_total +
                             ' (' + d3.format('.1f')(vs.overall_v36_vote_pct) + '% of full chain). ' +
-                            'Deepest at position ' + vs.deepest_v36_position + '/' + vs.propagation_target +
+                            'Deepest at position ' + vs.deepest_v36_position + '/' + vs.chain_length +
                             ' \u2014 reach sampling window in ~' + etaStr);
                     } else {
                         d3.select('#propagation-section').style('display', 'none');
