@@ -3030,6 +3030,70 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     
     msg_root.putChild('unban', MsgUnbanResource())
     
+    # POST /msg/load_blob — load a transition/authority message blob at runtime
+    # Body: {"blob_hex": "<hex_string>"} or {"blob_file": "<path_to_hex_file>"}
+    # Restricted to localhost connections for security.
+    # This allows loading new transition signals for future transitions
+    # (e.g. V36→V37) without restarting the node.
+    class MsgLoadBlobResource(resource.Resource):
+        def render_POST(self, request):
+            request.setHeader('Content-Type', 'application/json')
+            request.setHeader('Access-Control-Allow-Origin', '*')
+            # Security: only allow from localhost
+            client_ip = request.getClientIP()
+            if client_ip not in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
+                request.setResponseCode(403)
+                return json.dumps({'error': 'forbidden: localhost only'})
+            try:
+                store = _get_message_store()
+                body = json.loads(request.content.read())
+                blob_hex = body.get('blob_hex', '')
+                blob_file = body.get('blob_file', '')
+                if blob_file:
+                    if not os.path.isfile(blob_file):
+                        return json.dumps({'error': 'blob_file not found: %s' % blob_file})
+                    with open(blob_file, 'r') as f:
+                        blob_hex = f.read().strip()
+                if not blob_hex:
+                    return json.dumps({'error': 'no blob_hex or blob_file provided'})
+                n = store.load_blob_hex(blob_hex)
+                if n > 0:
+                    print('Messaging: loaded %d message(s) from /msg/load_blob' % n)
+                return json.dumps({'ok': True, 'loaded': n})
+            except Exception as e:
+                return json.dumps({'error': str(e)})
+    
+    msg_root.putChild('load_blob', MsgLoadBlobResource())
+    
+    # ====================================================================
+    # Live share message ingestion
+    # ====================================================================
+    # When a V36+ share is verified and carries message_data, its
+    # already-validated _parsed_messages (from check()) are added to the
+    # message store immediately.  This means transition signals embedded
+    # in shares appear in the API/dashboard as soon as the share is
+    # accepted, rather than only on startup via rebuild_from_tracker().
+    def _on_verified_share(share_hash):
+        store = getattr(node, '_message_store', None)
+        if store is None:
+            return
+        try:
+            share = node.tracker.items[share_hash]
+            if not hasattr(share, '_parsed_messages') or not share._parsed_messages:
+                return
+            added = 0
+            for msg in share._parsed_messages:
+                msg.share_hash = share.hash
+                msg.sender_address = getattr(share, 'address', None)
+                if store._add_message(msg):
+                    added += 1
+            if added > 0:
+                print('Messaging: ingested %d message(s) from verified share %064x' % (added, share.hash))
+        except Exception:
+            pass  # Share might be gone from tracker
+    
+    node.tracker.verified.added.watch(_on_verified_share)
+    
     if static_dir is None:
         static_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'web-static')
     web_root.putChild('static', static.File(static_dir))
