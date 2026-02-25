@@ -177,6 +177,42 @@
                     } else {
                         d3.select('#index-transition-msg').style('display', 'none');
                     }
+                    // Authority announcements (shown independent of transition)
+                    var announcements = vs.authority_announcements || [];
+                    var annDiv = d3.select('#index-announcements');
+                    annDiv.selectAll('*').remove();
+                    if (announcements.length > 0) {
+                        var urgStyles = {
+                            'info': { bg: '#e8f4fd', border: '#2196F3', fg: '#1976D2' },
+                            'recommended': { bg: '#fff3e0', border: '#FF9800', fg: '#E65100' },
+                            'required': { bg: '#ffebee', border: '#F44336', fg: '#C62828' },
+                            'alert': { bg: '#ffebee', border: '#F44336', fg: '#C62828' }
+                        };
+                        announcements.forEach(function(ann) {
+                            if (!ann.text) return;
+                            var urg = ann.urgency || 'info';
+                            var style = urgStyles[urg] || urgStyles['info'];
+                            if (ann.type_id === 16) { style = urgStyles['alert']; urg = 'alert'; }
+                            var card = annDiv.append('div')
+                                .style('padding', '8px 12px').style('border-left', '3px solid ' + style.border)
+                                .style('background', style.bg).style('border-radius', '3px').style('margin-bottom', '6px');
+                            var hdr = card.append('div').style('display', 'flex').style('align-items', 'center').style('gap', '6px');
+                            hdr.append('strong').style('font-size', '0.9em').style('color', style.fg).text(ann.type || 'Announcement');
+                            hdr.append('span').style('font-size', '0.75em').style('font-weight', 'bold').style('color', style.fg).text(urg.toUpperCase());
+                            if (ann.age != null) {
+                                var ageText = ann.age < 3600 ? Math.floor(ann.age/60) + 'm ago' :
+                                              ann.age < 86400 ? Math.floor(ann.age/3600) + 'h ago' :
+                                              Math.floor(ann.age/86400) + 'd ago';
+                                hdr.append('span').style('font-size', '0.72em').style('color', '#888').style('margin-left', 'auto').text(ageText);
+                            }
+                            card.append('div').style('font-size', '0.85em').style('color', '#333').style('margin-top', '4px').text(ann.text);
+                            if (ann.url) {
+                                card.append('div').style('margin-top', '4px')
+                                    .append('a').attr('href', ann.url).attr('target', '_blank').attr('rel', 'noopener')
+                                    .style('font-size', '0.8em').style('color', '#1976D2').text(ann.url);
+                            }
+                        });
+                    }
                 });
                 
                 var time_to_share = local_stats.attempts_to_share/local;
@@ -498,6 +534,8 @@
                     <a id="index-tmsg-url" href="#" target="_blank" rel="noopener" style="font-size:0.8em; color:#1976D2;">Get latest release</a>
                 </div>
             </div>
+            <!-- Authority Announcements -->
+            <div id="index-announcements" style="margin-top:8px;"></div>
         </div>
         
 <h2>Share explorer</h2>
