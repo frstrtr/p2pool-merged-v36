@@ -142,10 +142,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'percentage': (weight / total_weight) * 100
             }
         
-        # Single-pass scan of the ENTIRE tracked chain.
+        # Single-pass scan of the active chain (up to CHAIN_LENGTH).
+        # Only consensus-relevant shares matter for voting/signaling stats.
+        # Shares beyond CHAIN_LENGTH are aged-out history and would dilute %.
         # Collects: share type counts, desired_version votes, V36 propagation
-        # depth, and full-chain desired_version breakdown — all in one walk.
-        share_type_counts = {}       # VERSION -> count (full chain)
+        # depth, and chain desired_version breakdown — all in one walk.
+        share_type_counts = {}       # VERSION -> count (active chain)
         share_type_names = {
             17: 'Share', 32: 'PreSegwitShare', 33: 'NewShare',
             34: 'SegwitMiningShare', 35: 'PaddingBugfixShare', 36: 'MergedMiningShare'
@@ -153,15 +155,16 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         overall_v36_votes = 0        # shares with desired_version >= 36
         overall_v36_shares = 0       # shares with VERSION >= 36 (actual format)
         overall_total = 0            # total shares scanned
-        full_chain_desired = {}      # desired_version -> count (full chain, unweighted)
+        full_chain_desired = {}      # desired_version -> count (active chain, unweighted)
         propagation_target = chain_length * 9 // 10  # 7776 for LTC
         v36_contiguous_from_tip = 0  # consecutive V36 votes from tip
         deepest_v36_pos = 0          # deepest position where V36 vote exists
         _contiguous = True
+        _scan_limit = min(chain_height, chain_length)  # cap at CHAIN_LENGTH
         try:
             _sh = node.best_share_var.value
             _pos = 0
-            while _sh is not None and _pos < chain_height:
+            while _sh is not None and _pos < _scan_limit:
                 _s = node.tracker.items.get(_sh)
                 if _s is None:
                     break
