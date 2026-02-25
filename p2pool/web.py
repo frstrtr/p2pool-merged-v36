@@ -457,6 +457,64 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except Exception:
             return []
 
+    # Track when we last scanned for blob files (epoch seconds)
+    _last_blob_scan = [0]
+    _blob_scan_count = [0]  # how many scans have been performed
+
+    def _load_blob_dirs(store):
+        """Load transition/bootstrap blobs from all known directories.
+
+        Idempotent — _add_message() deduplicates by hash, so re-loading
+        already-loaded blobs is a cheap no-op.  Called both at store
+        creation and periodically (every 5 min) so that blobs added after
+        startup (e.g. via ``git pull``) are picked up without a restart.
+        """
+        now = time.time()
+        if now - _last_blob_scan[0] < 300:  # debounce: 5 minutes
+            return
+        _last_blob_scan[0] = now
+        _blob_scan_count[0] += 1
+        is_first_scan = (_blob_scan_count[0] == 1)
+
+        # 1. data/<net>/{bootstrap_messages,transition_messages,transitional_messages}/
+        if datadir_path:
+            for dirname in ('bootstrap_messages', 'transition_messages', 'transitional_messages'):
+                bdir = os.path.join(datadir_path, dirname)
+                if os.path.isdir(bdir):
+                    n = store.load_bootstrap_blobs(bdir)
+                    if n > 0:
+                        print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bdir))
+
+        # 2. <repo>/transition_messages/ (shipped with the source code)
+        _script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        _module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _search_bases = list(dict.fromkeys([_script_dir, _module_dir]))
+        _found_shipped = False
+        for _base in _search_bases:
+            for _dname in ('transition_messages', 'transitional_messages'):
+                shipped_dir = os.path.join(_base, _dname)
+                if os.path.isdir(shipped_dir):
+                    n = store.load_bootstrap_blobs(shipped_dir)
+                    if n > 0:
+                        print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
+                        _found_shipped = True
+        if not _found_shipped and is_first_scan:
+            print('Messaging: no shipped blobs found (searched %s)' % ', '.join(
+                os.path.join(b, d) for b in _search_bases for d in ('transition_messages', 'transitional_messages')))
+
+        # 3. --transition-message CLI blob
+        if transition_message:
+            blob_hex = transition_message
+            if os.path.isfile(blob_hex):
+                try:
+                    with open(blob_hex, 'r') as f:
+                        blob_hex = f.read().strip()
+                except Exception:
+                    pass
+            n = store.load_blob_hex(blob_hex)
+            if n > 0:
+                print('Messaging: loaded %d message(s) from --transition-message' % n)
+
     def _get_transition_message():
         """Extract the latest TRANSITION_SIGNAL from the share messaging system.
         
@@ -482,44 +540,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                             node.tracker, node.best_share_var.value, chain_len)
                     except Exception:
                         pass
-                # Load bootstrap blobs from data/<net>/{bootstrap_messages,transition_messages,transitional_messages}/
-                if datadir_path:
-                    for dirname in ('bootstrap_messages', 'transition_messages', 'transitional_messages'):
-                        bdir = os.path.join(datadir_path, dirname)
-                        if os.path.isdir(bdir):
-                            n = store.load_bootstrap_blobs(bdir)
-                            if n > 0:
-                                print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bdir))
-                # Load shipped blobs from <repo>/transition_messages/
-                # Try multiple base paths: sys.argv[0] dir and web.py's parent dir
-                _script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-                _module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                _search_bases = list(dict.fromkeys([_script_dir, _module_dir]))  # dedupe, preserve order
-                _found_shipped = False
-                for _base in _search_bases:
-                    for _dname in ('transition_messages', 'transitional_messages'):
-                        shipped_dir = os.path.join(_base, _dname)
-                        if os.path.isdir(shipped_dir):
-                            n = store.load_bootstrap_blobs(shipped_dir)
-                            if n > 0:
-                                print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
-                                _found_shipped = True
-                if not _found_shipped:
-                    print('Messaging: no shipped blobs found (searched %s)' % ', '.join(
-                        os.path.join(b, d) for b in _search_bases for d in ('transition_messages', 'transitional_messages')))
-                # Load --transition-message CLI blob
-                if transition_message:
-                    blob_hex = transition_message
-                    # Support file path
-                    if os.path.isfile(blob_hex):
-                        try:
-                            with open(blob_hex, 'r') as f:
-                                blob_hex = f.read().strip()
-                        except Exception:
-                            pass
-                    n = store.load_blob_hex(blob_hex)
-                    if n > 0:
-                        print('Messaging: loaded %d message(s) from --transition-message' % n)
+
+            # Always try to (re-)load blob dirs — debounced to every 5 min.
+            # This picks up blobs added after startup (e.g. via git pull).
+            _load_blob_dirs(store)
 
             from p2pool.share_messages import MSG_TRANSITION_SIGNAL
             signals = store.get_messages(
@@ -2841,43 +2865,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         print('Messaging: rebuilt %d messages from sharechain' % rebuilt)
                 except Exception:
                     pass
-            # Load bootstrap blobs from data/<net>/{bootstrap_messages,transition_messages,transitional_messages}/
-            if datadir_path:
-                for dirname in ('bootstrap_messages', 'transition_messages', 'transitional_messages'):
-                    bdir = os.path.join(datadir_path, dirname)
-                    if os.path.isdir(bdir):
-                        n = store.load_bootstrap_blobs(bdir)
-                        if n > 0:
-                            print('Messaging: loaded %d bootstrap message(s) from %s' % (n, bdir))
-            # Load shipped blobs from <repo>/transition_messages/
-            # Try multiple base paths: sys.argv[0] dir and web.py's parent dir
-            _script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-            _module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            _search_bases = list(dict.fromkeys([_script_dir, _module_dir]))  # dedupe, preserve order
-            _found_shipped = False
-            for _base in _search_bases:
-                for _dname in ('transition_messages', 'transitional_messages'):
-                    shipped_dir = os.path.join(_base, _dname)
-                    if os.path.isdir(shipped_dir):
-                        n = store.load_bootstrap_blobs(shipped_dir)
-                        if n > 0:
-                            print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
-                            _found_shipped = True
-            if not _found_shipped:
-                print('Messaging: no shipped blobs found (searched %s)' % ', '.join(
-                    os.path.join(b, d) for b in _search_bases for d in ('transition_messages', 'transitional_messages')))
-            # Load --transition-message CLI blob
-            if transition_message:
-                blob_hex = transition_message
-                if os.path.isfile(blob_hex):
-                    try:
-                        with open(blob_hex, 'r') as f:
-                            blob_hex = f.read().strip()
-                    except Exception:
-                        pass
-                n = store.load_blob_hex(blob_hex)
-                if n > 0:
-                    print('Messaging: loaded %d message(s) from --transition-message' % n)
+        # Always try to (re-)load blob dirs — debounced to every 5 min.
+        # This picks up blobs added after startup (e.g. via git pull).
+        _load_blob_dirs(store)
         return store
     
     from p2pool.share_messages import MSG_EMERGENCY
