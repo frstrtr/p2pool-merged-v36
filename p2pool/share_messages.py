@@ -1362,14 +1362,20 @@ class ShareMessageStore(object):
         return added
 
     def _add_message(self, msg):
-        """Add a message if not duplicate and not too old."""
+        """Add a message if not duplicate and not too old.
+
+        Authority-signed messages (e.g. transition signals from bootstrap
+        blobs) get 7x extended TTL — matching the pruning policy in _prune().
+        """
         msg_hash = msg.message_hash()
         msg_hash_hex = msg_hash.encode('hex')
 
         if msg_hash_hex in self.message_hashes:
             return False
 
-        if msg.age > self.max_age:
+        # Authority messages get extended TTL (7x normal), matching _prune()
+        effective_max_age = self.max_age * 7 if msg.is_protocol_authority else self.max_age
+        if msg.age > effective_max_age:
             return False
 
         self.messages.append(msg)
@@ -1422,16 +1428,23 @@ class ShareMessageStore(object):
                     self.message_hashes.discard(m.message_hash().encode('hex'))
 
     def _prune(self):
-        """Remove old and excess messages."""
-        cutoff = time.time() - self.max_age
+        """Remove old and excess messages.
 
-        expired = [m for m in self.messages if m.timestamp < cutoff]
+        Authority-signed messages get 7x extended TTL in both
+        self.messages and self.authority_messages.
+        """
+        cutoff = time.time() - self.max_age
+        authority_cutoff = time.time() - (self.max_age * 7)  # 7x normal TTL
+
+        # Prune regular messages by normal cutoff;
+        # authority messages only by extended cutoff
+        expired = [m for m in self.messages
+                   if m.timestamp < (authority_cutoff if m.is_protocol_authority else cutoff)]
         for m in expired:
             self.messages.remove(m)
             self.message_hashes.discard(m.message_hash().encode('hex'))
 
-        # Also prune old authority messages
-        authority_cutoff = time.time() - (self.max_age * 7)  # 7x normal TTL
+        # Also prune authority list
         expired_auth = [m for m in self.authority_messages
                         if m.timestamp < authority_cutoff]
         for m in expired_auth:
