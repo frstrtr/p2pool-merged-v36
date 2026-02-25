@@ -74,7 +74,7 @@ FLAG_PROTOCOL_AUTHORITY = 0x08    # Signed by a donation script key (forrestv or
 MAX_MESSAGE_PAYLOAD = 220       # bytes per message payload
 MAX_MESSAGES_PER_SHARE = 3      # max messages embedded in one share
 MAX_TOTAL_MESSAGE_BYTES = 512   # total bytes for all messages in one share
-MAX_MESSAGE_AGE = 86400         # fallback -- actual lifetime tied to sharechain window
+MAX_MESSAGE_AGE = 24 * 60 * 60  # fallback; callers should pass CHAIN_LENGTH * SHARE_PERIOD
 MAX_MESSAGE_HISTORY = 1000      # max messages to keep in memory
 
 # Message Weight Units (MWU) -- share-cost economics
@@ -1361,11 +1361,20 @@ class ShareMessageStore(object):
 
         return added
 
+    @staticmethod
+    def _is_transition_authority(msg):
+        """True for authority-signed transition signals — never time-expired."""
+        return msg.is_protocol_authority and msg.msg_type == MSG_TRANSITION_SIGNAL
+
     def _add_message(self, msg):
         """Add a message if not duplicate and not too old.
 
-        Authority-signed messages (e.g. transition signals from bootstrap
-        blobs) get 7x extended TTL — matching the pruning policy in _prune().
+        Expiry policy:
+          - Authority transition signals (MSG_TRANSITION_SIGNAL +
+            FLAG_PROTOCOL_AUTHORITY): NO time-based expiry.  They
+            persist for the entire transition period until superseded.
+          - Other authority messages: normal max_age (sharechain window).
+          - Regular messages: normal max_age.
         """
         msg_hash = msg.message_hash()
         msg_hash_hex = msg_hash.encode('hex')
@@ -1373,10 +1382,10 @@ class ShareMessageStore(object):
         if msg_hash_hex in self.message_hashes:
             return False
 
-        # Authority messages get extended TTL (7x normal), matching _prune()
-        effective_max_age = self.max_age * 7 if msg.is_protocol_authority else self.max_age
-        if msg.age > effective_max_age:
-            return False
+        # Transition signals from authority never expire by age
+        if not self._is_transition_authority(msg):
+            if msg.age > self.max_age:
+                return False
 
         self.messages.append(msg)
         self.message_hashes.add(msg_hash_hex)
@@ -1430,23 +1439,26 @@ class ShareMessageStore(object):
     def _prune(self):
         """Remove old and excess messages.
 
-        Authority-signed messages get 7x extended TTL in both
-        self.messages and self.authority_messages.
+        Expiry policy:
+          - Authority transition signals: NEVER pruned by time.
+            They persist until superseded or the node restarts.
+          - Regular messages: pruned after max_age (sharechain window).
         """
         cutoff = time.time() - self.max_age
-        authority_cutoff = time.time() - (self.max_age * 7)  # 7x normal TTL
 
-        # Prune regular messages by normal cutoff;
-        # authority messages only by extended cutoff
+        # Prune regular messages by cutoff;
+        # authority transition signals are exempt from time-based pruning
         expired = [m for m in self.messages
-                   if m.timestamp < (authority_cutoff if m.is_protocol_authority else cutoff)]
+                   if not self._is_transition_authority(m)
+                   and m.timestamp < cutoff]
         for m in expired:
             self.messages.remove(m)
             self.message_hashes.discard(m.message_hash().encode('hex'))
 
-        # Also prune authority list
+        # Also prune authority list (same policy)
         expired_auth = [m for m in self.authority_messages
-                        if m.timestamp < authority_cutoff]
+                        if not self._is_transition_authority(m)
+                        and m.timestamp < cutoff]
         for m in expired_auth:
             self.authority_messages.remove(m)
             if m in self.messages:

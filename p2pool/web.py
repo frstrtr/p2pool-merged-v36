@@ -422,7 +422,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 from p2pool.share_messages import ShareMessageStore, BanList
                 ban_path = os.path.join(datadir_path, 'banned_senders.json') if datadir_path else None
                 ban_list = BanList(persist_path=ban_path) if ban_path else BanList()
-                store = ShareMessageStore(ban_list=ban_list)
+                # max_age = sharechain PPLNS window duration (e.g. 8640 * 15 = 36h)
+                chain_window_secs = node.net.CHAIN_LENGTH * node.net.SHARE_PERIOD
+                store = ShareMessageStore(max_age=chain_window_secs, ban_list=ban_list)
                 node._message_store = store
                 if node.best_share_var.value is not None:
                     try:
@@ -2776,7 +2778,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             from p2pool.share_messages import ShareMessageStore, BanList
             ban_path = os.path.join(datadir_path, 'banned_senders.json')
             ban_list = BanList(persist_path=ban_path)
-            store = ShareMessageStore(ban_list=ban_list)
+            # max_age = sharechain PPLNS window duration (e.g. 8640 * 15 = 36h)
+            chain_window_secs = node.net.CHAIN_LENGTH * node.net.SHARE_PERIOD
+            store = ShareMessageStore(max_age=chain_window_secs, ban_list=ban_list)
             node._message_store = store
             # Rebuild from current sharechain
             if node.best_share_var.value is not None:
