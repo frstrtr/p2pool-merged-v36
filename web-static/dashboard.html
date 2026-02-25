@@ -1745,7 +1745,8 @@
             // Parse worker names and extract base addresses
             // Supported formats: address.worker, address_worker, address+diff, address/diff
             function extractAddress(workerName) {
-                return workerName.split('+')[0].split('/')[0].split('.')[0].split('_')[0];
+                // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
+                return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
             }
             
             // Estimate hashrate from difficulty: hashrate = difficulty * DUMB_SCRYPT_DIFF / target_seconds
