@@ -2099,7 +2099,7 @@
                         d3.select('#chain-maturity-section').style('display', 'none');
                     }
                     
-                    // Propagation section (new! shows shares aging toward sampling window)
+                    // Propagation section — shows V36 votes aging toward sampling window
                     if (vs.status === 'propagating') {
                         d3.select('#propagation-section').style('display', 'block');
                         d3.select('#propagation-bar').style('width', vs.propagation_pct + '%');
@@ -2108,9 +2108,10 @@
                         var etaM = etaMin % 60;
                         var etaStr = etaH > 0 ? etaH + 'h ' + etaM + 'm' : etaM + 'm';
                         d3.select('#propagation-text').text(
-                            'V' + vs.current_share_type + ' shares: ' + vs.current_type_count + 
-                            ' / ' + vs.propagation_target + ' (' + d3.format('.1f')(vs.propagation_pct) + 
-                            '%) \u2014 V' + vs.target_version + ' votes reach window in ~' + etaStr);
+                            'V' + vs.target_version + ' votes: ' + vs.overall_v36_votes + 
+                            ' (' + d3.format('.1f')(vs.overall_v36_vote_pct) + '% of chain). ' +
+                            'Deepest at position ' + vs.deepest_v36_position + '/' + vs.propagation_target +
+                            ' \u2014 reach sampling window in ~' + etaStr);
                     } else {
                         d3.select('#propagation-section').style('display', 'none');
                     }
@@ -2176,10 +2177,15 @@
                         var sigPct = vs.sampling_signaling;
                         d3.select('#signaling-bar').style('width', Math.min(100, sigPct) + '%');
                         if (vs.chain_ready) {
-                            d3.select('#sampling-signaling-text').text(
-                                d3.format('.1f')(sigPct) + '% of sampling window (' + 
+                            var samplingText = d3.format('.1f')(sigPct) + '% of sampling window (' + 
                                 vs.sampling_window_size + ' shares) voting for V' + vs.target_version +
-                                ' \u2014 need 95% to activate');
+                                ' \u2014 need 95% to activate';
+                            // Show overall V36 votes if they exist but differ from sampling window
+                            if (vs.overall_v36_votes > 0 && vs.overall_v36_vote_pct > sigPct + 0.1) {
+                                samplingText += ' (overall chain: ' + d3.format('.1f')(vs.overall_v36_vote_pct) + 
+                                    '% = ' + vs.overall_v36_votes + ' votes)';
+                            }
+                            d3.select('#sampling-signaling-text').text(samplingText);
                         } else {
                             d3.select('#sampling-signaling-text').text(
                                 d3.format('.1f')(vs.target_percentage) + '% overall signaling for V' + vs.target_version +
@@ -2227,17 +2233,38 @@
                         d3.select('#transition-message-section').style('display', 'none');
                     }
                     
-                    // Update version breakdown
+                    // Update version breakdown — show desired_version votes AND overall V36 stats
                     var versionsDiv = d3.select('#signaling-versions');
                     versionsDiv.selectAll('.version-tag').remove();
                     if (vs.versions) {
                         for (var ver in vs.versions) {
                             var verData = vs.versions[ver];
                             var isTarget = (parseInt(ver) === vs.target_version);
+                            var label;
+                            if (parseInt(ver) === vs.target_version) {
+                                label = 'V' + ver + ' votes: ' + d3.format('.1f')(verData.percentage) + '% (target)';
+                            } else {
+                                label = 'V' + ver + ' votes: ' + d3.format('.1f')(verData.percentage) + '%';
+                            }
                             versionsDiv.append('span')
                                 .attr('class', 'version-tag' + (isTarget ? ' target' : ''))
-                                .text('Signaling V' + ver + ': ' + d3.format('.1f')(verData.percentage) + '%');
+                                .text(label);
                         }
+                    }
+                    // Show overall V36 adoption summary
+                    if (vs.overall_v36_votes != null) {
+                        var overallLabel = 'V' + vs.target_version + ' overall: ' + 
+                            vs.overall_v36_votes + '/' + vs.overall_total + ' votes (' + 
+                            d3.format('.1f')(vs.overall_v36_vote_pct) + '%)';
+                        if (vs.overall_v36_shares > 0) {
+                            overallLabel += ', ' + vs.overall_v36_shares + ' V36 format shares';
+                        }
+                        versionsDiv.append('span')
+                            .attr('class', 'version-tag target')
+                            .style('background', 'rgba(76, 175, 80, 0.2)')
+                            .style('border-color', '#4CAF50')
+                            .style('color', '#81C784')
+                            .text(overallLabel);
                     }
                     
                     // Update current share type
@@ -2288,9 +2315,16 @@
                                     ' shares. Need full ' + vs.chain_length_required + 
                                     '-share window before activation can begin.';
                             } else {
-                                bannerText = 'V36 Transition: VOTING — ' + v36VotePct + 
+                                var overallInfo = '';
+                                if (vs.overall_v36_votes != null && vs.overall_v36_votes > 0) {
+                                    overallInfo = ' (' + vs.overall_v36_votes + ' V36 votes in chain = ' + 
+                                        d3.format('.1f')(vs.overall_v36_vote_pct) + '% overall)';
+                                } else {
+                                    overallInfo = ' (no V36 votes in chain yet — miners need to upgrade)';
+                                }
+                                bannerText = 'V36 Transition: VOTING — ' + d3.format('.1f')(vs.sampling_signaling) + 
                                     '% voting V36 in sampling window (' + vs.sampling_window_size + 
-                                    ' shares). Need 95% to activate.';
+                                    ' shares). Need 95% to activate.' + overallInfo;
                             }
                         } else if (r.state === 'activated') {
                             bannerClass += ' info-banner';

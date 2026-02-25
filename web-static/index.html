@@ -89,19 +89,27 @@
                         var etaH = Math.floor(etaMin / 60); var etaM = etaMin % 60;
                         var etaStr = etaH > 0 ? etaH + 'h ' + etaM + 'm' : etaM + 'm';
                         d3.select('#index-propagation-text').text(
-                            'V' + vs.current_share_type + ' shares: ' + vs.current_type_count + 
-                            ' / ' + vs.propagation_target + ' (' + d3.format('.1f')(vs.propagation_pct) + 
-                            '%) \u2014 V' + vs.target_version + ' votes reach window in ~' + etaStr);
+                            'V' + vs.target_version + ' votes: ' + vs.overall_v36_votes + 
+                            ' (' + d3.format('.1f')(vs.overall_v36_vote_pct) + '% of chain). ' +
+                            'Reach sampling window in ~' + etaStr);
                     } else {
                         d3.select('#index-propagation').style('display', 'none');
                     }
                     var sigPct = vs.sampling_signaling;
                     d3.select('#version-signaling-bar').style('width', Math.min(100, sigPct) + '%');
-                    d3.select('#index-sampling-text').text(vs.chain_ready ?
-                        d3.format('.1f')(sigPct) + '% of ' + vs.sampling_window_size + 
-                        ' shares voting V' + vs.target_version + ' (need 95%)' :
-                        d3.format('.1f')(vs.target_percentage) + '% overall (activates at ' +
-                        vs.chain_length_required + ' shares)');
+                    var samplingStr;
+                    if (vs.chain_ready) {
+                        samplingStr = d3.format('.1f')(sigPct) + '% of ' + vs.sampling_window_size + 
+                            ' shares voting V' + vs.target_version + ' (need 95%)';
+                        if (vs.overall_v36_votes > 0 && vs.overall_v36_vote_pct > sigPct + 0.1) {
+                            samplingStr += ' | Overall: ' + d3.format('.1f')(vs.overall_v36_vote_pct) + 
+                                '% (' + vs.overall_v36_votes + ' votes)';
+                        }
+                    } else {
+                        samplingStr = d3.format('.1f')(vs.target_percentage) + '% overall (activates at ' +
+                            vs.chain_length_required + ' shares)';
+                    }
+                    d3.select('#index-sampling-text').text(samplingStr);
                     d3.select('#index-status-message').text(vs.message);
                     d3.select('#index-current-type').text(
                         vs.current_share_name + ' (V' + vs.current_share_type + ')');
@@ -110,6 +118,10 @@
                         for (var ver in vs.share_types) {
                             var t = vs.share_types[ver];
                             parts.push('V' + ver + ': ' + d3.format('.1f')(t.percentage) + '% (' + t.count + ')');
+                        }
+                        // Add overall V36 adoption info
+                        if (vs.overall_v36_votes != null) {
+                            parts.push('V' + vs.target_version + ' votes: ' + vs.overall_v36_votes + '/' + vs.overall_total);
                         }
                         d3.select('#index-chain-types').text(parts.join(' | '));
                     }

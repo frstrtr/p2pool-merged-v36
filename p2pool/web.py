@@ -242,16 +242,65 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             except:
                 pass
         
-        # Calculate propagation progress for successor transition
-        # How far have current-type shares (voting for successor) traveled toward sampling window?
-        # Sampling window is at positions [CHAIN_LENGTH*9//10, CHAIN_LENGTH] from tip
-        # Current-type shares start at tip and grow outward
+        # Count V36 desired_version votes across the FULL chain (up to CHAIN_LENGTH)
+        # This tells users how many V36-capable nodes are mining, even before
+        # those votes reach the sampling window at positions [90%-100%] from tip.
+        overall_v36_votes = 0
+        overall_v36_shares = 0  # actual V36 share format
+        overall_total = 0
+        try:
+            _sh = node.best_share_var.value
+            _max = min(chain_height, chain_length)
+            _count = 0
+            while _sh is not None and _count < _max:
+                _s = node.tracker.items.get(_sh)
+                if _s is None:
+                    break
+                overall_total += 1
+                if getattr(_s, 'desired_version', _s.VERSION) >= 36:
+                    overall_v36_votes += 1
+                if _s.VERSION >= 36:
+                    overall_v36_shares += 1
+                _sh = _s.previous_hash
+                _count += 1
+        except:
+            pass
+        overall_v36_vote_pct = (overall_v36_votes * 100.0 / overall_total) if overall_total > 0 else 0
+        overall_v36_share_pct = (overall_v36_shares * 100.0 / overall_total) if overall_total > 0 else 0
+        
+        # Calculate how far V36 votes have propagated toward the sampling window.
+        # Sampling window covers shares at positions [CHAIN_LENGTH*9//10 .. CHAIN_LENGTH]
+        # from the tip.  V36 votes from recently-upgraded miners appear near the tip
+        # and age outward.  We find the deepest V36 vote position to track propagation.
         propagation_target = chain_length * 9 // 10  # 7776 - where sampling window starts
+        v36_contiguous_from_tip = 0  # how many consecutive V36 votes from tip
+        deepest_v36_pos = 0  # deepest position (from tip) where a V36 vote exists
+        try:
+            _sh = node.best_share_var.value
+            _pos = 0
+            _max = min(chain_height, chain_length)
+            _contiguous = True
+            while _sh is not None and _pos < _max:
+                _s = node.tracker.items.get(_sh)
+                if _s is None:
+                    break
+                if getattr(_s, 'desired_version', _s.VERSION) >= 36:
+                    deepest_v36_pos = _pos + 1
+                    if _contiguous:
+                        v36_contiguous_from_tip = _pos + 1
+                elif _contiguous:
+                    _contiguous = False
+                _sh = _s.previous_hash
+                _pos += 1
+        except:
+            pass
+        
+        propagation_pct = min(deepest_v36_pos / float(propagation_target) * 100, 100) if propagation_target > 0 else 0
+        shares_to_window = max(0, propagation_target - deepest_v36_pos)
+        time_to_window_seconds = shares_to_window * node.net.SHARE_PERIOD
+        
+        # Legacy field for backward compat
         current_type_count = share_type_counts.get(current_share_type, 0) if current_share_type else 0
-        propagation_pct = min(current_type_count / float(propagation_target) * 100, 100) if propagation_target > 0 else 0
-        # Shares remaining until current-type votes enter sampling window
-        shares_to_window = max(0, propagation_target - current_type_count)
-        time_to_window_seconds = shares_to_window * node.net.SHARE_PERIOD  # 10 sec per share
         
         # Determine status and message
         if not is_transitioning and not ratchet_active:
@@ -287,17 +336,28 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             transition_progress = sampling_signaling
         elif sampling_signaling > 0:
             status = 'signaling'
-            message = 'V%d signaling: %.1f%% in sampling window' % (effective_target, sampling_signaling)
+            message = 'V%d signaling: %.1f%% in sampling window (%.1f%% overall in chain)' % (
+                effective_target, sampling_signaling, overall_v36_vote_pct)
             transition_progress = sampling_signaling
-        elif successor_transition and current_type_count < propagation_target:
+        elif overall_v36_votes > 0 and deepest_v36_pos < propagation_target:
+            # V36 votes exist in the chain but haven't reached the sampling window yet
             status = 'propagating'
-            message = 'V%d shares propagating toward sampling window: %d/%d (%.1f%%). V%d votes reach window in ~%s' % (
-                current_share_type, current_type_count, propagation_target, propagation_pct,
-                effective_target, format_eta(time_to_window_seconds))
+            message = 'V%d votes propagating: %d votes (%.1f%% of chain), deepest at position %d/%d. Reach sampling window in ~%s' % (
+                effective_target, overall_v36_votes, overall_v36_vote_pct,
+                deepest_v36_pos, propagation_target, format_eta(time_to_window_seconds))
             transition_progress = propagation_pct
+        elif overall_v36_votes > 0:
+            # V36 votes exist and have reached sampling window position but are 0% weighted
+            # (edge case: votes exist at the right position but weight rounds to 0)
+            status = 'signaling'
+            message = 'V%d votes appearing in sampling window. %d votes (%.1f%%) in chain overall' % (
+                effective_target, overall_v36_votes, overall_v36_vote_pct)
+            transition_progress = overall_v36_vote_pct
         else:
+            # No V36 votes anywhere in the chain
             status = 'waiting'
-            message = 'Waiting for V%d signaling in sampling window' % effective_target
+            message = 'Waiting for miners to upgrade. No V%d votes in chain yet (0/%d shares). Miners need V36-capable software.' % (
+                effective_target, total_shares)
             transition_progress = 0
         
         # AutoRatchet state for dashboard — report effective state
@@ -332,9 +392,17 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             successor_name=successor_name,
             # Desired version voting breakdown
             versions=version_percentages,
-            # Propagation tracking
+            # Overall V36 stats (full chain, not just sampling window)
+            overall_v36_votes=overall_v36_votes,
+            overall_v36_vote_pct=round(overall_v36_vote_pct, 2),
+            overall_v36_shares=overall_v36_shares,
+            overall_v36_share_pct=round(overall_v36_share_pct, 2),
+            overall_total=overall_total,
+            # Propagation tracking (V36 votes aging toward sampling window)
             propagation_pct=round(propagation_pct, 2),
             propagation_target=propagation_target,
+            deepest_v36_position=deepest_v36_pos,
+            v36_contiguous_from_tip=v36_contiguous_from_tip,
             current_type_count=current_type_count,
             shares_to_window=shares_to_window,
             time_to_window_seconds=round(time_to_window_seconds, 0),
