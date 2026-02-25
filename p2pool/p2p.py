@@ -352,7 +352,12 @@ class Protocol(p2protocol.Protocol):
                 share = p2pool_data.load_share(wrappedshare, self.node.net, self.addr)
             except (ValueError, struct.error) as e:
                 # MWEB transactions can cause parsing errors - skip this share
-                print '[MWEB-SKIP] Skipping unparseable share in handle_shares (likely MWEB tx): %s' % (e,)
+                # Rate-limit: log first occurrence, then every 100th
+                if not hasattr(self, '_mweb_share_skip_count'):
+                    self._mweb_share_skip_count = 0
+                self._mweb_share_skip_count += 1
+                if self._mweb_share_skip_count == 1 or self._mweb_share_skip_count % 100 == 0:
+                    print '[MWEB-SKIP] Skipped %d unparseable shares so far (likely MWEB tx): %s' % (self._mweb_share_skip_count, e)
                 continue
             if 13 <= wrappedshare['type'] < 34:
                 txs = []
@@ -468,7 +473,12 @@ class Protocol(p2protocol.Protocol):
                 res = [p2pool_data.load_share(share, self.node.net, self.addr) for share in shares if share['type'] >= p2pool_data.Share.VERSION]
             except (ValueError, struct.error) as e:
                 # MWEB transactions can cause parsing errors - skip these shares but don't disconnect
-                print '[MWEB-SKIP] Skipping sharereply with unparseable shares (likely MWEB tx): %s' % (e,)
+                # Rate-limit: log first occurrence, then every 100th
+                if not hasattr(self, '_mweb_reply_skip_count'):
+                    self._mweb_reply_skip_count = 0
+                self._mweb_reply_skip_count += 1
+                if self._mweb_reply_skip_count == 1 or self._mweb_reply_skip_count % 100 == 0:
+                    print '[MWEB-SKIP] Skipped %d sharereply parse errors so far (likely MWEB tx): %s' % (self._mweb_reply_skip_count, e)
                 res = []  # Return empty list - we'll get these shares from other peers
         else:
             res = failure.Failure(self.ShareReplyError(result))
