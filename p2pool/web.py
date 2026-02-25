@@ -142,25 +142,51 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'percentage': (weight / total_weight) * 100
             }
         
-        # Count actual share types in chain (the VERSION of each share class)
-        share_type_counts = {}
+        # Single-pass scan of the ENTIRE tracked chain.
+        # Collects: share type counts, desired_version votes, V36 propagation
+        # depth, and full-chain desired_version breakdown — all in one walk.
+        share_type_counts = {}       # VERSION -> count (full chain)
         share_type_names = {
             17: 'Share', 32: 'PreSegwitShare', 33: 'NewShare',
             34: 'SegwitMiningShare', 35: 'PaddingBugfixShare', 36: 'MergedMiningShare'
         }
+        overall_v36_votes = 0        # shares with desired_version >= 36
+        overall_v36_shares = 0       # shares with VERSION >= 36 (actual format)
+        overall_total = 0            # total shares scanned
+        full_chain_desired = {}      # desired_version -> count (full chain, unweighted)
+        propagation_target = chain_length * 9 // 10  # 7776 for LTC
+        v36_contiguous_from_tip = 0  # consecutive V36 votes from tip
+        deepest_v36_pos = 0          # deepest position where V36 vote exists
+        _contiguous = True
         try:
-            share_hash = node.best_share_var.value
-            count = 0
-            max_count = min(chain_height, chain_length)
-            while share_hash is not None and count < max_count:
-                share = node.tracker.items.get(share_hash)
-                if share is None:
+            _sh = node.best_share_var.value
+            _pos = 0
+            while _sh is not None and _pos < chain_height:
+                _s = node.tracker.items.get(_sh)
+                if _s is None:
                     break
-                share_type_counts[share.VERSION] = share_type_counts.get(share.VERSION, 0) + 1
-                share_hash = share.previous_hash
-                count += 1
+                # Share type (VERSION)
+                share_type_counts[_s.VERSION] = share_type_counts.get(_s.VERSION, 0) + 1
+                # Desired version vote
+                _dv = getattr(_s, 'desired_version', _s.VERSION)
+                full_chain_desired[_dv] = full_chain_desired.get(_dv, 0) + 1
+                overall_total += 1
+                if _dv >= 36:
+                    overall_v36_votes += 1
+                    deepest_v36_pos = _pos + 1
+                    if _contiguous:
+                        v36_contiguous_from_tip = _pos + 1
+                elif _contiguous:
+                    _contiguous = False
+                if _s.VERSION >= 36:
+                    overall_v36_shares += 1
+                _sh = _s.previous_hash
+                _pos += 1
         except:
             pass
+        
+        overall_v36_vote_pct = (overall_v36_votes * 100.0 / overall_total) if overall_total > 0 else 0
+        overall_v36_share_pct = (overall_v36_shares * 100.0 / overall_total) if overall_total > 0 else 0
         
         total_shares = sum(share_type_counts.values()) if share_type_counts else 0
         share_types = {}
@@ -170,6 +196,14 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'name': name,
                 'count': cnt,
                 'percentage': (cnt / total_shares * 100) if total_shares > 0 else 0
+            }
+        
+        # Full-chain desired_version percentages (unweighted, all shares)
+        full_chain_version_pcts = {}
+        for ver, cnt in full_chain_desired.items():
+            full_chain_version_pcts[str(ver)] = {
+                'count': cnt,
+                'percentage': (cnt * 100.0 / overall_total) if overall_total > 0 else 0
             }
         
         # Current share type being produced (tip of chain)
@@ -186,7 +220,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             successor_version = type(current_share).SUCCESSOR.VERSION
             successor_name = share_type_names.get(successor_version, 'V%d' % successor_version)
         
-        # Find the dominant desired version
+        # Find the dominant desired version in sampling window
         target_version = None
         target_percentage = 0
         for ver, weight in counts.iteritems():
@@ -242,59 +276,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             except:
                 pass
         
-        # Count V36 desired_version votes across the FULL chain (up to CHAIN_LENGTH)
-        # This tells users how many V36-capable nodes are mining, even before
-        # those votes reach the sampling window at positions [90%-100%] from tip.
-        overall_v36_votes = 0
-        overall_v36_shares = 0  # actual V36 share format
-        overall_total = 0
-        try:
-            _sh = node.best_share_var.value
-            _max = min(chain_height, chain_length)
-            _count = 0
-            while _sh is not None and _count < _max:
-                _s = node.tracker.items.get(_sh)
-                if _s is None:
-                    break
-                overall_total += 1
-                if getattr(_s, 'desired_version', _s.VERSION) >= 36:
-                    overall_v36_votes += 1
-                if _s.VERSION >= 36:
-                    overall_v36_shares += 1
-                _sh = _s.previous_hash
-                _count += 1
-        except:
-            pass
-        overall_v36_vote_pct = (overall_v36_votes * 100.0 / overall_total) if overall_total > 0 else 0
-        overall_v36_share_pct = (overall_v36_shares * 100.0 / overall_total) if overall_total > 0 else 0
-        
-        # Calculate how far V36 votes have propagated toward the sampling window.
-        # Sampling window covers shares at positions [CHAIN_LENGTH*9//10 .. CHAIN_LENGTH]
-        # from the tip.  V36 votes from recently-upgraded miners appear near the tip
-        # and age outward.  We find the deepest V36 vote position to track propagation.
-        propagation_target = chain_length * 9 // 10  # 7776 - where sampling window starts
-        v36_contiguous_from_tip = 0  # how many consecutive V36 votes from tip
-        deepest_v36_pos = 0  # deepest position (from tip) where a V36 vote exists
-        try:
-            _sh = node.best_share_var.value
-            _pos = 0
-            _max = min(chain_height, chain_length)
-            _contiguous = True
-            while _sh is not None and _pos < _max:
-                _s = node.tracker.items.get(_sh)
-                if _s is None:
-                    break
-                if getattr(_s, 'desired_version', _s.VERSION) >= 36:
-                    deepest_v36_pos = _pos + 1
-                    if _contiguous:
-                        v36_contiguous_from_tip = _pos + 1
-                elif _contiguous:
-                    _contiguous = False
-                _sh = _s.previous_hash
-                _pos += 1
-        except:
-            pass
-        
+        # Propagation: how far V36 votes have aged toward the sampling window
         propagation_pct = min(deepest_v36_pos / float(propagation_target) * 100, 100) if propagation_target > 0 else 0
         shares_to_window = max(0, propagation_target - deepest_v36_pos)
         time_to_window_seconds = shares_to_window * node.net.SHARE_PERIOD
@@ -390,8 +372,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             # Successor info
             successor_version=successor_version,
             successor_name=successor_name,
-            # Desired version voting breakdown
+            # Desired version voting breakdown (sampling window, weighted)
             versions=version_percentages,
+            # Full-chain desired_version votes (unweighted, all tracked shares)
+            full_chain_versions=full_chain_version_pcts,
             # Overall V36 stats (full chain, not just sampling window)
             overall_v36_votes=overall_v36_votes,
             overall_v36_vote_pct=round(overall_v36_vote_pct, 2),
