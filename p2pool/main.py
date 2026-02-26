@@ -426,7 +426,8 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                                my_pubkey_type=my_pubkey_type)
         web_root = web.get_web_root(wb, datadir_path, bitcoind_getinfo_var, static_dir=args.web_static,
                                      enable_miner_messages=getattr(args, 'enable_miner_messages', False),
-                                     transition_message=getattr(args, 'transition_message', None))
+                                     transition_message=getattr(args, 'transition_message', None),
+                                     trusted_proxy=getattr(args, 'trusted_proxy', None))
         caching_wb = worker_interface.CachingWorkerBridge(wb)
         worker_interface.WorkerInterface(caching_wb).attach_to(web_root, get_handler=lambda request: request.redirect('/static/'))
         web_serverfactory = server.Site(web_root)
@@ -789,6 +790,12 @@ def run():
              '(signed by COMBINED_DONATION_SCRIPT keys) are shown. '
              'Use this flag to opt-in to community messages.',
         action='store_true', default=False, dest='enable_miner_messages')
+    msg_group.add_argument('--trusted-proxy',
+        help='IP address of a trusted reverse proxy (e.g. 127.0.0.1 for local nginx). '
+             'When set, localhost-only endpoints will check X-Forwarded-For to determine '
+             'the real client IP instead of the TCP peer IP. '
+             'WARNING: Only set this if you have a reverse proxy that sets X-Forwarded-For.',
+        type=str, action='store', default=None, dest='trusted_proxy')
     
     args = parser.parse_args()
     args.node_owner_fee = args.worker_fee
@@ -1054,8 +1061,11 @@ def run():
                 postdata=p2pool.__version__ + ' ' + net.NAME + '\n' + text,
                 timeout=15,
             ).addBoth(lambda x: None)
-    if not args.no_bugreport:
-        log.addObserver(ErrorReporter().emit)
+    # M14 fix: external error reporter disabled — u.forre.st domain
+    # ownership is uncertain and reports are sent over plaintext HTTP.
+    # The ErrorReporter class is retained but no longer attached.
+    # if not args.no_bugreport:
+    #     log.addObserver(ErrorReporter().emit)
     if args.rconsole:
         from rfoo.utils import rconsole
         rconsole.spawn_server()

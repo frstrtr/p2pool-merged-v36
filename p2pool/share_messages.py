@@ -411,7 +411,7 @@ def decrypt_message_data(encrypted_envelope):
 
         # Verify MAC first (fast reject for wrong key)
         mac_computed = hmac.new(enc_key, ciphertext, hashlib.sha256).digest()
-        if mac_computed != mac_received:
+        if not hmac.compare_digest(mac_computed, mac_received):
             continue  # Wrong key — try next
 
         # MAC matches — decrypt

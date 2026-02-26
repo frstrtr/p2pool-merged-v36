@@ -46,9 +46,25 @@ def _atomic_write(filename, data):
         os.rename(filename + '.new', filename)
 
 def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Event(), static_dir=None,
-                 enable_miner_messages=False, transition_message=None):
+                 enable_miner_messages=False, transition_message=None, trusted_proxy=None):
     node = wb.node
     start_time = time.time()
+
+    _LOCALHOST_IPS = ('127.0.0.1', '::1', '::ffff:127.0.0.1')
+
+    def _get_real_client_ip(request):
+        """Get the real client IP, respecting X-Forwarded-For if behind a trusted proxy."""
+        peer_ip = request.getClientIP()
+        if trusted_proxy and peer_ip == trusted_proxy:
+            forwarded = request.getHeader('X-Forwarded-For')
+            if forwarded:
+                # X-Forwarded-For: client, proxy1, proxy2 — take the first (leftmost)
+                return forwarded.split(',')[0].strip()
+        return peer_ip
+
+    def _is_localhost(request):
+        """Check if the request originates from localhost."""
+        return _get_real_client_ip(request) in _LOCALHOST_IPS
     
     web_root = resource.Resource()
     
@@ -3013,6 +3029,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         def render_GET(self, request):
             request.setHeader('Content-Type', 'application/json')
             request.setHeader('Access-Control-Allow-Origin', '*')
+            # Security: only allow from localhost (exposes filesystem paths)
+            if not _is_localhost(request):
+                request.setResponseCode(403)
+                return json.dumps({'error': 'forbidden: localhost only'})
             try:
                 store = _get_message_store()
                 # Directories that _load_blob_dirs scans
@@ -3076,7 +3096,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 })
             except Exception as e:
                 import traceback
-                return json.dumps({'error': str(e), 'traceback': traceback.format_exc()})
+                print('Messaging: /msg/diag error: %s' % traceback.format_exc())
+                return json.dumps({'error': 'internal error'})
 
     msg_root.putChild('diag', MsgDiagResource())
 
@@ -3088,8 +3109,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             request.setHeader('Content-Type', 'application/json')
             request.setHeader('Access-Control-Allow-Origin', '*')
             # Security: only allow from localhost
-            client_ip = request.getClientIP()
-            if client_ip not in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
+            if not _is_localhost(request):
                 request.setResponseCode(403)
                 return json.dumps({'error': 'forbidden: localhost only'})
             try:
@@ -3127,8 +3147,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             request.setHeader('Content-Type', 'application/json')
             request.setHeader('Access-Control-Allow-Origin', '*')
             # Security: only allow from localhost
-            client_ip = request.getClientIP()
-            if client_ip not in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
+            if not _is_localhost(request):
                 request.setResponseCode(403)
                 return json.dumps({'error': 'forbidden: localhost only'})
             try:
@@ -3169,8 +3188,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             request.setHeader('Content-Type', 'application/json')
             request.setHeader('Access-Control-Allow-Origin', '*')
             # Security: only allow from localhost
-            client_ip = request.getClientIP()
-            if client_ip not in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
+            if not _is_localhost(request):
                 request.setResponseCode(403)
                 return json.dumps({'error': 'forbidden: localhost only'})
             try:

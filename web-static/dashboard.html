@@ -1913,9 +1913,15 @@
                         .attr('onclick', 'event.stopPropagation()')
                         .text(miner.address);
                     if (miner.mergedAddress) {
-                        addressCell.append('div')
-                            .attr('style', 'font-size: 0.7rem; color: #c3a634; margin-top: 2px; margin-left: 20px;')
-                            .html('🐕 <a href="https://dogechain.info/address/' + miner.mergedAddress + '" target="_blank" onclick="event.stopPropagation()" style="color: #c3a634; text-decoration: none;">' + miner.mergedAddress + '</a>');
+                        var mergedDiv = addressCell.append('div')
+                            .attr('style', 'font-size: 0.7rem; color: #c3a634; margin-top: 2px; margin-left: 20px;');
+                        mergedDiv.append('span').text('🐕 ');
+                        mergedDiv.append('a')
+                            .attr('href', 'https://dogechain.info/address/' + encodeURIComponent(miner.mergedAddress))
+                            .attr('target', '_blank')
+                            .attr('onclick', 'event.stopPropagation()')
+                            .attr('style', 'color: #c3a634; text-decoration: none;')
+                            .text(miner.mergedAddress);
                     }
                     if (miner.workers.length > 1) {
                         addressCell.append('span')

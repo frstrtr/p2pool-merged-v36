@@ -12,8 +12,8 @@
 | Severity     | Count | Description                                              |
 |--------------|-------|----------------------------------------------------------|
 | **CRITICAL** | 0     | —                                                        |
-| **HIGH**     | 10    | Auth bypass, memory DoS, eclipse attacks, assert-based validation |
-| **MEDIUM**   | 16    | Timing attacks, info disclosure, weak PRNG, amplification |
+| **HIGH**     | 10    | Auth bypass, memory DoS, eclipse attacks, assert-based validation — **4 fixed** |
+| **MEDIUM**   | 16    | Timing attacks, info disclosure, weak PRNG, amplification — **6 fixed, 1 false positive** |
 | **LOW**      | 11    | Minor input validation, config exposure                  |
 | **INFO**     | 4     | By-design limitations                                    |
 | **Total**    | **41** |                                                         |
@@ -28,7 +28,7 @@ Each HIGH finding is traced to its origin via `git blame`:
 | **V36 new** | H1, H2, H3, H10 | Introduced in v36 share-messaging subsystem |
 | **Mixed (legacy + V36 modifications)** | H6, H8, H9 | Legacy design modified or extended by v36 |
 
-### Fix Status
+### HIGH Fix Status
 
 | Finding | Status | Action Taken |
 |---------|--------|-------------|
@@ -42,6 +42,37 @@ Each HIGH finding is traced to its origin via `git blame`:
 | H8 | **FIXED** (partial) | IPv6 crash fixed in `_host_to_ident()`; /16 limiting unchanged |
 | H9 | Accepted | Vardiff auto-adjusts; standard stratum behavior |
 | H10 | Accepted (by design) | Documented broadcast obfuscation; ECIES planned for V37 |
+
+### MEDIUM Origin Classification
+
+| Origin | Findings | Description |
+|--------|----------|-------------|
+| **Legacy (forrestv 2011-2012)** | M9, M10, M11, M12, M13, M15 | Inherited from original p2pool |
+| **V36 new** | M1, M2, M3, M4, M5, M8, M14* | Introduced in v36 share-messaging / web subsystem |
+| **Mixed (legacy + V36 modifications)** | M6, M7, M16 | Legacy design extended by v36 dashboard |
+
+*M14 is legacy forrestv error reporter, but retained unchanged in V36.
+
+### MEDIUM Fix Status
+
+| Finding | Status | Action Taken |
+|---------|--------|-------------|
+| M1 | **FIXED** | `hmac.compare_digest()` for timing-safe MAC comparison |
+| M2 | Accepted (by design) | Broadcast obfuscation cipher; ECIES planned for V37 |
+| M3 | Accepted (V37 scope) | Key rotation + multisig deferred to V37 |
+| M4 | **FIXED** | `/msg/diag` restricted to localhost only |
+| M5 | **FIXED** | Traceback removed from `/msg/diag` error responses (logged server-side) |
+| M6 | Accepted | Sensitive endpoints now localhost-only; generic errors on public endpoints |
+| M7 | Accepted | No observed performance impact on PyPy; caching deferred to V37 |
+| M8 | **FIXED** | `--trusted-proxy` CLI arg + `_is_localhost()` helper with X-Forwarded-For support |
+| M9 | Accepted | Legacy gossip pattern; matches upstream p2pool |
+| M10 | Accepted | Bounded by P2P wire framing limits (~4 MB max payload) |
+| M11 | Accepted | Legacy code; `_max_payload_length` caps buffering |
+| M12 | Accepted | Already capped to `1000//len(hashes)` shares per request |
+| M13 | **False positive** | PoW already validated in `Share.__init__()` before `tracker.add()` |
+| M14 | **FIXED** | Disabled `u.forre.st` error reporter (uncertain domain ownership, plaintext HTTP) |
+| M15 | Accepted | Rogue localhost daemon is outside threat model |
+| M16 | **FIXED** | `.html()`/`.innerHTML` → `.text()`/`textContent` for merged addresses in 3 dashboard files |
 
 ---
 
@@ -374,7 +405,7 @@ Each HIGH finding is traced to its origin via `git blame`:
 1. ~~**Add localhost restriction to `/msg/ban` and `/msg/unban`**~~ — ✅ FIXED (H1+H3)
 2. ~~**Replace `assert` with `raise ValueError` for all validation**~~ — ✅ FIXED, 15 asserts converted (H4)
 3. **Add `max_length` to VarStr/ListType + reduce P2P payload limit** — Accepted: bounded by payload limit (H5+H6)
-4. **Use `hmac.compare_digest()` for MAC comparison** — one-line fix for timing attack (M1)
+4. ~~**Use `hmac.compare_digest()` for MAC comparison**~~ — ✅ FIXED (M1)
 5. ~~**Limit POST body size on all endpoints**~~ — ✅ FIXED, 64KB cap + HTTP 413 (H2)
 
 ---

@@ -829,8 +829,19 @@
                         if (mp.address) {
                             var mergedAddrDiv = document.createElement('div');
                             mergedAddrDiv.style.cssText = 'font-family: "Courier New", monospace; font-size: 0.9rem; color: #c3a634; margin-top: 4px;';
-                            mergedAddrDiv.innerHTML = '🐕 <a href="https://dogechain.info/address/' + mp.address + '" target="_blank" style="color: #c3a634; text-decoration: none;">' + mp.address + '</a>' +
-                                ' <span style="font-size: 0.75rem; color: #8888a0;">(' + (mp.symbol || 'DOGE') + ' merged mining)</span>';
+                            var dogeSpan = document.createElement('span');
+                            dogeSpan.textContent = '🐕 ';
+                            mergedAddrDiv.appendChild(dogeSpan);
+                            var addrLink = document.createElement('a');
+                            addrLink.href = 'https://dogechain.info/address/' + encodeURIComponent(mp.address);
+                            addrLink.target = '_blank';
+                            addrLink.style.cssText = 'color: #c3a634; text-decoration: none;';
+                            addrLink.textContent = mp.address;
+                            mergedAddrDiv.appendChild(addrLink);
+                            var symbolSpan = document.createElement('span');
+                            symbolSpan.style.cssText = 'font-size: 0.75rem; color: #8888a0;';
+                            symbolSpan.textContent = ' (' + (mp.symbol || 'DOGE') + ' merged mining)';
+                            mergedAddrDiv.appendChild(symbolSpan);
                             headerDiv.insertBefore(mergedAddrDiv, headerDiv.querySelector('.miner-status'));
                         }
                     });
@@ -838,12 +849,27 @@
                     stats.merged_payouts.forEach(function(mp) {
                         var card = document.createElement('div');
                         card.className = 'stat-card';
-                        card.innerHTML = '<h3>' + mp.symbol + ' Payout</h3>' +
-                            '<div class="stat-value success">' + d3.format(',.4f')(mp.amount) + '</div>' +
-                            '<div class="stat-label">' + mp.network + ' on next block</div>' +
-                            '<div class="stat-label" style="font-size: 0.7rem; margin-top: 5px;">' +
-                            '<a href="https://dogechain.info/address/' + mp.address + '" target="_blank" style="color: var(--primary);">' + 
-                            mp.address.substring(0, 12) + '...' + mp.address.substring(mp.address.length - 4) + '</a></div>';
+                        var h3 = document.createElement('h3');
+                        h3.textContent = mp.symbol + ' Payout';
+                        card.appendChild(h3);
+                        var valDiv = document.createElement('div');
+                        valDiv.className = 'stat-value success';
+                        valDiv.textContent = d3.format(',.4f')(mp.amount);
+                        card.appendChild(valDiv);
+                        var labelDiv = document.createElement('div');
+                        labelDiv.className = 'stat-label';
+                        labelDiv.textContent = mp.network + ' on next block';
+                        card.appendChild(labelDiv);
+                        var addrLabelDiv = document.createElement('div');
+                        addrLabelDiv.className = 'stat-label';
+                        addrLabelDiv.style.cssText = 'font-size: 0.7rem; margin-top: 5px;';
+                        var addrLink2 = document.createElement('a');
+                        addrLink2.href = 'https://dogechain.info/address/' + encodeURIComponent(mp.address);
+                        addrLink2.target = '_blank';
+                        addrLink2.style.cssText = 'color: var(--primary);';
+                        addrLink2.textContent = mp.address.substring(0, 12) + '...' + mp.address.substring(mp.address.length - 4);
+                        addrLabelDiv.appendChild(addrLink2);
+                        card.appendChild(addrLabelDiv);
                         mergedGrid.appendChild(card);
                     });
                 }
