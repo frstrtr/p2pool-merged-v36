@@ -1532,14 +1532,12 @@ class ShareMessageStore(object):
             # unpack() strips (authority must be "earned" via verification).
             if authority_pubkey and msg.has_signature:
                 msg.verify_authority_direct(authority_pubkey)
-            # Fallback: if ECDSA verification failed (e.g. no ecdsa/coincurve
-            # library) but the envelope was successfully decrypted by an
-            # authority pubkey, grant authority status anyway.  Decryption
-            # itself proves authenticity — only the private key holder could
-            # have encrypted the envelope with HMAC-SHA256 key derivation.
             if authority_pubkey and not msg.is_protocol_authority:
-                msg.flags |= FLAG_PROTOCOL_AUTHORITY
-                msg.verified = True
+                import logging
+                logging.getLogger('p2pool.share_messages').warning(
+                    'Authority message ECDSA verification failed — '
+                    'install ecdsa or coincurve: '
+                    'pypy -m pip install ecdsa')
             if self._add_message(msg):
                 added += 1
         return added
