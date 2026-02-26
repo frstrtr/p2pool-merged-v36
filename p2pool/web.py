@@ -481,24 +481,20 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         '017c9299b7c4579e67c0e7670dfc9c4207c045f7c7cc28f8eee9a11e1779f41440b240f6c66376d03d5ecd2d03a896ab93135f354ac895032c72486ee15202bfbaea01e595d5ef8c49a8c66a0a5da39fa1e5ef4ad669874582380dc0915f8eafb7697b55f6ba8208c017ccd112710cf8f06cd6b17fb9f22889c6c1dcbbf636e0c70963ee8ad00825f95b9f6c7d42089ba271155b8d8420e38d6d8925f91cd348c7e517a9461fd1574e990d682cedc4c5c646612b0d91c6662afb91c2d157859230d6185e31e8c2c4e98273f824e3c48f9d372f5fc65bfcd8d10e1ff729f9b87c9c841a1f087055703d1e85b9039c3cd87184a66abf589c0642f3243cba67b5aa3ed7154f75350af5752652795709b7537f3a18f05bfaa2a88895e3e2afe7195a2f39f67ba0ccb3f7ab6779ffdb0ddf02fed2d661fb474b6fc5cafa76dc087cd6927bf5595237e7531927b2e6f688584c5608d6905347460bf82e5449eede31dae5a848199a2fd6166f3c0e',
     ]
 
-    # Track when we last scanned for blob files (epoch seconds)
-    _last_blob_scan = [0]
-    _blob_scan_count = [0]  # how many scans have been performed
+    _blobs_loaded = [False]
 
     def _load_blob_dirs(store):
         """Load transition/bootstrap blobs from all known directories.
 
-        Idempotent — _add_message() deduplicates by hash, so re-loading
-        already-loaded blobs is a cheap no-op.  Called both at store
-        creation and periodically (every 5 min) so that blobs added after
-        startup (e.g. via ``git pull``) are picked up without a restart.
+        Called once at store creation.  Blobs are deduplicated by
+        message hash, so calling again is safe but wasteful (re-reads
+        files, re-decrypts, re-verifies ECDSA just to be rejected by
+        the dedup set).  To pick up new blobs added after startup,
+        restart the node.
         """
-        now = time.time()
-        if now - _last_blob_scan[0] < 300:  # debounce: 5 minutes
+        if _blobs_loaded[0]:
             return
-        _last_blob_scan[0] = now
-        _blob_scan_count[0] += 1
-        is_first_scan = (_blob_scan_count[0] == 1)
+        _blobs_loaded[0] = True
 
         # 1. data/<net>/{bootstrap_messages,transition_messages,transitional_messages}/
         if datadir_path:
@@ -522,7 +518,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     if n > 0:
                         print('Messaging: loaded %d shipped message(s) from %s' % (n, shipped_dir))
                         _found_shipped = True
-        if not _found_shipped and is_first_scan:
+        if not _found_shipped:
             print('Messaging: no shipped blobs found (searched %s)' % ', '.join(
                 os.path.join(b, d) for b in _search_bases for d in ('transition_messages', 'transitional_messages')))
 
@@ -543,7 +539,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         for blob_hex in _BUILTIN_TRANSITION_BLOBS:
             try:
                 n = store.load_blob_hex(blob_hex)
-                if n > 0 and is_first_scan:
+                if n > 0:
                     print('Messaging: loaded %d builtin message(s)' % n)
             except Exception:
                 pass
@@ -574,8 +570,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     except Exception:
                         pass
 
-            # Always try to (re-)load blob dirs — debounced to every 5 min.
-            # This picks up blobs added after startup (e.g. via git pull).
+            # Load blob dirs once (idempotent — skips if already loaded).
             _load_blob_dirs(store)
 
             from p2pool.share_messages import MSG_TRANSITION_SIGNAL
