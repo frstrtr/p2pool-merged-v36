@@ -1819,7 +1819,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     }
 
                 user_merged_work[chainid] = result
-            except Exception:
+            except Exception as e:
+                print >>sys.stderr, '[MERGED-DIAG] WARNING: _build_user_specific_merged_work failed for chain %s: %s' % (chainid, e)
                 import traceback
                 traceback.print_exc()
                 user_merged_work[chainid] = aux_work
@@ -2295,13 +2296,28 @@ class WorkerBridge(worker_interface.WorkerBridge):
             max_work_events = 30 if not self.node.net.PERSIST else 3
             on_time = work_event_diff <= max_work_events
 
-            # Debug: Uncomment to trace merged mining auxpow checking (prints on every share)
-            # print >>sys.stderr, '[DEBUG] mm_later has %d items, pow_hash=%064x' % (len(mm_later), pow_hash)
-            # for aux_work, index, hashes in mm_later:
-            #     print >>sys.stderr, '[DEBUG] Checking aux_work target=%064x, meets=%s' % (aux_work['target'], pow_hash <= aux_work['target'])
-            
+            # Merged mining diagnostic: always log when parent block found
+            if pow_hash <= header['bits'].target:
+                if mm_later:
+                    print >>sys.stderr, '[MERGED-DIAG] Parent block found! mm_later has %d chain(s), pow_hash=%064x' % (len(mm_later), pow_hash)
+                    for _aw, _idx, _hs in mm_later:
+                        _meets = pow_hash <= _aw['target']
+                        print >>sys.stderr, '[MERGED-DIAG]   chain=%s target=%064x meets=%s multiaddress=%s' % (
+                            _aw.get('merged_net_symbol', '?'), _aw['target'], _meets, _aw.get('multiaddress', False))
+                else:
+                    print >>sys.stderr, '[MERGED-DIAG] WARNING: Parent block found but mm_later is EMPTY! No merged mining check will run.'
+                    print >>sys.stderr, '[MERGED-DIAG]   merged_work.value has %d chain(s)' % len(self.merged_work.value)
+                    if self.merged_work.value:
+                        # mm_later was empty at get_work() time but merged work exists NOW.
+                        # Cannot submit merged block (LTC coinbase lacks fabe6d6d commitment).
+                        # But log what WOULD have been a twin so we can track missed opportunities.
+                        for _cid, _mw in self.merged_work.value.iteritems():
+                            if pow_hash <= _mw.get('target', 0):
+                                print >>sys.stderr, '[MERGED-DIAG] MISSED TWIN! %s target=%064x WOULD have qualified but LTC coinbase has no merged commitment' % (
+                                    _mw.get('merged_net_symbol', 'chain_%s' % _cid), _mw['target'])
+
             if mm_later and pow_hash <= mm_later[0][0]['target']:
-                pass  # Logged by MergedBroadcaster below
+                pass  # Target met — will be processed in loop below
 
             for aux_work, index, hashes in mm_later:
                 try:
@@ -2331,7 +2347,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     
                     if pow_hash <= aux_work['target']:
                         # Hash meets Dogecoin difficulty - submit auxpow block
-                        # Logged by MergedBroadcaster below
+                        merged_net_sym = aux_work.get('merged_net_symbol', 'MERGED')
+                        print >>sys.stderr, '[MERGED-SUBMIT] %s target met! pow=%064x target=%064x Building block...' % (
+                            merged_net_sym, pow_hash, aux_work['target'])
                         # Check if this is multiaddress merged mining (getblocktemplate with auxpow)
                         if aux_work.get('multiaddress'):
                             # Build complete Dogecoin block with auxpow proof
@@ -2716,11 +2734,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 
                                 @df.addErrback
                                 def _(err):
-                                    # Debug: Uncomment to trace RPC errors - print >>sys.stderr, '[DEBUG] rpc_submitblock raised error: %s' % (err,)
+                                    print >>sys.stderr, '[MERGED-SUBMIT] ERROR: rpc_submitblock failed: %s' % (err.getErrorMessage() if hasattr(err, 'getErrorMessage') else err,)
                                     log.err(err, 'Error submitting multiaddress merged block:')
                                     
                             except Exception as e:
-                                print >>sys.stderr, 'Error building multiaddress merged block: %s' % (e,)
+                                print >>sys.stderr, '[MERGED-SUBMIT] CRITICAL ERROR building multiaddress merged block: %s' % (e,)
+                                import traceback
+                                traceback.print_exc()
                                 log.err(None, 'Error building multiaddress merged block:')
                         else:
                             # Standard getauxblock submission (backward compatible)
@@ -2833,6 +2853,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             def _(err):
                                 log.err(err, 'Error submitting merged block:')
                 except:
+                    print >>sys.stderr, '[MERGED-SUBMIT] CRITICAL ERROR in merged mining POW processing:'
+                    import traceback
+                    traceback.print_exc()
                     log.err(None, 'Error while processing merged mining POW:')
 
             # P2Pool share creation - re-enabled for PERSIST=False bootstrap
