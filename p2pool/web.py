@@ -1341,32 +1341,67 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         nb = wb.node_best_difficulty
         network_difficulty = bitcoin_data.target_to_difficulty(node.bitcoind_work.value['bits'].target)
         
-        def pct_of_block(diff):
-            return (diff / network_difficulty * 100) if network_difficulty > 0 and diff > 0 else 0
+        def pct_of_block(diff, net_diff):
+            return (diff / net_diff * 100) if net_diff > 0 and diff > 0 else 0
         
-        return dict(
+        result = dict(
             network_difficulty=network_difficulty,
             all_time=dict(
                 difficulty=nb['all_time'],
-                pct_of_block=pct_of_block(nb['all_time']),
+                pct_of_block=pct_of_block(nb['all_time'], network_difficulty),
                 miner=nb['all_time_user'],
                 timestamp=nb['all_time_ts'],
             ),
             session=dict(
                 difficulty=nb['session'],
-                pct_of_block=pct_of_block(nb['session']),
+                pct_of_block=pct_of_block(nb['session'], network_difficulty),
                 miner=nb['session_user'],
                 timestamp=nb['session_ts'],
                 started=wb.session_start_time,
             ),
             round=dict(
                 difficulty=nb['round'],
-                pct_of_block=pct_of_block(nb['round']),
+                pct_of_block=pct_of_block(nb['round'], network_difficulty),
                 miner=nb['round_user'],
                 timestamp=nb['round_ts'],
                 started=nb['round_start'],
             ),
         )
+        
+        # Add merged chain (DOGE) best share stats
+        mb = wb.merged_best_difficulty
+        merged_difficulty = 0
+        merged_symbol = None
+        try:
+            for chainid, aux_work in wb.merged_work.value.iteritems():
+                merged_target = aux_work.get('target', 0)
+                if merged_target and merged_target > 0:
+                    merged_difficulty = bitcoin_data.target_to_difficulty(merged_target)
+                    merged_symbol = aux_work.get('merged_net_symbol', 'DOGE' if chainid == 98 else 'AUX')
+                    break
+        except Exception:
+            pass
+        
+        if merged_difficulty > 0 or mb['all_time'] > 0:
+            result['merged'] = dict(
+                network_difficulty=merged_difficulty,
+                symbol=merged_symbol or 'DOGE',
+                all_time=dict(
+                    difficulty=mb['all_time'],
+                    pct_of_block=pct_of_block(mb['all_time'], merged_difficulty),
+                    miner=mb['all_time_user'],
+                    timestamp=mb['all_time_ts'],
+                ),
+                round=dict(
+                    difficulty=mb['round'],
+                    pct_of_block=pct_of_block(mb['round'], merged_difficulty),
+                    miner=mb['round_user'],
+                    timestamp=mb['round_ts'],
+                    started=mb['round_start'],
+                ),
+            )
+        
+        return result
     web_root.putChild('best_share', WebInterface(get_best_share))
     
     # ==== Individual miner payouts endpoint ====

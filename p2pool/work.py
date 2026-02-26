@@ -228,6 +228,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
             'round_ts': 0,
             'round_start': time.time(),
         }
+        # Merged chain (DOGE) best difficulty tracking
+        self.merged_best_difficulty = {
+            'all_time': 0,
+            'all_time_user': None,
+            'all_time_ts': 0,
+            'round': 0,              # Resets when pool finds a DOGE block
+            'round_user': None,
+            'round_ts': 0,
+            'round_start': time.time(),
+        }
 
         self.removed_unstales_var = variable.Variable((0, 0, 0))
         self.removed_doa_unstales_var = variable.Variable(0)
@@ -1443,7 +1453,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         return addr_hash_rates
 
     def update_best_difficulty(self, user, difficulty):
-        """Track best difficulty for a miner and node-wide"""
+        """Track best difficulty for a miner and node-wide (parent + merged)"""
         now = time.time()
         if user not in self.miner_best_difficulty:
             self.miner_best_difficulty[user] = {
@@ -1461,7 +1471,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         if difficulty > rec['round']:
             rec['round'] = difficulty
         
-        # Node-wide tracking
+        # Node-wide tracking (parent chain)
         nb = self.node_best_difficulty
         if difficulty > nb['all_time']:
             nb['all_time'] = difficulty
@@ -1475,6 +1485,17 @@ class WorkerBridge(worker_interface.WorkerBridge):
             nb['round'] = difficulty
             nb['round_user'] = user
             nb['round_ts'] = now
+        
+        # Merged chain (DOGE) tracking — same PoW hash, different target
+        mb = self.merged_best_difficulty
+        if difficulty > mb['all_time']:
+            mb['all_time'] = difficulty
+            mb['all_time_user'] = user
+            mb['all_time_ts'] = now
+        if difficulty > mb['round']:
+            mb['round'] = difficulty
+            mb['round_user'] = user
+            mb['round_ts'] = now
 
     def reset_round_best_difficulty(self):
         """Reset round-level best difficulty (called when pool finds a block)"""
@@ -1488,6 +1509,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.node_best_difficulty['round_ts'] = 0
         self.node_best_difficulty['round_start'] = now
         print >>sys.stderr, 'Best difficulty round stats reset (new round started)'
+
+    def reset_merged_round_best_difficulty(self):
+        """Reset merged chain round-level best difficulty (called when pool finds a DOGE block)"""
+        now = time.time()
+        self.merged_best_difficulty['round'] = 0
+        self.merged_best_difficulty['round_user'] = None
+        self.merged_best_difficulty['round_ts'] = 0
+        self.merged_best_difficulty['round_start'] = now
+        print >>sys.stderr, 'Merged best difficulty round stats reset (DOGE block found)'
 
     def get_miner_best_difficulty(self, user):
         """Get best difficulty stats for a miner"""
@@ -2720,6 +2750,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # Keep only last 100 merged blocks
                                         if len(self.recent_merged_blocks) > 100:
                                             self.recent_merged_blocks = self.recent_merged_blocks[-100:]
+                                        # Reset merged round best difficulty
+                                        self.reset_merged_round_best_difficulty()
                                         
                                         # Async verification after a delay
                                         if 'merged_proxy' in aux_work:
@@ -2835,6 +2867,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # Keep only last 100 merged blocks
                                         if len(self.recent_merged_blocks) > 100:
                                             self.recent_merged_blocks = self.recent_merged_blocks[-100:]
+                                        # Reset merged round best difficulty
+                                        self.reset_merged_round_best_difficulty()
                                         
                                         # For testnet: async verification after a delay
                                         # Use aux_work['hash'] (Dogecoin block hash) NOT pow_hash (scrypt hash)
