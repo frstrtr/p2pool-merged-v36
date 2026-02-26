@@ -2104,7 +2104,7 @@
                 var local = d3.sum(values(local_stats.miner_hash_rates));
                 var local_dead = d3.sum(values(local_stats.miner_dead_hash_rates));
                 d3.select('#local_rate').text(format_hashrate(local));
-                d3.select('#local_doa').text(d3.format('.2p')(local_dead/local));
+                d3.select('#local_doa').text(local > 0 ? d3.format('.2p')(local_dead/local) : '0%');
                 
                 d3.select('#shares_total').text(local_stats.shares.total);
                 d3.select('#shares_orphan').text(local_stats.shares.orphan);
@@ -2520,8 +2520,8 @@
                     }
                 });
                 
-                var time_to_share = local_stats.attempts_to_share / local;
-                d3.select('#time_to_share').text(isFinite(time_to_share) ? format_dt(time_to_share) : '∞');
+                var time_to_share = local > 0 ? local_stats.attempts_to_share / local : Infinity;
+                d3.select('#time_to_share').text(local > 0 && isFinite(time_to_share) ? format_dt(time_to_share) : '-');
                 
                 d3.json('../global_stats', function(global_stats) {
                     if (!global_stats) return;
