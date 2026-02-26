@@ -1430,6 +1430,7 @@
                                 <th title="Last pseudoshare received">Last Seen</th>
                                 <th title="Dead on Arrival rate">DOA Rate</th>
                                 <th title="Predicted payout if block found now">Predicted Payout</th>
+                                <th title="Predicted merged mining payout if block found now">Merged Payout</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -1866,20 +1867,22 @@
                 
                 if (display.length === 0) {
                     d3.select('#active_miners tbody').append('tr').append('td')
-                        .attr('colspan', '7')
+                        .attr('colspan', '8')
                         .attr('style', 'text-align: center; color: #888;')
                         .text('No miners currently connected via stratum');
                     return;
                 }
                 
-                // Fetch payout data
+                // Fetch payout data (both main chain and merged)
                 d3.json('../current_payouts', function(payouts_data) {
+                d3.json('../current_merged_payouts', function(merged_payouts_data) {
                 var payouts = {};
                 if (payouts_data) {
                     for (var addr in payouts_data) {
                         payouts[addr] = payouts_data[addr];
                     }
                 }
+                var mergedPayouts = merged_payouts_data || {};
                 
                 var tbody = d3.select('#active_miners tbody');
                 
@@ -1975,9 +1978,22 @@
                     // DOA Rate
                     minerRow.append('td').text(d3.format('.2%')(miner.doa_percent));
                     
-                    // Payout
+                    // Payout with symbol
                     var payout = payouts[miner.address] || 0;
-                    minerRow.append('td').text(d3.format('.4f')(payout));
+                    var payoutSymbol = (currency_info && currency_info.symbol) || 'LTC';
+                    minerRow.append('td').text(d3.format('.4f')(payout) + ' ' + payoutSymbol);
+                    
+                    // Merged payout
+                    var mergedEntry = mergedPayouts[miner.address];
+                    var mergedPayoutCell = minerRow.append('td');
+                    if (mergedEntry && mergedEntry.merged && mergedEntry.merged.length > 0) {
+                        var mp = mergedEntry.merged[0];
+                        mergedPayoutCell
+                            .style('color', '#c3a634')
+                            .text(d3.format(',.2f')(mp.amount) + ' ' + (mp.symbol || 'DOGE'));
+                    } else {
+                        mergedPayoutCell.style('color', '#666').text('-');
+                    }
                     
                     // Create worker rows (initially hidden)
                     miner.workers.forEach(function(worker, widx) {
@@ -2030,7 +2046,9 @@
                         var doaPercent = worker.hashrate > 0 ? worker.doa_hashrate / worker.hashrate : 0;
                         workerRow.append('td').text(d3.format('.2%')(doaPercent));
                         workerRow.append('td').text('-');
+                        workerRow.append('td').text('-');
                     });
+                });
                 });
                 });
             });
