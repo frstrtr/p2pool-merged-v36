@@ -421,7 +421,7 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                 else:
                     print '             Operator payout address: (auto-convert from parent)'
             print
-            # [CHECK 3] Merged operator address — show actual DOGE address
+            # [CHECK 3] Merged operator address -- show actual DOGE address
             if args.merged_operator_address:
                 print '  [CHECK 3] Merged operator address: %s (explicit via --merged-operator-address)' % args.merged_operator_address
             else:
@@ -436,7 +436,7 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                             my_pubkey_hash, _merged_net.ADDRESS_VERSION, -1, _merged_net)
                         print '  [CHECK 3] Merged operator address: %s (auto-converted from %s)' % (merged_operator_addr, my_address)
                     else:
-                        print '  [CHECK 3] Merged operator address: (auto-convert pending — dogecoin network not loaded)'
+                        print '  [CHECK 3] Merged operator address: (auto-convert pending -- dogecoin network not loaded)'
                 except Exception as e:
                     print '  [CHECK 3] Merged operator address: FAILED to convert (%s)' % e
             print
@@ -469,7 +469,7 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
             if args.coinb_texts:
                 print '             Parent chain (LTC scriptSig): %s' % ', '.join(repr(t) for t in args.coinb_texts)
             else:
-                print '             Parent chain (LTC scriptSig): (none — use --coinbtext to set)'
+                print '             Parent chain (LTC scriptSig): (none -- use --coinbtext to set)'
             print '             Merged chain (DOGE OP_RETURN):  configured in mm-adapter config.yaml'
             print '             Merged chain fallback default:  \'%s\'' % _mm_tag
             print
