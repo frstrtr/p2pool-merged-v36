@@ -2,7 +2,7 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
-## [v36-0.07-alpha] - 2026-02-26
+## [v36-0.02-alpha] - 2026-02-26
 
 ### Critical Fixes
 - **fix: miner.html shows 0 blocks for inactive miners** - Restructured `loadMinerStats()` to always load payouts, graphs, and merged blocks regardless of miner active status; previously miners not connected to the viewing node saw an error page with no block history (`5e46adf`)
