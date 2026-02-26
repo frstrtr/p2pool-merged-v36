@@ -83,7 +83,7 @@ export PATH="$PWD/pypy2.7-v7.3.20-linux64/bin:$PATH"
 
 # Install P2Pool dependencies (includes scrypt hashing)
 pypy -m ensurepip
-pypy -m pip install twisted pycryptodome 'scrypt>=0.8.0,<=0.8.22'
+pypy -m pip install twisted pycryptodome 'scrypt>=0.8.0,<=0.8.22' ecdsa
 ```
 
 ### Step 2: Configure Litecoin Core
@@ -328,7 +328,7 @@ Python 2 is no longer available. Use PyPy:
 sudo snap install pypy --classic
 
 # Install dependencies
-pypy -m pip install twisted==19.10.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22'
+pypy -m pip install twisted==19.10.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22' ecdsa
 
 # Clone and setup
 git clone https://github.com/frstrtr/p2pool-merged-v36.git
