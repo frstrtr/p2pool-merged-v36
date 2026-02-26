@@ -1570,8 +1570,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         
         # Block explorer URLs for merged chains
         merged_explorers = {
-            98: {'testnet': 'https://blockchair.com/dogecoin/block/',
-                 'mainnet': 'https://blockchair.com/dogecoin/block/'}
+            98: {'testnet': 'https://dogechain.info/block/',
+                 'mainnet': 'https://dogechain.info/block/'}
         }
         
         for b in wb.recent_merged_blocks:

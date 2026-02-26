@@ -1920,7 +1920,7 @@
                             .attr('style', 'font-size: 0.7rem; color: #c3a634; margin-top: 2px; margin-left: 20px;');
                         mergedDiv.append('span').text('🐕 ');
                         mergedDiv.append('a')
-                            .attr('href', 'https://blockchair.com/dogecoin/address/' + encodeURIComponent(miner.mergedAddress))
+                            .attr('href', 'https://dogechain.info/address/' + encodeURIComponent(miner.mergedAddress))
                             .attr('target', '_blank')
                             .attr('onclick', 'event.stopPropagation()')
                             .attr('style', 'color: #c3a634; text-decoration: none;')
@@ -2781,8 +2781,8 @@
                 // Block explorer URLs for different merged mining chains
                 var merged_explorers = {
                     98: {  // Dogecoin (chainid 98)
-                        testnet: 'https://blockchair.com/dogecoin/block/',
-                        mainnet: 'https://blockchair.com/dogecoin/block/',
+                        testnet: 'https://dogechain.info/block/',
+                        mainnet: 'https://dogechain.info/block/',
                     },
                 };
                 
@@ -3078,8 +3078,8 @@
         function getMergedExplorerUrl(symbol, address) {
             // Block explorers for merged mining chains
             var explorers = {
-                'tDOGE': 'https://blockchair.com/dogecoin/address/',
-                'DOGE': 'https://blockchair.com/dogecoin/address/',
+                'tDOGE': 'https://dogechain.info/address/',
+                'DOGE': 'https://dogechain.info/address/',
             };
             var prefix = explorers[symbol] || '#';
             return prefix + address;

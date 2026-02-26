@@ -343,8 +343,8 @@
                 
                 function getMergedExplorerUrl(symbol, address) {
                     var explorers = {
-                        'tDOGE': 'https://blockchair.com/dogecoin/address/',
-                        'DOGE': 'https://blockchair.com/dogecoin/address/',
+                        'tDOGE': 'https://dogechain.info/address/',
+                        'DOGE': 'https://dogechain.info/address/',
                     };
                     return (explorers[symbol] || '#') + address;
                 }
@@ -405,8 +405,8 @@
                     // Note: Use block hash (not pow_hash) for explorer links
                     var merged_explorers = {
                         98: {  // Dogecoin (chainid 98)
-                            testnet: 'https://blockchair.com/dogecoin/block/',
-                            mainnet: 'https://blockchair.com/dogecoin/block/',
+                            testnet: 'https://dogechain.info/block/',
+                            mainnet: 'https://dogechain.info/block/',
                         },
                         // Add more chain explorers here as needed
                     };
