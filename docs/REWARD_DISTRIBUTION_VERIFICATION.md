@@ -66,7 +66,7 @@ Each LTC P2Pool block coinbase contains:
 Each DOGE merged-mined block coinbase contains:
 ```
 [0..N] Miner payout outputs (proportional to same PPLNS weights)
-[N+1]  OP_RETURN "c2poolmerged" (pool identifier tag)
+[N+1]  OP_RETURN "technocore" (pool identifier tag)
 [N+2]  P2SH donation output (COMBINED_DONATION_SCRIPT on DOGE)
 ```
 
@@ -79,7 +79,7 @@ Each DOGE merged-mined block coinbase contains:
 | Witness commitment | Yes (OP_RETURN [0]) | No (not SegWit) |
 | Miner outputs | From `generate_transaction()` | From `build_merged_coinbase()` |
 | Donation output | COMBINED_DONATION_SCRIPT (P2SH) | COMBINED_DONATION_SCRIPT (P2SH) |
-| Pool tag | Share ref hash OP_RETURN | "c2poolmerged" OP_RETURN |
+| Pool tag | Share ref hash OP_RETURN | "technocore" OP_RETURN |
 | Finder fee | 0.5% (subsidy//200) added to finder | 0.5% to per-user finder address |
 
 ---
@@ -202,7 +202,7 @@ This confirms: **when the PPLNS window state is the same, the payout distributio
 | Finder fee (0.5%) | **PASS** | Paid to actual block finder, not node operator |
 | `merged_node_owner_fee` = 0 | **PASS** | Always 0 in PPLNS mode; operator fee via share replacement |
 | Donation output structure | **PASS** | COMBINED_DONATION_SCRIPT (P2SH) on both chains |
-| OP_RETURN tag | **PASS** | "c2poolmerged" on DOGE, share ref hash on LTC |
+| OP_RETURN tag | **PASS** | "technocore" on DOGE, share ref hash on LTC |
 | Edge: miner=donation addr | **SAFE** | Practically unreachable; different behavior LTC vs DOGE |
 | Edge: single miner | **PASS** | Correct minimal coinbase |
 | Edge: empty shareholders | **SAFE** | Guarded upstream; graceful degradation |

@@ -21,7 +21,7 @@ chain:
   chain_id: 98
   network_magic: "fcc1b7dc"  # Dogecoin testnet magic
 
-coinbase_text: "c2poolmerged"
+coinbase_text: "technocore"
 
 logging:
   level: "DEBUG"              # Verbose logging for testnet debugging

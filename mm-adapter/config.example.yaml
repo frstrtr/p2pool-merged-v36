@@ -33,7 +33,7 @@ chain:
 # ── Pool identification ─────────────────────────────────────────────────
 # Embedded in OP_RETURN outputs of merged blocks to identify the pool.
 # Can be overridden per-request via {"coinbase_text": "..."} in getblocktemplate params.
-coinbase_text: "c2poolmerged"
+coinbase_text: "technocore"
 
 # ── Logging ──────────────────────────────────────────────────────────────
 logging:

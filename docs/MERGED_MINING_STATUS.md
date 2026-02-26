@@ -34,7 +34,7 @@
 - **node29** (192.168.86.29): V36, miner `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW`, ~1.2 MH/s
 - **node31** (192.168.86.31): V36, miner `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g`, ~1.2 MH/s
 - **node30** (192.168.86.30): V35 (jtoomim baseline), miner `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ`, ~1.2 MH/s
-- **mm-adapter**: 127.0.0.1:44556 on each V36 node (adapter_v2.py in screen session)
+- **mm-adapter**: 127.0.0.1:44556 on each V36 node (adapter.py in screen session)
 - **Runtime**: PyPy 2.7 (pypy2.7-v7.3.20-linux64)
 - **Pool Stats**: ~4 MH/s total, ~1000+ shares, 3 peers
 

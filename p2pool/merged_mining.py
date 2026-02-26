@@ -54,7 +54,7 @@ DONATION_SCRIPT = COMBINED_DONATION_SCRIPT
 #   Litecoin mainnet post-V36 : MLhSmVQxMusLE3pjGFvp4unFckgjeD8LUA
 
 # P2Pool merged mining identifier for OP_RETURN
-P2POOL_TAG = 'P2Pool merged mining'
+P2POOL_TAG = 'technocore'
 
 
 def build_coinbase_input_script(height, extradata=''):

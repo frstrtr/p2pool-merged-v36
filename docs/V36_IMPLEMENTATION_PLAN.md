@@ -3297,7 +3297,7 @@ Block 2459 (V36 node29):
   vout[0]: 152,134.48 DOGE → miner_A (PPLNS ~53%)
   vout[1]:  52,035.70 DOGE → miner_B (PPLNS ~18%)
   vout[2]:  81,463.82 DOGE → miner_C (PPLNS ~29%)
-  vout[3]:       0.00 DOGE → OP_RETURN "c2poolmerged"
+  vout[3]:       0.00 DOGE → OP_RETURN "technocore"
   vout[4]:       1.00 DOGE → donation script (marker with dust)
 ```
 

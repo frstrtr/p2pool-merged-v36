@@ -66,7 +66,7 @@ p2pool/merged/
   - Include blockchain branch (for multi-chain merged mining)
 
 - [x] Handle different aux_pow versions
-  - Implemented via mm-adapter proxy (adapter_v2.py)
+  - Implemented via mm-adapter proxy (adapter.py)
   - Handles Dogecoin AuxPoW format
 
 **Files to modify:**

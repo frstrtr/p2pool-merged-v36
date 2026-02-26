@@ -1,7 +1,7 @@
 # Merged Mining RPC Adapter
 
-A Python 3 service that acts as a bridge between P2Pool and standard cryptocurrency daemons
-for merged mining support.
+A Python 3 service that bridges P2Pool and standard cryptocurrency daemons
+for merged mining with **multiaddress PPLNS payouts**.
 
 ## Purpose
 
@@ -76,7 +76,7 @@ chain:
   network_magic: "c0c0c0c0"  # mainnet: c0c0c0c0 | testnet: fcc1b7dc
 
 # ── Pool branding ──────────────────────────────────────
-coinbase_text: "c2poolmerged" # OP_RETURN data in merged blocks
+coinbase_text: "technocore" # OP_RETURN data in merged blocks
 
 # ── Logging ─────────────────────────────────────────────
 logging:
@@ -106,7 +106,7 @@ chain:
   chain_id: 98
   network_magic: "c0c0c0c0"
 
-coinbase_text: "c2poolmerged"
+coinbase_text: "technocore"
 
 logging:
   level: "INFO"
@@ -135,7 +135,7 @@ chain:
   chain_id: 98
   network_magic: "fcc1b7dc"
 
-coinbase_text: "c2poolmerged"
+coinbase_text: "technocore"
 
 logging:
   level: "DEBUG"
@@ -167,6 +167,19 @@ source venv/bin/activate
 
 # Run the adapter
 python3 adapter.py --config config.yaml
+
+# Run with log file
+python3 adapter.py --config config.yaml --log-file adapter.log
+
+# Run with debug logging
+python3 adapter.py --config config.yaml --debug
+```
+
+Alternatively, set `logging.file` in config.yaml:
+```yaml
+logging:
+  level: "INFO"
+  file: "/path/to/adapter.log"   # null = stdout only
 ```
 
 Or with Docker:
@@ -193,6 +206,20 @@ python run_p2pool.py \
     ...
 ```
 
+## Coinbase Text (Pool Identification)
+
+There are **two separate coinbase texts** for parent and child chains:
+
+| Chain | Where to set | Appears in |
+|---|---|---|
+| **Parent** (Litecoin) | P2Pool `--coinbtext "mypool"` | Litecoin block coinbase scriptSig |
+| **Child** (Dogecoin) | Adapter `coinbase_text: "technocore"` in config.yaml | Dogecoin block OP_RETURN output |
+
+These are independent — the parent chain text goes into the Litecoin coinbase
+scriptSig (alongside block height and merged mining data), while the child chain
+text goes into a Dogecoin OP_RETURN output built by P2Pool using the value
+from the adapter's template response.
+
 ## Supported Aux Chains
 
 - Dogecoin (Scrypt, chain_id=98)
@@ -203,18 +230,22 @@ python run_p2pool.py \
 ### 1. Work Request (P2Pool → Adapter → Dogecoin)
 
 ```
-P2Pool calls: getblocktemplate()
-Adapter calls: getauxblock() on Dogecoin
-Adapter returns: Modified template with aux chain data
+P2Pool calls: getblocktemplate({"capabilities": ["auxpow"]})
+Adapter calls: getblocktemplate() on Dogecoin
+Adapter returns: Raw template with auxpow marker (NO pre-computed hash)
+P2Pool builds: Custom coinbase with PPLNS shareholder addresses
+P2Pool calculates: merkle root → block header → block hash
 ```
 
 ### 2. Block Submission (P2Pool → Adapter → Dogecoin)
 
 ```
-P2Pool calls: submitauxblock(aux_hash, auxpow_hex)
-Adapter calls: getauxblock(aux_hash, auxpow_hex) on Dogecoin
-Adapter returns: Success/failure
+P2Pool builds: Complete Dogecoin block (header + auxpow + coinbase + txs)
+P2Pool calls: submitblock(complete_block_hex)
+Adapter calls: submitblock(complete_block_hex) on Dogecoin
 ```
+
+The key difference: P2Pool controls the coinbase, not the daemon.
 
 ## Development
 

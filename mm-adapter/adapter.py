@@ -1,22 +1,41 @@
 #!/usr/bin/env python3
 """
-Merged Mining RPC Adapter (v2 — optimized)
+Merged Mining RPC Adapter
 
-Acts as a bridge between P2Pool and standard cryptocurrency daemons for merged mining.
-Translates P2Pool's merged mining RPC calls to standard daemon RPC methods.
+This adapter enables MULTI-ADDRESS merged mining using ONLY standard daemon RPCs.
+It uses getblocktemplate (not createauxblock) so P2Pool can build its own coinbase:
 
-Optimizations over v1:
-  1. Persistent HTTP session — reuses TCP connection to dogecoind (no per-call handshake)
-  2. Background poller — pre-fetches template every 1s so P2Pool gets instant responses
-  3. Cached getbestblockhash — returns cached tip hash with zero upstream cost
-  4. Parallel RPC — createauxblock + getblocktemplate fetched concurrently
+1. Returns raw block template data to P2Pool (not pre-built blocks)
+2. P2Pool builds custom coinbase with PPLNS shareholder addresses
+3. P2Pool calculates merkle root and block hash itself
+4. P2Pool submits complete block via submitblock
 
-P2Pool tries these methods in order:
-1. getblocktemplate({"capabilities": ["auxpow"]}) - Our modified daemon (multiaddress)
-2. createauxblock(address) - Standard daemon with address
-3. getauxblock() - Standard daemon with wallet
+Flow:
+=====
+P2Pool                          Adapter                         Standard Daemon
+  |                                |                                   |
+  | getblocktemplate(auxpow)       |                                   |
+  |------------------------------->| getblocktemplate()                |
+  |                                |---------------------------------->|
+  |                                |<-- {prev_hash, bits, txs, value}  |
+  |<-- {auxpow: {chainid, target}, |                                   |
+  |     coinbasevalue, txs, bits}  |                                   |
+  |                                |                                   |
+  | [P2Pool builds coinbase with   |                                   |
+  |  multiple miner addresses]     |                                   |
+  | [P2Pool calculates merkle_root]|                                   |
+  | [P2Pool builds block header]   |                                   |
+  | [P2Pool calculates block hash] |                                   |
+  | [Hash goes into parent chain]  |                                   |
+  |                                |                                   |
+  | submitblock(complete_block_hex)|                                   |
+  |------------------------------->| submitblock(block_hex)            |
+  |                                |---------------------------------->|
+  |                                |<-- result                         |
+  |<-- result                      |                                   |
 
-This adapter speaks method 1 to P2Pool but uses methods 2/3 to talk to standard daemons.
+Key insight: We DON'T use createauxblock. We return getblocktemplate data
+with an auxpow marker, and P2Pool handles all coinbase/merkle/hash building.
 """
 
 import argparse
@@ -29,6 +48,8 @@ import struct
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from collections import defaultdict
 
 import aiohttp
 from aiohttp import web
@@ -37,22 +58,75 @@ import yaml
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 log = logging.getLogger('mm-adapter')
 
 
+# Chain configurations
+CHAIN_CONFIGS = {
+    'dogecoin': {
+        'name': 'Dogecoin',
+        'symbol': 'DOGE',
+        'chainid': 98,  # 0x62 - Dogecoin's AuxPOW chain ID
+        'default_port': 22555,
+        'testnet_port': 44555,
+    },
+    'dogecoin_testnet': {
+        'name': 'Dogecoin Testnet',
+        'symbol': 'tDOGE',
+        'chainid': 98,
+        'default_port': 44555,
+        'testnet_port': 44555,
+    },
+    'bellscoin': {
+        'name': 'Bellscoin',
+        'symbol': 'BELLS',
+        'chainid': 0,  # TODO: Get actual chainid
+        'default_port': 19918,
+        'testnet_port': 19919,
+    },
+    'junkcoin': {
+        'name': 'Junkcoin',
+        'symbol': 'JKC',
+        'chainid': 0,  # TODO: Get actual chainid  
+        'default_port': 9771,
+        'testnet_port': 19771,
+    },
+}
+
+
 class JsonRpcError(Exception):
     """JSON-RPC error from upstream daemon."""
-    def __init__(self, code: int, message: str):
+    def __init__(self, code: int, message: str, data: Any = None):
         self.code = code
         self.message = message
+        self.data = data
         super().__init__(f"JSON-RPC Error {code}: {message}")
 
 
+@dataclass
+class BlockTemplate:
+    """Cached block template from upstream daemon."""
+    version: int
+    previous_block_hash: str
+    transactions: List[Dict]
+    coinbase_value: int
+    target: str
+    bits: str
+    cur_time: int
+    min_time: int
+    height: int
+    mutable: List[str]
+    rules: List[str]
+    # Metadata
+    fetched_at: float = field(default_factory=time.time)
+    chainid: int = 0
+
+
 class UpstreamRPC:
-    """JSON-RPC client for the upstream daemon with persistent session."""
+    """JSON-RPC client for the upstream daemon."""
     
     def __init__(self, url: str, user: str, password: str, timeout: int = 30):
         self.url = url
@@ -70,8 +144,13 @@ class UpstreamRPC:
                 auth=self.auth, timeout=self.timeout, connector=conn)
         return self._session
     
+    async def close(self):
+        """Close HTTP session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+    
     async def call(self, method: str, *params) -> Any:
-        """Make a JSON-RPC call via persistent session."""
+        """Make a JSON-RPC call to the upstream daemon."""
         self._id += 1
         payload = {
             "jsonrpc": "1.0",
@@ -80,7 +159,7 @@ class UpstreamRPC:
             "params": list(params)
         }
         
-        log.debug(f"RPC -> {method}({params})")
+        log.debug(f"RPC -> {method}({params[:2]}{'...' if len(params) > 2 else ''})")
         
         session = await self._get_session()
         async with session.post(self.url, json=payload) as resp:
@@ -91,32 +170,65 @@ class UpstreamRPC:
             
             if result.get('error'):
                 err = result['error']
-                raise JsonRpcError(err.get('code', -1), err.get('message', 'Unknown error'))
+                raise JsonRpcError(
+                    err.get('code', -1),
+                    err.get('message', 'Unknown error'),
+                    err.get('data')
+                )
             
             res = result.get('result')
-            log.debug(f"RPC <- {method}: {str(res)[:100]}...")
+            log.debug(f"RPC <- {method}: {str(res)[:80]}{'...' if res and len(str(res)) > 80 else ''}")
             return res
     
-    async def close(self):
-        """Close the persistent session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+    async def call_batch(self, calls: List[Tuple[str, List]]) -> List[Any]:
+        """Make multiple JSON-RPC calls in a batch."""
+        batch = []
+        for method, params in calls:
+            self._id += 1
+            batch.append({
+                "jsonrpc": "1.0",
+                "id": self._id,
+                "method": method,
+                "params": params
+            })
+        
+        session = await self._get_session()
+        async with session.post(self.url, json=batch) as resp:
+            if resp.status == 401:
+                raise JsonRpcError(-1, "Authentication failed")
+            
+            results = await resp.json()
+            
+            outputs = []
+            for result in results:
+                if result.get('error'):
+                    err = result['error']
+                    outputs.append(JsonRpcError(
+                        err.get('code', -1),
+                        err.get('message', 'Unknown error')
+                    ))
+                else:
+                    outputs.append(result.get('result'))
+            
+            return outputs
 
 
-class MergedMiningAdapter:
+class MultiAddressMergedMiningAdapter:
     """
-    Translates P2Pool's merged mining RPC to standard daemon RPC.
+    Sophisticated merged mining adapter supporting multiple payout addresses.
     
-    P2Pool expects:
-    - getblocktemplate({"capabilities": ["auxpow"]}) → response with auxpow object
+    This adapter does NOT use createauxblock. Instead, it:
+    1. Returns raw block template data via getblocktemplate
+    2. P2Pool builds custom coinbase with multiple addresses
+    3. P2Pool calculates merkle root and block hash
+    4. P2Pool submits complete block via submitblock
     
-    Standard Dogecoin provides:
-    - createauxblock(address) → {"hash": "...", "chainid": ..., "target": "..."}
-    - getauxblock(hash, auxpow) → submits block
-    
-    Optimization: background poller pre-fetches work from dogecoind every 1s.
-    P2Pool calls return cached data instantly (sub-millisecond).
+    The approach:
+    - getblocktemplate → P2Pool builds coinbase → submitblock
     """
+    
+    # Default coinbase text for OP_RETURN
+    DEFAULT_COINBASE_TEXT = "technocore"
     
     def __init__(self, config: Dict):
         self.config = config
@@ -128,19 +240,24 @@ class MergedMiningAdapter:
             upstream.get('timeout', 30)
         )
         
-        # Payout address for merged mining rewards
-        self.payout_address = config.get('payout', {}).get('address')
-        if not self.payout_address:
-            log.warning("No payout address configured, will use wallet default")
+        # Chain configuration
+        chain_config = config.get('chain', {})
+        self.chain_name = chain_config.get('name', 'unknown')
+        self.chainid = chain_config.get('chain_id', 0)
+        
+        # Coinbase text for OP_RETURN (default: "technocore")
+        self.coinbase_text = config.get('coinbase_text', self.DEFAULT_COINBASE_TEXT)
+        
+        # Auto-detect chainid if not configured
+        self._chainid_detected = False
+        
+        # Template cache
+        self._current_template: Optional[BlockTemplate] = None
+        self._template_lock = asyncio.Lock()
         
         # --- Cached state (updated by background poller) ---
-        self.cached_tip_hash: Optional[str] = None      # getbestblockhash result
-        self.cached_response: Optional[Dict] = None      # Full GBT response for P2Pool
-        self.cached_response_time: float = 0              # When cached_response was last updated
-        self.cache_lock = asyncio.Lock()
-        
-        # Track pending aux blocks for submission (keyed by aux hash)
-        self.pending_aux_blocks: Dict[str, Dict] = {}
+        self.cached_tip_hash: Optional[str] = None       # getbestblockhash result
+        self.cached_response_time: float = 0             # When last built
         
         # Background poller settings
         poll_cfg = config.get('polling', {})
@@ -149,10 +266,19 @@ class MergedMiningAdapter:
         self._running = False
         
         # Stats
-        self._polls = 0
-        self._cache_hits = 0
-        self._cache_misses = 0
+        self.stats = {
+            'templates_served': 0,
+            'blocks_submitted': 0,
+            'blocks_accepted': 0,
+            'blocks_rejected': 0,
+            'last_template_time': None,
+            'last_submit_time': None,
+            'polls': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
+        }
     
+    # ---- Background poller ----
     async def start_poller(self):
         """Start the background template poller."""
         self._running = True
@@ -170,245 +296,357 @@ class MergedMiningAdapter:
                 pass
     
     async def _poll_loop(self):
-        """Background loop: poll dogecoind for new work every poll_interval seconds."""
+        """Background loop: poll daemon for new work every poll_interval seconds."""
         while self._running:
             try:
                 await self._refresh_template()
-                self._polls += 1
+                self.stats['polls'] += 1
             except Exception as e:
                 log.error(f"Poller error: {e}")
-            
             await asyncio.sleep(self.poll_interval)
     
     async def _refresh_template(self):
-        """Fetch fresh work from dogecoind and update cache.
+        """Fetch fresh template and update cache.
         
-        Optimization: first check getbestblockhash.  If the tip hasn't
-        changed, skip the expensive createauxblock + getblocktemplate calls
-        and keep the cached response (transactions update slowly on DOGE).
+        Optimization: first check getbestblockhash. If the tip hasn't
+        changed and cache is fresh (<5s), skip the expensive getblocktemplate.
         Full refresh is forced every 5s for mempool freshness.
         """
-        FULL_REFRESH_INTERVAL = 5.0  # seconds
-        
-        # Lightweight tip check
+        FULL_REFRESH_INTERVAL = 5.0
+
         try:
             tip_hash = await self.rpc.call('getbestblockhash')
         except Exception:
             tip_hash = None
-        
+
         now = time.time()
         tip_changed = (tip_hash != self.cached_tip_hash)
         needs_full = (tip_changed
-                      or self.cached_response is None
+                      or self._current_template is None
                       or now - self.cached_response_time >= FULL_REFRESH_INTERVAL)
-        
+
         if not needs_full:
             return  # Tip unchanged, cache fresh enough — skip heavy work
-        
-        # Full refresh: fetch createauxblock + getblocktemplate in parallel
+
+        # Fetch new template
         try:
-            if self.payout_address:
-                auxblock_coro = self.rpc.call('createauxblock', self.payout_address)
-            else:
-                auxblock_coro = self.rpc.call('getauxblock')
-            
             try:
-                template_coro = self.rpc.call('getblocktemplate', {"rules": ["segwit"]})
-                auxblock, template = await asyncio.gather(auxblock_coro, template_coro)
-            except Exception:
-                # Retry template without segwit rules
-                if self.payout_address:
-                    auxblock = await self.rpc.call('createauxblock', self.payout_address)
+                template_raw = await self.rpc.call('getblocktemplate', {'rules': ['segwit']})
+            except JsonRpcError as e:
+                if 'segwit' in str(e.message).lower():
+                    template_raw = await self.rpc.call('getblocktemplate')
                 else:
-                    auxblock = await self.rpc.call('getauxblock')
-                template = await self.rpc.call('getblocktemplate')
-            
-            # Store for later submission
-            self.pending_aux_blocks[auxblock['hash']] = {
-                'auxblock': auxblock,
-                'use_submitauxblock': self.payout_address is not None
-            }
-            
-            # Prune old pending entries (keep last 10)
-            if len(self.pending_aux_blocks) > 10:
-                keys = sorted(self.pending_aux_blocks.keys())
-                for k in keys[:-10]:
-                    del self.pending_aux_blocks[k]
-            
-            # Build response in format P2Pool expects
-            chain_id = self.config.get('chain', {}).get('chain_id', 98)
-            response = {
-                'version': template.get('version', 1),
-                'previousblockhash': template.get('previousblockhash'),
-                'transactions': template.get('transactions', []),
-                'coinbasevalue': template.get('coinbasevalue', 0),
-                'target': auxblock.get('target', template.get('target')),
-                'mintime': template.get('mintime'),
-                'curtime': template.get('curtime'),
-                'mutable': template.get('mutable', ['time', 'transactions', 'prevblock']),
-                'height': template.get('height'),
-                'bits': template.get('bits'),
-                
-                # The key auxpow object P2Pool expects
-                'auxpow': {
-                    'chainid': auxblock.get('chainid', chain_id),
-                    'target': auxblock.get('target'),
-                    'hash': auxblock['hash'],
-                    'coinbasevalue': template.get('coinbasevalue', 0),
-                }
-            }
-            
-            async with self.cache_lock:
-                old_tip = self.cached_tip_hash
+                    raise
+
+            async with self._template_lock:
+                self._current_template = BlockTemplate(
+                    version=template_raw['version'],
+                    previous_block_hash=template_raw['previousblockhash'],
+                    transactions=template_raw.get('transactions', []),
+                    coinbase_value=template_raw.get('coinbasevalue', 0),
+                    target=template_raw.get('target', ''),
+                    bits=template_raw['bits'],
+                    cur_time=template_raw['curtime'],
+                    min_time=template_raw.get('mintime', template_raw['curtime']),
+                    height=template_raw.get('height', 0),
+                    mutable=template_raw.get('mutable', ['time', 'transactions', 'prevblock']),
+                    rules=template_raw.get('rules', []),
+                    chainid=self.chainid,
+                )
                 self.cached_tip_hash = tip_hash
-                self.cached_response = response
                 self.cached_response_time = now
-            
-            if tip_changed and old_tip is not None:
-                log.info(f"[POLLER] NEW BLOCK height={template.get('height')} "
-                         f"prev={template.get('previousblockhash', '')[:16]} "
-                         f"txs={len(template.get('transactions', []))} "
-                         f"fees={sum(tx.get('fee', 0) for tx in template.get('transactions', []))}")
+                self.stats['last_template_time'] = now
+
+            if tip_changed:
+                log.info(f"[POLLER] New tip: {tip_hash[:16]}... height={self._current_template.height}")
             else:
-                log.debug(f"[POLLER] Template refresh height={template.get('height')} "
-                          f"txs={len(template.get('transactions', []))}")
-            
+                log.debug(f"[POLLER] Refreshed template (mempool update)")
+
         except Exception as e:
-            log.error(f"[POLLER] Failed to refresh template: {e}")
+            log.error(f"[POLLER] Template fetch failed: {e}")
+    
+    async def initialize(self):
+        """Initialize adapter - detect chain info."""
+        try:
+            # Get blockchain info to detect chain
+            info = await self.rpc.call('getblockchaininfo')
+            chain = info.get('chain', 'unknown')
+            
+            log.info(f"Connected to upstream daemon: chain={chain}, blocks={info.get('blocks')}")
+            
+            # Auto-detect chainid from known chains
+            if not self.chainid:
+                for cfg_name, cfg in CHAIN_CONFIGS.items():
+                    if cfg_name.startswith(chain) or chain in cfg_name:
+                        self.chainid = cfg['chainid']
+                        self.chain_name = cfg['name']
+                        log.info(f"Auto-detected chain: {self.chain_name} (chainid={self.chainid})")
+                        break
+            
+            if not self.chainid:
+                # Try to get from getauxblock if available
+                try:
+                    auxblock = await self.rpc.call('getauxblock')
+                    self.chainid = auxblock.get('chainid', 0)
+                    log.info(f"Got chainid from getauxblock: {self.chainid}")
+                except:
+                    pass
+            
+            if not self.chainid:
+                log.warning("Could not detect chainid - using 0")
+                
+        except Exception as e:
+            log.error(f"Failed to initialize: {e}")
             raise
     
+    async def get_block_template(self) -> BlockTemplate:
+        """Return cached block template (kept fresh by background poller).
+        
+        Falls back to synchronous fetch if poller hasn't populated cache yet.
+        """
+        async with self._template_lock:
+            if self._current_template is not None:
+                self.stats['cache_hits'] += 1
+                return self._current_template
+        
+        # Cache miss — first call before poller has run
+        self.stats['cache_misses'] += 1
+        log.info("Template cache miss — fetching synchronously")
+        await self._refresh_template()
+        
+        async with self._template_lock:
+            if self._current_template is None:
+                raise JsonRpcError(-1, "Failed to fetch block template")
+            return self._current_template
+    
     async def handle_getblocktemplate(self, params: List) -> Dict:
-        """Return cached template (populated by background poller)."""
+        """
+        Handle getblocktemplate call from P2Pool.
+        
+        When P2Pool requests auxpow capabilities, we return a template that
+        P2Pool can use to build its own coinbase with multiple addresses.
+        
+        Unlike createauxblock, we don't return a pre-computed hash.
+        P2Pool will:
+        1. Build coinbase with PPLNS shareholder addresses
+        2. Calculate merkle root from [coinbase, ...transactions]
+        3. Build block header with that merkle root
+        4. Hash the header to get the block hash
+        5. Include that hash in parent chain (Litecoin) coinbase
+        
+        Coinbase text can be overridden per-request via params or uses config default.
+        """
+        # Check if this is an auxpow request
         capabilities = []
+        coinbase_text_override = None
         if params and isinstance(params[0], dict):
             capabilities = params[0].get('capabilities', [])
+            # Allow caller to override coinbase text
+            coinbase_text_override = params[0].get('coinbase_text')
         
         if 'auxpow' not in capabilities:
+            # Not a merged mining request - pass through
             return await self.rpc.call('getblocktemplate', *params)
         
-        # Return cached response if available
-        async with self.cache_lock:
-            if self.cached_response is not None:
-                self._cache_hits += 1
-                age_ms = (time.time() - self.cached_response_time) * 1000
-                log.debug(f"[CACHE HIT] Serving cached template (age={age_ms:.0f}ms, "
-                          f"hits={self._cache_hits} misses={self._cache_misses})")
-                return self.cached_response
+        # Determine coinbase text: request override > config > default
+        coinbase_text = coinbase_text_override or self.coinbase_text
         
-        # Cache miss (first call before poller has run) — fetch synchronously
-        self._cache_misses += 1
-        log.info("[CACHE MISS] No cached template, fetching synchronously")
-        await self._refresh_template()
-        async with self.cache_lock:
-            return self.cached_response
-    
-    async def handle_getbestblockhash(self) -> str:
-        """Return cached tip hash (zero upstream cost)."""
-        async with self.cache_lock:
-            if self.cached_tip_hash is not None:
-                return self.cached_tip_hash
+        log.info(f"Handling merged mining getblocktemplate (multiaddress, coinbase_text='{coinbase_text}')")
         
-        # Cache miss — fetch from daemon
-        tip = await self.rpc.call('getbestblockhash')
-        async with self.cache_lock:
-            self.cached_tip_hash = tip
-        return tip
+        # Get fresh template
+        template = await self.get_block_template()
+        
+        self.stats['templates_served'] += 1
+        
+        # Build response in format P2Pool expects for multiaddress merged mining
+        # Key: NO 'hash' in auxpow - P2Pool calculates this from custom coinbase
+        response = {
+            'version': template.version,
+            'previousblockhash': template.previous_block_hash,
+            'transactions': template.transactions,
+            'coinbasevalue': template.coinbase_value,
+            'target': template.target,
+            'mintime': template.min_time,
+            'curtime': template.cur_time,
+            'mutable': template.mutable,
+            'height': template.height,
+            'bits': template.bits,
+            'rules': template.rules,
+            
+            # The auxpow object tells P2Pool this is auxpow-capable
+            # but without a pre-computed hash - P2Pool builds its own
+            'auxpow': {
+                'chainid': self.chainid,
+                'target': template.target,
+                # NO 'hash' here - that's the key difference!
+                # P2Pool will build coinbase and calculate hash itself
+                'coinbasevalue': template.coinbase_value,
+                # Coinbase text for OP_RETURN in merged block
+                'coinbase_text': coinbase_text,
+            }
+        }
+        
+        log.info(f"Serving template: height={template.height}, "
+                 f"coinbasevalue={template.coinbase_value}, "
+                 f"txs={len(template.transactions)}, chainid={self.chainid}")
+        
+        return response
     
-    async def handle_submitauxblock(self, params: List) -> bool:
+    async def handle_submitblock(self, params: List) -> Any:
         """
-        Handle submitauxblock call from P2Pool.
+        Handle submitblock call from P2Pool.
         
-        P2Pool calls: submitauxblock(hash, auxpow_hex)
-        We translate to: submitauxblock(hash, auxpow) or getauxblock(hash, auxpow)
+        P2Pool builds the complete merged block including:
+        - Block header (with custom merkle root from PPLNS coinbase)
+        - AuxPOW proof (linking to parent chain)
+        - Coinbase transaction (with multiple payout addresses)
+        - Other transactions
+        
+        We just pass this through to the daemon.
+        """
+        if not params:
+            raise JsonRpcError(-1, "submitblock requires block data")
+        
+        block_hex = params[0]
+        
+        log.info(f"Submitting block: {len(block_hex)} hex chars")
+        self.stats['blocks_submitted'] += 1
+        self.stats['last_submit_time'] = time.time()
+        
+        try:
+            result = await self.rpc.call('submitblock', block_hex)
+            
+            # submitblock returns null on success, error message on failure
+            if result is None:
+                log.info("Block ACCEPTED by daemon!")
+                self.stats['blocks_accepted'] += 1
+                # Trigger immediate template refresh after block acceptance
+                asyncio.ensure_future(self._refresh_template())
+                return None
+            else:
+                log.warning(f"Block rejected: {result}")
+                self.stats['blocks_rejected'] += 1
+                return result
+                
+        except JsonRpcError as e:
+            log.error(f"submitblock RPC error: {e}")
+            self.stats['blocks_rejected'] += 1
+            raise
+    
+    async def handle_submitauxblock(self, params: List) -> Any:
+        """
+        Handle submitauxblock for backward compatibility.
+        
+        This is for the simple single-address mode. In multiaddress mode,
+        P2Pool uses submitblock instead.
         """
         if len(params) < 2:
-            raise JsonRpcError(-1, "submitauxblock requires hash and auxpow parameters")
+            raise JsonRpcError(-1, "submitauxblock requires hash and auxpow")
         
         aux_hash = params[0]
         auxpow_hex = params[1]
         
-        log.info(f"Submitting aux block: hash={aux_hash[:16]}...")
+        log.info(f"submitauxblock (legacy): hash={aux_hash[:16]}...")
         
-        # Look up how we got this aux work
-        pending = self.pending_aux_blocks.get(aux_hash)
+        # Pass through to daemon
+        return await self.rpc.call('submitauxblock', aux_hash, auxpow_hex)
+    
+    async def handle_getauxblock(self, params: List) -> Any:
+        """
+        Handle getauxblock for backward compatibility.
         
-        try:
-            if pending and pending.get('use_submitauxblock'):
-                result = await self.rpc.call('submitauxblock', aux_hash, auxpow_hex)
-            else:
-                result = await self.rpc.call('getauxblock', aux_hash, auxpow_hex)
-            
-            log.info(f"Aux block submitted successfully: {aux_hash[:16]}...")
-            
-            # Clean up pending
-            if aux_hash in self.pending_aux_blocks:
-                del self.pending_aux_blocks[aux_hash]
-            
-            # Force immediate template refresh after block submission
-            asyncio.ensure_future(self._refresh_template())
-            
-            return result if result is not None else True
-            
-        except JsonRpcError as e:
-            log.error(f"Aux block submission failed: {e}")
-            raise
+        This provides single-address fallback mode.
+        """
+        if len(params) == 0:
+            # Work request - wallet mode
+            return await self.rpc.call('getauxblock')
+        elif len(params) == 1:
+            # createauxblock equivalent
+            return await self.rpc.call('createauxblock', params[0])
+        else:
+            # Submission
+            return await self.rpc.call('getauxblock', params[0], params[1])
+    
+    async def handle_createauxblock(self, params: List) -> Any:
+        """Pass through createauxblock for single-address fallback."""
+        if not params:
+            raise JsonRpcError(-1, "createauxblock requires address")
+        return await self.rpc.call('createauxblock', params[0])
     
     async def handle_rpc_request(self, method: str, params: List) -> Any:
         """Route RPC requests to appropriate handlers."""
         
-        log.debug(f"Handling RPC: {method}({params})")
+        log.debug(f"Handling RPC: {method}")
         
-        if method == 'getblocktemplate':
+        # Merged mining methods
+        if method == 'getbestblockhash':
+            # Return cached tip hash instantly (zero upstream cost)
+            if self.cached_tip_hash:
+                self.stats['cache_hits'] += 1
+                return self.cached_tip_hash
+            return await self.rpc.call('getbestblockhash')
+        
+        elif method == 'getblocktemplate':
             return await self.handle_getblocktemplate(params)
         
-        elif method == 'getbestblockhash':
-            return await self.handle_getbestblockhash()
+        elif method == 'submitblock':
+            return await self.handle_submitblock(params)
         
         elif method == 'submitauxblock':
             return await self.handle_submitauxblock(params)
         
         elif method == 'getauxblock':
-            if len(params) == 0:
-                auxblock = await self.rpc.call('getauxblock')
-                self.pending_aux_blocks[auxblock['hash']] = {
-                    'auxblock': auxblock,
-                    'use_submitauxblock': False
-                }
-                return auxblock
-            elif len(params) == 1:
-                auxblock = await self.rpc.call('createauxblock', params[0])
-                self.pending_aux_blocks[auxblock['hash']] = {
-                    'auxblock': auxblock,
-                    'use_submitauxblock': True
-                }
-                return auxblock
-            else:
-                return await self.rpc.call('getauxblock', params[0], params[1])
+            return await self.handle_getauxblock(params)
         
         elif method == 'createauxblock':
-            auxblock = await self.rpc.call('createauxblock', *params)
-            self.pending_aux_blocks[auxblock['hash']] = {
-                'auxblock': auxblock,
-                'use_submitauxblock': True
-            }
-            return auxblock
+            return await self.handle_createauxblock(params)
+        
+        # Info methods - useful for debugging
+        elif method == 'getblockchaininfo':
+            return await self.rpc.call('getblockchaininfo')
         
         elif method == 'getnetworkinfo':
-            # Pass through for daemon warning checks
             return await self.rpc.call('getnetworkinfo')
         
+        elif method == 'getmininginfo':
+            return await self.rpc.call('getmininginfo')
+        
+        elif method == 'getblock':
+            return await self.rpc.call('getblock', *params)
+        
+        elif method == 'getblockhash':
+            return await self.rpc.call('getblockhash', *params)
+        
+        # Adapter stats (custom method)
+        elif method == 'getadapterstats':
+            return {
+                'chain': self.chain_name,
+                'chainid': self.chainid,
+                'coinbase_text': self.coinbase_text,
+                'stats': self.stats,
+                'mode': 'multiaddress',
+            }
+        
         else:
-            # Pass through any other methods
+            # Pass through unknown methods
+            log.debug(f"Passing through: {method}")
             return await self.rpc.call(method, *params)
+    
+    async def close(self):
+        """Cleanup resources."""
+        await self.stop_poller()
+        await self.rpc.close()
 
 
 class RPCServer:
     """JSON-RPC server that accepts connections from P2Pool."""
     
-    def __init__(self, adapter: MergedMiningAdapter, config: Dict):
+    def __init__(self, adapter: MultiAddressMergedMiningAdapter, config: Dict):
         self.adapter = adapter
         self.config = config
         self.server_config = config['server']
+        self._app: Optional[web.Application] = None
+        self._runner: Optional[web.AppRunner] = None
     
     def check_auth(self, request: web.Request) -> bool:
         """Verify Basic auth credentials."""
@@ -428,6 +666,7 @@ class RPCServer:
     async def handle_request(self, request: web.Request) -> web.Response:
         """Handle incoming JSON-RPC request."""
         
+        # Check authentication
         if not self.check_auth(request):
             return web.Response(status=401, text='Unauthorized')
         
@@ -441,63 +680,100 @@ class RPCServer:
                 'error': {'code': -32700, 'message': 'Parse error'}
             })
         
+        # Handle batch requests
+        if isinstance(body, list):
+            responses = []
+            for req in body:
+                resp = await self._handle_single_request(req)
+                responses.append(resp)
+            return web.json_response(responses)
+        
+        return web.json_response(await self._handle_single_request(body))
+    
+    async def _handle_single_request(self, body: Dict) -> Dict:
+        """Handle a single JSON-RPC request."""
         request_id = body.get('id')
         method = body.get('method', '')
         params = body.get('params', [])
         
-        log.debug(f"RPC request: {method}")
+        start_time = time.time()
         
         try:
             result = await self.adapter.handle_rpc_request(method, params)
-            return web.json_response({
+            elapsed = (time.time() - start_time) * 1000
+            
+            if method not in ('getblocktemplate',):  # Don't spam for frequent calls
+                log.info(f"RPC {method}: OK ({elapsed:.1f}ms)")
+            
+            return {
                 'jsonrpc': '1.0',
                 'id': request_id,
                 'result': result,
                 'error': None
-            })
+            }
         except JsonRpcError as e:
-            return web.json_response({
+            elapsed = (time.time() - start_time) * 1000
+            log.warning(f"RPC {method}: Error {e.code} ({elapsed:.1f}ms)")
+            return {
                 'jsonrpc': '1.0',
                 'id': request_id,
                 'result': None,
                 'error': {'code': e.code, 'message': e.message}
-            })
+            }
         except Exception as e:
-            log.exception(f"Error handling {method}")
-            return web.json_response({
+            elapsed = (time.time() - start_time) * 1000
+            log.exception(f"RPC {method}: Exception ({elapsed:.1f}ms)")
+            return {
                 'jsonrpc': '1.0',
                 'id': request_id,
                 'result': None,
                 'error': {'code': -1, 'message': str(e)}
-            })
+            }
     
     async def run(self):
-        """Start the RPC server and background poller."""
-        app = web.Application()
-        app.router.add_post('/', self.handle_request)
+        """Start the RPC server."""
+        self._app = web.Application()
+        self._app.router.add_post('/', self.handle_request)
+        
+        # Also handle GET for simple health check
+        async def health_check(request):
+            return web.json_response({
+                'status': 'ok',
+                'mode': 'multiaddress',
+                'chain': self.adapter.chain_name,
+                'chainid': self.adapter.chainid,
+            })
+        self._app.router.add_get('/', health_check)
         
         host = self.server_config['host']
         port = self.server_config['port']
         
-        runner = web.AppRunner(app)
-        await runner.setup()
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
         
-        site = web.TCPSite(runner, host, port)
+        site = web.TCPSite(self._runner, host, port)
         await site.start()
         
+        log.info(f"")
+        log.info(f"{'=' * 60}")
         log.info(f"MM Adapter listening on {host}:{port}")
         log.info(f"Upstream daemon: {self.config['upstream']['host']}:{self.config['upstream']['port']}")
-        
-        # Start background poller
-        await self.adapter.start_poller()
+        log.info(f"Chain: {self.adapter.chain_name} (chainid={self.adapter.chainid})")
+        log.info(f"{'=' * 60}")
+        log.info(f"")
         
         # Keep running
         try:
             while True:
                 await asyncio.sleep(3600)
-        finally:
-            await self.adapter.stop_poller()
-            await self.adapter.rpc.close()
+        except asyncio.CancelledError:
+            pass
+    
+    async def shutdown(self):
+        """Graceful shutdown."""
+        if self._runner:
+            await self._runner.cleanup()
+        await self.adapter.close()
 
 
 def load_config(path: str) -> Dict:
@@ -507,28 +783,84 @@ def load_config(path: str) -> Dict:
 
 
 async def main():
-    parser = argparse.ArgumentParser(description='Merged Mining RPC Adapter')
-    parser.add_argument('--config', '-c', default='config.yaml', help='Config file path')
-    parser.add_argument('--debug', '-d', action='store_true', help='Enable debug logging')
+    parser = argparse.ArgumentParser(
+        description='Merged Mining RPC Adapter'
+    )
+    parser.add_argument('--config', '-c', default='config.yaml',
+                        help='Config file path')
+    parser.add_argument('--debug', '-d', action='store_true',
+                        help='Enable debug logging')
+    parser.add_argument('--log-file', '-l',
+                        help='Log to file (overrides config logging.file)')
+    parser.add_argument('--host', help='Override listen host')
+    parser.add_argument('--port', '-p', type=int, help='Override listen port')
+    parser.add_argument('--upstream', '-u', help='Override upstream URL (host:port)')
     args = parser.parse_args()
     
+    # Load config
+    try:
+        config = load_config(args.config)
+    except FileNotFoundError:
+        log.error(f"Config file not found: {args.config}")
+        sys.exit(1)
+    
+    # Apply overrides
+    if args.host:
+        config['server']['host'] = args.host
+    if args.port:
+        config['server']['port'] = args.port
+    if args.upstream:
+        host, port = args.upstream.split(':')
+        config['upstream']['host'] = host
+        config['upstream']['port'] = int(port)
+    
+    # Set logging level and optional log file
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        log_level = config.get('logging', {}).get('level', 'INFO')
+        logging.getLogger().setLevel(getattr(logging, log_level))
     
-    config = load_config(args.config)
+    # Add file handler if configured (CLI --log-file overrides config)
+    log_file = args.log_file or config.get('logging', {}).get('file')
+    if log_file:
+        import os
+        log_dir = os.path.dirname(log_file)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        logging.getLogger().addHandler(file_handler)
+        log.info(f"Logging to file: {log_file}")
     
-    # Override logging level from config
-    log_level = config.get('logging', {}).get('level', 'INFO')
-    logging.getLogger().setLevel(getattr(logging, log_level))
+    # Create and initialize adapter
+    adapter = MultiAddressMergedMiningAdapter(config)
     
-    adapter = MergedMiningAdapter(config)
+    try:
+        await adapter.initialize()
+    except Exception as e:
+        log.error(f"Failed to initialize adapter: {e}")
+        sys.exit(1)
+    
+    # Start background poller
+    await adapter.start_poller()
+    
+    # Create and run server
     server = RPCServer(adapter, config)
     
-    await server.run()
+    try:
+        await server.run()
+    except KeyboardInterrupt:
+        log.info("Shutting down...")
+    finally:
+        await server.shutdown()
 
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        log.info("Shutting down...")
+        pass

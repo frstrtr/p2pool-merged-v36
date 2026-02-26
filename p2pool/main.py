@@ -726,7 +726,9 @@ def run():
         action='store_true', default=False, dest='merged_coind_rpc_ssl')
     
     parser.add_argument('--coinbtext',
-        help='append this text to the coinbase',
+        help='append this text to the parent chain (Litecoin) coinbase scriptSig. '
+             'For merged chain (Dogecoin) coinbase text, set coinbase_text in mm-adapter config.yaml. '
+             'Repeatable: --coinbtext "pool1" --coinbtext "tag2"',
         type=str, action='append', default=[], dest='coinb_texts')
     parser.add_argument('--give-author', metavar='DONATION_PERCENTAGE',
         help='donate this percentage of work towards the development of p2pool (default: 0.0)',
