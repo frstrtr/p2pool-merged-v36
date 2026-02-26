@@ -2,6 +2,15 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.03-alpha] - 2026-02-26
+
+### Bug Fixes
+- **fix: DOGE donation display shows tiny value (0.11) instead of ≥1 DOGE** — `get_v36_merged_weights()` returns `total_weight` inclusive of donation, but the display code added `donation_weight` a second time, halving the apparent donation ratio. Fixed weight decomposition: `miner_weight = total_weight - donation_weight`. Also enforce DUST_THRESHOLD minimum (1 DOGE) in display to match actual coinbase builder (`ba457df`)
+- **fix: miner page shows 0 blocks for comma-separated merged miners** — Stratum records merged miners as `LTC_ADDR,DOGE_ADDR` but `get_miner_payouts()` / `get_merged_miner_payouts()` only split on `.` `+` `_` `/`, never on comma. Added `.split(',')[0]` to all 6 address-matching locations in `web.py` and `work.py` (`3bee8d6`)
+- **fix: block explorer link uses wrong hash on miners page** — `miners.html` used `pow_hash_hex` (scrypt PoW hash) for the chainz.cryptoid.info link, but the explorer expects the SHA256d block hash. Changed to `block.hash`; display text still shows truncated PoW hash with a tooltip showing both hashes (`4787873`)
+
+---
+
 ## [v36-0.02-alpha] - 2026-02-26
 
 ### Critical Fixes
