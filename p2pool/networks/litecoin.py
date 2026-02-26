@@ -45,9 +45,12 @@ MAX_TARGET = 2**256//2**20 - 1
 PERSIST = True
 WORKER_PORT = 9327
 BOOTSTRAP_ADDRS = [
-        # Active p2pool nodes (verified 2026-02-24 via peer_addresses API)
+        # Active p2pool nodes (verified 2026-02-26 via peer_addresses API)
         'ml.toom.im',           # jtoomim's node (protocol 3502)
         'usa.p2p-spb.xyz',      # p2p-spb pool node (protocol 3502)
+        # V36 nodes (protocol 3503)
+        '102.160.209.121',      # technocore node29 (v36)
+        '5.188.104.245',        # V36 peer
         # Live peers seen by ml.toom.im and usa.p2p-spb.xyz
         '20.127.82.115',        # Azure peer
         '31.25.241.224',        # EU peer
