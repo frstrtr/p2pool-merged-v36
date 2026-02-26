@@ -763,126 +763,140 @@
             d3.json('../miner_stats/' + minerAddress, function(stats) {
                 document.getElementById('miner_loading').style.display = 'none';
                 
-                if (!stats || stats.error || !stats.active) {
-                    showError(stats && stats.error ? stats.error : 'Miner not found or inactive');
+                if (!stats) {
+                    showError('Failed to load miner data');
                     return;
                 }
+                
+                var isActive = stats.active && !stats.error;
                 
                 document.getElementById('miner_content').style.display = 'block';
                 
                 // Update header
                 const addrDiv = document.getElementById('miner_address');
-                addrDiv.innerHTML = '<a href="' + (currency_info.address_explorer_url_prefix || '') + stats.address + '" target="_blank">' + stats.address + '</a>';
+                var displayAddr = stats.address || minerAddress;
+                addrDiv.innerHTML = '<a href="' + (currency_info.address_explorer_url_prefix || '') + displayAddr + '" target="_blank">' + displayAddr + '</a>';
                 
-                // Update current stats - show ~ prefix if estimated from difficulty
-                var hashrateText = format_hashrate(stats.hashrate);
-                if (stats.estimated_hashrate) {
-                    hashrateText = '~' + hashrateText;
-                    document.getElementById('current_hashrate').title = 'Estimated from vardiff difficulty';
-                }
-                document.getElementById('current_hashrate').textContent = hashrateText;
-                
-                // DOA Rate - update multiple elements
-                const doaRate = stats.doa_rate * 100;
-                document.getElementById('doa_rate_inline').textContent = d3.format('.2f')(doaRate) + '%';
-                document.getElementById('doa_rate_detail').textContent = d3.format('.2f')(doaRate) + '%';
-                
-                // Efficiency (inverse of DOA rate)
-                var efficiency = 100 - doaRate;
-                var effElement = document.getElementById('efficiency_value');
-                effElement.textContent = d3.format('.2f')(efficiency) + '%';
-                effElement.className = 'stat-value ' + (efficiency > 98 ? 'success' : (efficiency > 95 ? 'warning' : 'danger'));
-                document.getElementById('good_shares_pct').textContent = d3.format('.2f')(efficiency) + '%';
-                
-                // Hashrate periods
-                if (stats.hashrate_periods) {
-                    document.getElementById('hashrate_1m').textContent = format_hashrate(stats.hashrate_periods['1m'] ? stats.hashrate_periods['1m'].hashrate : 0);
-                    document.getElementById('hashrate_10m').textContent = format_hashrate(stats.hashrate_periods['10m'] ? stats.hashrate_periods['10m'].hashrate : 0);
-                    document.getElementById('hashrate_1h').textContent = format_hashrate(stats.hashrate_periods['1h'] ? stats.hashrate_periods['1h'].hashrate : 0);
+                // Update status indicator
+                var statusIndicator = document.getElementById('status_indicator');
+                var statusText = document.getElementById('status_text');
+                if (!isActive) {
+                    statusIndicator.style.background = '#888';
+                    statusText.textContent = 'Not connected';
+                    statusText.style.color = '#8888a0';
                 }
                 
-                // Best difficulty
-                if (stats.best_difficulty_all_time !== undefined) {
-                    document.getElementById('best_diff_all_time').textContent = format_difficulty(stats.best_difficulty_all_time);
-                    document.getElementById('best_diff_session').textContent = format_difficulty(stats.best_difficulty_session || 0);
-                    document.getElementById('best_diff_round').textContent = format_difficulty(stats.best_difficulty_round || 0);
+                if (isActive) {
+                    // Update current stats - show ~ prefix if estimated from difficulty
+                    var hashrateText = format_hashrate(stats.hashrate);
+                    if (stats.estimated_hashrate) {
+                        hashrateText = '~' + hashrateText;
+                        document.getElementById('current_hashrate').title = 'Estimated from vardiff difficulty';
+                    }
+                    document.getElementById('current_hashrate').textContent = hashrateText;
                     
-                    // Chance to find block
-                    var chance = stats.chance_to_find_block || 0;
-                    document.getElementById('chance_to_find').textContent = d3.format('.6f')(chance) + '%';
-                }
-                
-                document.getElementById('share_difficulty').textContent = d3.format('.3r')(stats.share_difficulty);
-                document.getElementById('current_payout').textContent = d3.format('.4f')(stats.current_payout);
-                document.getElementById('doa_hashrate').textContent = format_hashrate(stats.dead_hashrate);
-                
-                // Display merged mining payouts
-                if (stats.merged_payouts && stats.merged_payouts.length > 0) {
-                    document.getElementById('merged_section').style.display = 'block';
-                    var mergedGrid = document.getElementById('merged_payouts_grid');
-                    mergedGrid.style.display = 'grid';
-                    mergedGrid.innerHTML = '';
+                    // DOA Rate - update multiple elements
+                    const doaRate = stats.doa_rate * 100;
+                    document.getElementById('doa_rate_inline').textContent = d3.format('.2f')(doaRate) + '%';
+                    document.getElementById('doa_rate_detail').textContent = d3.format('.2f')(doaRate) + '%';
                     
-                    // Show merged address(es) in the header
-                    var headerDiv = document.querySelector('.miner-header');
-                    stats.merged_payouts.forEach(function(mp) {
-                        if (mp.address) {
-                            var mergedAddrDiv = document.createElement('div');
-                            mergedAddrDiv.style.cssText = 'font-family: "Courier New", monospace; font-size: 0.9rem; color: #c3a634; margin-top: 4px;';
-                            var dogeSpan = document.createElement('span');
-                            dogeSpan.textContent = '🐕 ';
-                            mergedAddrDiv.appendChild(dogeSpan);
-                            var addrLink = document.createElement('a');
-                            addrLink.href = 'https://dogechain.info/address/' + encodeURIComponent(mp.address);
-                            addrLink.target = '_blank';
-                            addrLink.style.cssText = 'color: #c3a634; text-decoration: none;';
-                            addrLink.textContent = mp.address;
-                            mergedAddrDiv.appendChild(addrLink);
-                            var symbolSpan = document.createElement('span');
-                            symbolSpan.style.cssText = 'font-size: 0.75rem; color: #8888a0;';
-                            symbolSpan.textContent = ' (' + (mp.symbol || 'DOGE') + ' merged mining)';
-                            mergedAddrDiv.appendChild(symbolSpan);
-                            headerDiv.insertBefore(mergedAddrDiv, headerDiv.querySelector('.miner-status'));
-                        }
-                    });
+                    // Efficiency (inverse of DOA rate)
+                    var efficiency = 100 - doaRate;
+                    var effElement = document.getElementById('efficiency_value');
+                    effElement.textContent = d3.format('.2f')(efficiency) + '%';
+                    effElement.className = 'stat-value ' + (efficiency > 98 ? 'success' : (efficiency > 95 ? 'warning' : 'danger'));
+                    document.getElementById('good_shares_pct').textContent = d3.format('.2f')(efficiency) + '%';
                     
-                    stats.merged_payouts.forEach(function(mp) {
-                        var card = document.createElement('div');
-                        card.className = 'stat-card';
-                        var h3 = document.createElement('h3');
-                        h3.textContent = mp.symbol + ' Payout';
-                        card.appendChild(h3);
-                        var valDiv = document.createElement('div');
-                        valDiv.className = 'stat-value success';
-                        valDiv.textContent = d3.format(',.4f')(mp.amount);
-                        card.appendChild(valDiv);
-                        var labelDiv = document.createElement('div');
-                        labelDiv.className = 'stat-label';
-                        labelDiv.textContent = mp.network + ' on next block';
-                        card.appendChild(labelDiv);
-                        var addrLabelDiv = document.createElement('div');
-                        addrLabelDiv.className = 'stat-label';
-                        addrLabelDiv.style.cssText = 'font-size: 0.7rem; margin-top: 5px;';
-                        var addrLink2 = document.createElement('a');
-                        addrLink2.href = 'https://dogechain.info/address/' + encodeURIComponent(mp.address);
-                        addrLink2.target = '_blank';
-                        addrLink2.style.cssText = 'color: var(--primary);';
-                        addrLink2.textContent = mp.address.substring(0, 12) + '...' + mp.address.substring(mp.address.length - 4);
-                        addrLabelDiv.appendChild(addrLink2);
-                        card.appendChild(addrLabelDiv);
-                        mergedGrid.appendChild(card);
-                    });
+                    // Hashrate periods
+                    if (stats.hashrate_periods) {
+                        document.getElementById('hashrate_1m').textContent = format_hashrate(stats.hashrate_periods['1m'] ? stats.hashrate_periods['1m'].hashrate : 0);
+                        document.getElementById('hashrate_10m').textContent = format_hashrate(stats.hashrate_periods['10m'] ? stats.hashrate_periods['10m'].hashrate : 0);
+                        document.getElementById('hashrate_1h').textContent = format_hashrate(stats.hashrate_periods['1h'] ? stats.hashrate_periods['1h'].hashrate : 0);
+                    }
+                    
+                    // Best difficulty
+                    if (stats.best_difficulty_all_time !== undefined) {
+                        document.getElementById('best_diff_all_time').textContent = format_difficulty(stats.best_difficulty_all_time);
+                        document.getElementById('best_diff_session').textContent = format_difficulty(stats.best_difficulty_session || 0);
+                        document.getElementById('best_diff_round').textContent = format_difficulty(stats.best_difficulty_round || 0);
+                        
+                        // Chance to find block
+                        var chance = stats.chance_to_find_block || 0;
+                        document.getElementById('chance_to_find').textContent = d3.format('.6f')(chance) + '%';
+                    }
+                    
+                    document.getElementById('share_difficulty').textContent = d3.format('.3r')(stats.share_difficulty);
+                    document.getElementById('current_payout').textContent = d3.format('.4f')(stats.current_payout);
+                    document.getElementById('doa_hashrate').textContent = format_hashrate(stats.dead_hashrate);
+                    
+                    // Display merged mining payouts
+                    if (stats.merged_payouts && stats.merged_payouts.length > 0) {
+                        document.getElementById('merged_section').style.display = 'block';
+                        var mergedGrid = document.getElementById('merged_payouts_grid');
+                        mergedGrid.style.display = 'grid';
+                        mergedGrid.innerHTML = '';
+                        
+                        // Show merged address(es) in the header
+                        var headerDiv = document.querySelector('.miner-header');
+                        stats.merged_payouts.forEach(function(mp) {
+                            if (mp.address) {
+                                var mergedAddrDiv = document.createElement('div');
+                                mergedAddrDiv.style.cssText = 'font-family: "Courier New", monospace; font-size: 0.9rem; color: #c3a634; margin-top: 4px;';
+                                var dogeSpan = document.createElement('span');
+                                dogeSpan.textContent = '🐕 ';
+                                mergedAddrDiv.appendChild(dogeSpan);
+                                var addrLink = document.createElement('a');
+                                addrLink.href = 'https://dogechain.info/address/' + encodeURIComponent(mp.address);
+                                addrLink.target = '_blank';
+                                addrLink.style.cssText = 'color: #c3a634; text-decoration: none;';
+                                addrLink.textContent = mp.address;
+                                mergedAddrDiv.appendChild(addrLink);
+                                var symbolSpan = document.createElement('span');
+                                symbolSpan.style.cssText = 'font-size: 0.75rem; color: #8888a0;';
+                                symbolSpan.textContent = ' (' + (mp.symbol || 'DOGE') + ' merged mining)';
+                                mergedAddrDiv.appendChild(symbolSpan);
+                                headerDiv.insertBefore(mergedAddrDiv, headerDiv.querySelector('.miner-status'));
+                            }
+                        });
+                        
+                        stats.merged_payouts.forEach(function(mp) {
+                            var card = document.createElement('div');
+                            card.className = 'stat-card';
+                            var h3 = document.createElement('h3');
+                            h3.textContent = mp.symbol + ' Payout';
+                            card.appendChild(h3);
+                            var valDiv = document.createElement('div');
+                            valDiv.className = 'stat-value success';
+                            valDiv.textContent = d3.format(',.4f')(mp.amount);
+                            card.appendChild(valDiv);
+                            var labelDiv = document.createElement('div');
+                            labelDiv.className = 'stat-label';
+                            labelDiv.textContent = mp.network + ' on next block';
+                            card.appendChild(labelDiv);
+                            var addrLabelDiv = document.createElement('div');
+                            addrLabelDiv.className = 'stat-label';
+                            addrLabelDiv.style.cssText = 'font-size: 0.7rem; margin-top: 5px;';
+                            var addrLink2 = document.createElement('a');
+                            addrLink2.href = 'https://dogechain.info/address/' + encodeURIComponent(mp.address);
+                            addrLink2.target = '_blank';
+                            addrLink2.style.cssText = 'color: var(--primary);';
+                            addrLink2.textContent = mp.address.substring(0, 12) + '...' + mp.address.substring(mp.address.length - 4);
+                            addrLabelDiv.appendChild(addrLink2);
+                            card.appendChild(addrLabelDiv);
+                            mergedGrid.appendChild(card);
+                        });
+                    }
+                    
+                    // Update share counts
+                    if (stats.total_shares !== undefined) {
+                        document.getElementById('total_shares').textContent = stats.total_shares;
+                        document.getElementById('dead_shares').textContent = stats.dead_shares || 0;
+                        var deadPct = stats.total_shares > 0 ? (stats.dead_shares / stats.total_shares * 100) : 0;
+                        document.getElementById('dead_shares_pct').textContent = d3.format('.1f')(deadPct) + '%';
+                    }
                 }
                 
-                // Update share counts
-                if (stats.total_shares !== undefined) {
-                    document.getElementById('total_shares').textContent = stats.total_shares;
-                    document.getElementById('dead_shares').textContent = stats.dead_shares || 0;
-                    var deadPct = stats.total_shares > 0 ? (stats.dead_shares / stats.total_shares * 100) : 0;
-                    document.getElementById('dead_shares_pct').textContent = d3.format('.1f')(deadPct) + '%';
-                }
-                
-                // Calculate 24h average hashrate
+                // Calculate 24h average hashrate (always load - works from graph history)
                 d3.json('../web/graph_data/miner_hash_rates/last_day', function(graph_data) {
                     var avg_24h = 0;
                     if (graph_data && graph_data.length > 0) {
@@ -916,10 +930,10 @@
                     document.getElementById('avg_24h_hashrate').textContent = format_hashrate(avg_24h);
                 });
                 
-                // Load graph data
+                // Load graph data (always - shows history even if miner disconnected)
                 loadGraphs();
                 
-                // Load payouts data
+                // Always load payouts/blocks data regardless of active status
                 loadPayouts();
                 
                 // Load merged blocks
@@ -1511,13 +1525,17 @@
                     if (stats && stats.active) {
                         document.getElementById('current_hashrate').textContent = format_hashrate(stats.hashrate);
                         
-                        const doaRate = stats.doa_rate * 100;
-                        const doaElement = document.getElementById('doa_rate');
-                        doaElement.textContent = d3.format('.2f')(doaRate) + '%';
-                        doaElement.className = 'stat-value ' + (doaRate > 5 ? 'danger' : (doaRate > 2 ? 'warning' : 'success'));
+                        var doaRate = stats.doa_rate * 100;
+                        document.getElementById('doa_rate_inline').textContent = d3.format('.2f')(doaRate) + '%';
+                        document.getElementById('doa_rate_detail').textContent = d3.format('.2f')(doaRate) + '%';
+                        
+                        var efficiency = 100 - doaRate;
+                        var effElement = document.getElementById('efficiency_value');
+                        effElement.textContent = d3.format('.2f')(efficiency) + '%';
+                        effElement.className = 'stat-value ' + (efficiency > 98 ? 'success' : (efficiency > 95 ? 'warning' : 'danger'));
+                        document.getElementById('good_shares_pct').textContent = d3.format('.2f')(efficiency) + '%';
                         
                         document.getElementById('share_difficulty').textContent = d3.format('.3r')(stats.share_difficulty);
-                        document.getElementById('time_to_share').textContent = format_dt(stats.time_to_share);
                         document.getElementById('current_payout').textContent = d3.format('.4f')(stats.current_payout);
                         document.getElementById('doa_hashrate').textContent = format_hashrate(stats.dead_hashrate);
                     }
