@@ -63,6 +63,9 @@ logging.basicConfig(
 )
 log = logging.getLogger('mm-adapter')
 
+# Suppress noisy aiohttp access logs (every HTTP request)
+logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
+
 
 # Chain configurations
 CHAIN_CONFIGS = {
@@ -411,7 +414,7 @@ class MultiAddressMergedMiningAdapter:
         
         # Cache miss — first call before poller has run
         self.stats['cache_misses'] += 1
-        log.info("Template cache miss — fetching synchronously")
+        log.debug("Template cache miss -- fetching synchronously")
         await self._refresh_template()
         
         async with self._template_lock:
@@ -451,7 +454,7 @@ class MultiAddressMergedMiningAdapter:
         # Determine coinbase text: request override > config > default
         coinbase_text = coinbase_text_override or self.coinbase_text
         
-        log.info(f"Handling merged mining getblocktemplate (multiaddress, coinbase_text='{coinbase_text}')")
+        log.debug(f"Handling merged mining getblocktemplate (multiaddress, coinbase_text='{coinbase_text}')")
         
         # Get fresh template
         template = await self.get_block_template()
@@ -486,7 +489,7 @@ class MultiAddressMergedMiningAdapter:
             }
         }
         
-        log.info(f"Serving template: height={template.height}, "
+        log.debug(f"Serving template: height={template.height}, "
                  f"coinbasevalue={template.coinbase_value}, "
                  f"txs={len(template.transactions)}, chainid={self.chainid}")
         
@@ -703,7 +706,7 @@ class RPCServer:
             elapsed = (time.time() - start_time) * 1000
             
             if method not in ('getblocktemplate',):  # Don't spam for frequent calls
-                log.info(f"RPC {method}: OK ({elapsed:.1f}ms)")
+                log.debug(f"RPC {method}: OK ({elapsed:.1f}ms)")
             
             return {
                 'jsonrpc': '1.0',
