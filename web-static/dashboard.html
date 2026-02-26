@@ -2599,7 +2599,7 @@
                 // Store only 10 most recent blocks for table display
                 // (graph chart fetches recent_blocks separately and gets full history)
                 window.allBlocks = blocks.slice(0, 10);
-                window.blocksDisplayCount = Math.min(5, window.allBlocks.length);
+                window.blocksDisplayCount = Math.min(10, window.allBlocks.length);
                 
                 // Function to render blocks
                 function renderBlocks() {
@@ -2734,7 +2734,7 @@
                     var blocksRemaining = window.allBlocks.length - window.blocksDisplayCount;
                     if (blocksRemaining > 0) {
                         showMoreBtn.style('display', 'block')
-                            .text('Show ' + Math.min(5, blocksRemaining) + ' more... (' + blocksRemaining + ' remaining)');
+                            .text('Show ' + Math.min(10, blocksRemaining) + ' more... (' + blocksRemaining + ' remaining)');
                     } else {
                         showMoreBtn.style('display', 'none');
                     }
@@ -2746,7 +2746,7 @@
                 // Show more button handler
                 d3.select('#blocks_show_more').on('click', function() {
                     var remaining = window.allBlocks.length - window.blocksDisplayCount;
-                    var step = (remaining <= 5) ? remaining : 5;
+                    var step = (remaining <= 10) ? remaining : 10;
                     window.blocksDisplayCount = Math.min(window.blocksDisplayCount + step, window.allBlocks.length);
                     renderBlocks();
                 });
@@ -2776,7 +2776,7 @@
                 
                 // Store only 10 most recent merged blocks for table display
                 window.allMergedBlocks = blocks.slice(0, 10);
-                window.mergedBlocksDisplayCount = Math.min(5, window.allMergedBlocks.length);
+                window.mergedBlocksDisplayCount = Math.min(10, window.allMergedBlocks.length);
                 
                 // Block explorer URLs for different merged mining chains
                 var merged_explorers = {
@@ -2847,7 +2847,7 @@
                     var mergedRemaining = window.allMergedBlocks.length - window.mergedBlocksDisplayCount;
                     if (mergedRemaining > 0) {
                         showMoreBtn.style('display', 'block')
-                            .text('Show ' + Math.min(5, mergedRemaining) + ' more... (' + mergedRemaining + ' remaining)');
+                            .text('Show ' + Math.min(10, mergedRemaining) + ' more... (' + mergedRemaining + ' remaining)');
                     } else {
                         showMoreBtn.style('display', 'none');
                     }
@@ -2859,7 +2859,7 @@
                 // Show more button handler
                 d3.select('#merged_blocks_show_more').on('click', function() {
                     var remaining = window.allMergedBlocks.length - window.mergedBlocksDisplayCount;
-                    var step = (remaining <= 5) ? remaining : 5;
+                    var step = (remaining <= 10) ? remaining : 10;
                     window.mergedBlocksDisplayCount = Math.min(window.mergedBlocksDisplayCount + step, window.allMergedBlocks.length);
                     renderMergedBlocks();
                 });
@@ -2979,7 +2979,7 @@
             if (payoutsRemaining > 0) {
                 d3.select('#payouts_show_more')
                     .style('display', 'block')
-                    .text('Show ' + Math.min(5, payoutsRemaining) + ' more (' + payoutsRemaining + ' remaining)');
+                    .text('Show ' + Math.min(10, payoutsRemaining) + ' more (' + payoutsRemaining + ' remaining)');
             } else {
                 d3.select('#payouts_show_more').style('display', 'none');
             }
@@ -3008,7 +3008,7 @@
                 
                 // Store for show more
                 window.payoutsData = { mergedPays: mergedPays, sortedAddrs: arr };
-                window.payoutsDisplayCount = 5;
+                window.payoutsDisplayCount = 10;
                 
                 // Calculate totals
                 var total = d3.sum(arr, function(addr) { return mergedPays[addr].amount; });
@@ -3065,7 +3065,7 @@
                 // Set up show more button click handler
                 d3.select('#payouts_show_more').on('click', function() {
                     var rem = window.payoutsData.sortedAddrs.length - window.payoutsDisplayCount;
-                    var step = (rem <= 5) ? rem : 5;
+                    var step = (rem <= 10) ? rem : 10;
                     window.payoutsDisplayCount = Math.min(
                         window.payoutsDisplayCount + step,
                         window.payoutsData.sortedAddrs.length
@@ -3093,7 +3093,7 @@
             
             // Store for show more functionality
             window.payoutsData = { simplePays: pays, sortedAddrs: arr };
-            window.payoutsDisplayCount = 5;
+            window.payoutsDisplayCount = 10;
             
             var total = d3.sum(arr, function(addr) { return pays[addr]; });
             d3.select('#payouts_total').text(d3.format('.4f')(total));
@@ -3103,7 +3103,7 @@
             // Set up show more button for simple payouts
             d3.select('#payouts_show_more').on('click', function() {
                 var rem = window.payoutsData.sortedAddrs.length - window.payoutsDisplayCount;
-                var step = (rem <= 5) ? rem : 5;
+                var step = (rem <= 10) ? rem : 10;
                 window.payoutsDisplayCount = Math.min(
                     window.payoutsDisplayCount + step,
                     window.payoutsData.sortedAddrs.length
@@ -3141,7 +3141,7 @@
             if (simpleRemaining > 0) {
                 d3.select('#payouts_show_more')
                     .style('display', 'block')
-                    .text('Show ' + Math.min(5, simpleRemaining) + ' more (' + simpleRemaining + ' remaining)');
+                    .text('Show ' + Math.min(10, simpleRemaining) + ' more (' + simpleRemaining + ' remaining)');
             } else {
                 d3.select('#payouts_show_more').style('display', 'none');
             }
@@ -3283,7 +3283,7 @@
                 // Store peers globally for pagination
                 window.allBroadcasterPeers = peers;
                 if (!window.broadcastPeersDisplayCount) {
-                    window.broadcastPeersDisplayCount = Math.min(5, peers.length);
+                    window.broadcastPeersDisplayCount = Math.min(10, peers.length);
                 }
                 
                 function renderBroadcasterPeers() {
@@ -3336,7 +3336,7 @@
                     if (bcRemaining > 0) {
                         d3.select('#broadcaster_peers_show_more')
                             .style('display', 'block')
-                            .text('Show ' + Math.min(5, bcRemaining) + ' more... (' + bcRemaining + ' remaining)');
+                            .text('Show ' + Math.min(10, bcRemaining) + ' more... (' + bcRemaining + ' remaining)');
                     } else {
                         d3.select('#broadcaster_peers_show_more').style('display', 'none');
                     }
@@ -3347,7 +3347,7 @@
                 // Set up show more button
                 d3.select('#broadcaster_peers_show_more').on('click', function() {
                     var bcRem = window.allBroadcasterPeers.length - window.broadcastPeersDisplayCount;
-                    var bcStep = (bcRem <= 5) ? bcRem : 5;
+                    var bcStep = (bcRem <= 10) ? bcRem : 10;
                     window.broadcastPeersDisplayCount = Math.min(
                         window.broadcastPeersDisplayCount + bcStep,
                         window.allBroadcasterPeers.length
