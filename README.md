@@ -193,7 +193,8 @@ stratum+tcp://YOUR_IP:9327
 **Username formats:**
 - Basic: `LTC_ADDRESS`
 - With DOGE address: `LTC_ADDRESS,DOGE_ADDRESS`
-- With worker name: `LTC_ADDRESS,DOGE_ADDRESS.worker1`
+- With worker name (dot): `LTC_ADDRESS,DOGE_ADDRESS.worker1`
+- With worker name (underscore): `LTC_ADDRESS,DOGE_ADDRESS_worker1`
 
 **Example:**
 ```
@@ -385,10 +386,12 @@ YOUR_ADDRESS/DIFFICULTY
 Example: ltc1qexampleaddress/65536
 ```
 
-**Worker names** (for monitoring):
+**Worker names** (for monitoring — both `.` and `_` are valid separators):
 ```
 YOUR_ADDRESS.worker_name
+YOUR_ADDRESS_worker_name
 Example: ltc1qexampleaddress.asic1
+Example: ltc1qexampleaddress_asic1
 ```
 
 ## Configuration Modes

@@ -452,7 +452,10 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
             # [CHECK 6] Miner stratum format reminder
             print '  [CHECK 6] Miner stratum username format for merged mining:'
             print '             LTC_ADDRESS,DOGE_ADDRESS.WORKER_NAME'
-            print '             Example: LUSr5EY...,DANxiiX...Rig1'
+            print '             LTC_ADDRESS,DOGE_ADDRESS_WORKER_NAME'
+            print '             Both . and _ are valid worker separators'
+            print '             Example: LUSr5EY...,DANxiiX....Rig1'
+            print '             Example: LUSr5EY...,DANxiiX..._Rig1'
             print
             print '  VERIFY IN LOGS AFTER STARTUP:'
             print '    - Look for: "Detected auxpow-capable merged mining daemon"'
