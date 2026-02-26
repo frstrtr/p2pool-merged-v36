@@ -473,6 +473,14 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except Exception:
             return []
 
+    # Hardcoded transition blobs -- guaranteed to load regardless of file paths.
+    # These are authority-signed encrypted blobs (same format as .hex files).
+    # Add new blobs here when creating new transition messages.
+    _BUILTIN_TRANSITION_BLOBS = [
+        # V35 -> V36 mainnet transition signal (created 2026-02-24)
+        '017c9299b7c4579e67c0e7670dfc9c4207c045f7c7cc28f8eee9a11e1779f41440b240f6c66376d03d5ecd2d03a896ab93135f354ac895032c72486ee15202bfbaea01e595d5ef8c49a8c66a0a5da39fa1e5ef4ad669874582380dc0915f8eafb7697b55f6ba8208c017ccd112710cf8f06cd6b17fb9f22889c6c1dcbbf636e0c70963ee8ad00825f95b9f6c7d42089ba271155b8d8420e38d6d8925f91cd348c7e517a9461fd1574e990d682cedc4c5c646612b0d91c6662afb91c2d157859230d6185e31e8c2c4e98273f824e3c48f9d372f5fc65bfcd8d10e1ff729f9b87c9c841a1f087055703d1e85b9039c3cd87184a66abf589c0642f3243cba67b5aa3ed7154f75350af5752652795709b7537f3a18f05bfaa2a88895e3e2afe7195a2f39f67ba0ccb3f7ab6779ffdb0ddf02fed2d661fb474b6fc5cafa76dc087cd6927bf5595237e7531927b2e6f688584c5608d6905347460bf82e5449eede31dae5a848199a2fd6166f3c0e',
+    ]
+
     # Track when we last scanned for blob files (epoch seconds)
     _last_blob_scan = [0]
     _blob_scan_count = [0]  # how many scans have been performed
@@ -530,6 +538,15 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             n = store.load_blob_hex(blob_hex)
             if n > 0:
                 print('Messaging: loaded %d message(s) from --transition-message' % n)
+
+        # 4. Builtin hardcoded blobs (always available, no file path dependencies)
+        for blob_hex in _BUILTIN_TRANSITION_BLOBS:
+            try:
+                n = store.load_blob_hex(blob_hex)
+                if n > 0 and is_first_scan:
+                    print('Messaging: loaded %d builtin message(s)' % n)
+            except Exception:
+                pass
 
     def _get_transition_message():
         """Extract the latest TRANSITION_SIGNAL from the share messaging system.
@@ -3090,6 +3107,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     'seconds_since_scan': int(time.time() - _last_blob_scan[0]) if _last_blob_scan[0] else None,
                     'cli_transition_message': transition_message or None,
                     'scanned_dirs': scanned_dirs,
+                    'builtin_blobs': len(_BUILTIN_TRANSITION_BLOBS),
                     'store_message_count': msg_count,
                     'transition_signals': transition_msgs,
                     'enable_miner_messages': enable_miner_messages,
