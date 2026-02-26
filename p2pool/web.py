@@ -1463,10 +1463,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         COINBASE_MATURITY = 100
         
         for b in block_history:
-            # Strip worker suffix from miner field for matching
+            # Strip merged DOGE address (comma) and worker suffix for matching
             block_miner = b.get('miner', '')
             if block_miner:
-                block_miner = block_miner.split('.')[0].split('+')[0].split('/')[0].split('_')[0]
+                block_miner = block_miner.split(',')[0].split('.')[0].split('+')[0].split('/')[0].split('_')[0]
             if block_miner == address:
                 block_hash = b.get('hash', '')
                 block_height = b.get('number', 0)
@@ -1558,7 +1558,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     
                     for sh_addr, val in shareholders.iteritems():
                         frac = val[0] if isinstance(val, tuple) else val
-                        sh_base = sh_addr.split('.')[0].split('_')[0].split('+')[0].split('/')[0]
+                        sh_base = sh_addr.split(',')[0].split('.')[0].split('_')[0].split('+')[0].split('/')[0]
                         if sh_base == address:
                             current_merged_payout = int(miners_reward * frac) / 1e8
                             break
@@ -1598,11 +1598,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             
             block_miner = b.get('miner', '')
             block_miner_parent = b.get('miner_parent', '')
-            # Strip worker suffix from miner field for matching
+            # Strip merged DOGE address (comma) and worker suffix for matching
             if block_miner:
-                block_miner = block_miner.split('.')[0].split('+')[0].split('/')[0].split('_')[0]
+                block_miner = block_miner.split(',')[0].split('.')[0].split('+')[0].split('/')[0].split('_')[0]
             if block_miner_parent:
-                block_miner_parent = block_miner_parent.split('.')[0].split('+')[0].split('/')[0].split('_')[0]
+                block_miner_parent = block_miner_parent.split(',')[0].split('.')[0].split('+')[0].split('/')[0].split('_')[0]
             
             if block_miner == address or block_miner_parent == address:
                 block_hash = b.get('hash', '')
@@ -1790,7 +1790,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                             if not b.get('miner_payout') and b.get('miner'):
                                 try:
                                     current_txouts = node.get_current_txouts()
-                                    miner_addr = b['miner'].split('.')[0].split('_')[0]
+                                    miner_addr = b['miner'].split(',')[0].split('.')[0].split('_')[0]
                                     b['miner_payout'] = current_txouts.get(miner_addr, 0)
                                 except:
                                     pass
@@ -1830,7 +1830,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 # Get miner's payout from current txouts
                 try:
                     current_txouts = node.get_current_txouts()
-                    base_addr = miner_addr.split('.')[0].split('_')[0]
+                    base_addr = miner_addr.split(',')[0].split('.')[0].split('_')[0]
                     block_info['miner_payout'] = current_txouts.get(base_addr, 0)
                 except:
                     block_info['miner_payout'] = 0

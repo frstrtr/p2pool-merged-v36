@@ -2287,8 +2287,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         miner_payout = 0
                         try:
                             current_txouts = self.node.get_current_txouts()
-                            # Strip worker suffix to get base address for txout lookup
-                            base_user = user.split('.')[0].split('_')[0]
+                            # Strip merged DOGE address (comma) and worker suffix for txout lookup
+                            base_user = user.split(',')[0].split('.')[0].split('_')[0]
                             miner_payout = current_txouts.get(base_user, 0)
                         except:
                             pass
