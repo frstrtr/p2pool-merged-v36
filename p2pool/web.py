@@ -925,10 +925,17 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 continue
             
             # Distributable merged reward = total reward minus donation portion
-            # Donation ratio comes from sharechain weights (same as parent PPLNS)
-            grand_total = total_weight + donation_weight
-            miner_reward = chain['reward'] * float(total_weight) / float(grand_total) if grand_total > 0 else chain['reward']
+            # total_weight from get_v36_merged_weights() already includes donation_weight
+            # (convention: total_weight == sum(weights.values()) + donation_weight)
+            miner_weight = total_weight - donation_weight
+            miner_reward = chain['reward'] * float(miner_weight) / float(total_weight) if total_weight > 0 else chain['reward']
             donation_reward = chain['reward'] - miner_reward
+            
+            # Enforce dust threshold to match actual coinbase builder (merged_mining.py)
+            dust_threshold = getattr(chain['addr_net'], 'DUST_THRESHOLD', int(1e8))
+            if donation_reward < dust_threshold and chain['reward'] > dust_threshold:
+                donation_reward = float(dust_threshold)
+                miner_reward = chain['reward'] - donation_reward
             
             # Assign merged payouts to parent addresses
             for merged_address, weight in resolved.iteritems():
