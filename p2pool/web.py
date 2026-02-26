@@ -3087,9 +3087,18 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         def render_POST(self, request):
             request.setHeader('Content-Type', 'application/json')
             request.setHeader('Access-Control-Allow-Origin', '*')
+            # Security: only allow from localhost
+            client_ip = request.getClientIP()
+            if client_ip not in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
+                request.setResponseCode(403)
+                return json.dumps({'error': 'forbidden: localhost only'})
             try:
                 store = _get_message_store()
-                body = json.loads(request.content.read())
+                content = request.content.read(65536)
+                if len(content) >= 65536:
+                    request.setResponseCode(413)
+                    return json.dumps({'error': 'request body too large'})
+                body = json.loads(content)
                 actions = []
                 if 'signing_id' in body:
                     store.ban_list.ban_signing_id(body['signing_id'])
@@ -3117,9 +3126,18 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         def render_POST(self, request):
             request.setHeader('Content-Type', 'application/json')
             request.setHeader('Access-Control-Allow-Origin', '*')
+            # Security: only allow from localhost
+            client_ip = request.getClientIP()
+            if client_ip not in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
+                request.setResponseCode(403)
+                return json.dumps({'error': 'forbidden: localhost only'})
             try:
                 store = _get_message_store()
-                body = json.loads(request.content.read())
+                content = request.content.read(65536)
+                if len(content) >= 65536:
+                    request.setResponseCode(413)
+                    return json.dumps({'error': 'request body too large'})
+                body = json.loads(content)
                 actions = []
                 if 'signing_id' in body:
                     store.ban_list.unban_signing_id(body['signing_id'])
@@ -3157,7 +3175,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 return json.dumps({'error': 'forbidden: localhost only'})
             try:
                 store = _get_message_store()
-                body = json.loads(request.content.read())
+                content = request.content.read(65536)
+                if len(content) >= 65536:
+                    request.setResponseCode(413)
+                    return json.dumps({'error': 'request body too large'})
+                body = json.loads(content)
                 blob_hex = body.get('blob_hex', '')
                 blob_file = body.get('blob_file', '')
                 if blob_file:

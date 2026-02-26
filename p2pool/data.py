@@ -46,7 +46,8 @@ def prefix_to_hash_link(prefix, const_ending=''):
     # print >>sys.stderr, '[PREFIX_TO_HASH_LINK] const_ending: %s' % const_ending.encode('hex')
     # print >>sys.stderr, '[PREFIX_TO_HASH_LINK] last 50 bytes of prefix: %s' % prefix[-50:].encode('hex')
     
-    assert prefix.endswith(const_ending), (prefix, const_ending)
+    if not prefix.endswith(const_ending):
+        raise ValueError('prefix_to_hash_link: prefix does not end with const_ending')
     x = sha256.sha256(prefix)
     
     # print >>sys.stderr, '[PREFIX_TO_HASH_LINK] SHA256 state: %s (len=%d)' % (x.state.encode('hex'), len(x.state))
@@ -68,9 +69,11 @@ def check_hash_link(hash_link, data, const_ending=''):
     # print >>sys.stderr, '[CHECK_HASH_LINK] const_ending: %s (len=%d)' % (const_ending.encode('hex'), len(const_ending))
     
     extra_length = hash_link['length'] % (512//8)
-    assert len(hash_link['extra_data']) == max(0, extra_length - len(const_ending))
+    if len(hash_link['extra_data']) != max(0, extra_length - len(const_ending)):
+        raise ValueError('check_hash_link: extra_data length mismatch (got %d, expected %d)' % (len(hash_link['extra_data']), max(0, extra_length - len(const_ending))))
     extra = (hash_link['extra_data'] + const_ending)[len(hash_link['extra_data']) + len(const_ending) - extra_length:]
-    assert len(extra) == extra_length
+    if len(extra) != extra_length:
+        raise ValueError('check_hash_link: extra length mismatch (got %d, expected %d)' % (len(extra), extra_length))
     
     # print >>sys.stderr, '[CHECK_HASH_LINK] extra_length: %d' % extra_length
     # print >>sys.stderr, '[CHECK_HASH_LINK] extra: %s' % extra.encode('hex')
@@ -719,7 +722,8 @@ class BaseShare(object):
         previous_share = tracker.items[share_data['previous_share_hash']] if share_data['previous_share_hash'] is not None else None
         
         height, last = tracker.get_height_and_last(share_data['previous_share_hash'])
-        assert height >= net.REAL_CHAIN_LENGTH or last is None
+        if not (height >= net.REAL_CHAIN_LENGTH or last is None):
+            raise ValueError('share chain not long enough (height=%d, need %d)' % (height, net.REAL_CHAIN_LENGTH))
         if height < net.TARGET_LOOKBEHIND:
             pre_target3 = net.MAX_TARGET
         else:
@@ -809,14 +813,16 @@ class BaseShare(object):
         if None not in removed_fees:
             share_data = dict(share_data, subsidy=share_data['subsidy'] - sum(removed_fees))
         else:
-            assert base_subsidy is not None
+            if base_subsidy is None:
+                raise ValueError('base_subsidy is None in subsidy calculation')
             share_data = dict(share_data, subsidy=base_subsidy + definite_fees)
         
         weights, total_weight, donation_weight = tracker.get_cumulative_weights(previous_share.share_data['previous_share_hash'] if previous_share is not None else None,
             max(0, min(height, net.REAL_CHAIN_LENGTH) - 1),
             65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target),
         )
-        assert total_weight == sum(weights.itervalues()) + donation_weight, (total_weight, sum(weights.itervalues()) + donation_weight)
+        if total_weight != sum(weights.itervalues()) + donation_weight:
+            raise ValueError('PPLNS weight mismatch: total_weight=%d, sum+donation=%d' % (total_weight, sum(weights.itervalues()) + donation_weight))
         
         amounts = dict((script, share_data['subsidy']*(199*weight)//(200*total_weight)) for script, weight in weights.iteritems()) # 99.5% goes according to weights prior to this share
         if 'address' not in share_data:
@@ -1080,7 +1086,8 @@ class BaseShare(object):
             if cls.VERSION >= 36:
                 share_contents['message_data'] = message_data
             share = cls(net, None, share_contents)
-            assert share.header == header # checks merkle_root
+            if share.header != header: # checks merkle_root
+                raise ValueError('share header does not match expected header (merkle_root mismatch)')
             return share
         t5 = time.time()
         if p2pool.BENCH: print "%8.3f ms for data.py:generate_transaction(). Parts: %8.3f %8.3f %8.3f %8.3f %8.3f " % (
@@ -1135,7 +1142,8 @@ class BaseShare(object):
         
         # V36 uses VarStrType for extra_data (gentx_before_refhash < 64 bytes)
         if self.VERSION < 36:
-            assert not self.hash_link['extra_data'], repr(self.hash_link['extra_data'])
+            if self.hash_link['extra_data']:
+                raise ValueError('pre-V36 share has non-empty hash_link extra_data: %r' % (self.hash_link['extra_data'],))
         
         self.share_data = self.share_info['share_data']
         self.max_target = self.share_info['max_bits'].target
@@ -1184,10 +1192,12 @@ class BaseShare(object):
         if self.VERSION < 34:
             n = set()
             for share_count, tx_count in self.iter_transaction_hash_refs():
-                assert share_count < 110
+                if share_count >= 110:
+                    raise ValueError('transaction hash ref share_count too large: %d' % share_count)
                 if share_count == 0:
                     n.add(tx_count)
-            assert n == set(range(len(self.share_info['new_transaction_hashes'])))
+            if n != set(range(len(self.share_info['new_transaction_hashes']))):
+                raise ValueError('transaction hash refs do not cover all new_transaction_hashes')
         
         # Debug: Uncomment to trace share validation (confirmed working)
         # import sys
@@ -1281,7 +1291,8 @@ class BaseShare(object):
             message_data=self._message_data,
             merged_coinbase_info=self.share_info.get('merged_coinbase_info', None))
         
-        assert other_tx_hashes2 == other_tx_hashes
+        if other_tx_hashes2 != other_tx_hashes:
+            raise ValueError('reconstructed other_tx_hashes do not match expected')
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
             raise ValueError('''gentx doesn't match hash_link''')
         
@@ -1795,7 +1806,8 @@ class OkayTracker(forest.Tracker):
                         min(x.target for x in self.get_chain(head, min(head_height, 5))),
                     ))
         for bad in bads:
-            assert bad not in self.verified.items
+            if bad in self.verified.items:
+                raise ValueError('bad share %s found in verified items' % (bad,))
             #assert bad in self.heads
             bad_share = self.items[bad]
             if bad_share.peer_addr is not None:

@@ -474,7 +474,8 @@ class StratumRPCMiningProvider(object):
             return False
         x, got_response = self.handler_map[job_id]
         coinb_nonce = self.xnonce1.decode('hex') + extranonce2.decode('hex')
-        assert len(coinb_nonce) == self.wb.COINBASE_NONCE_LENGTH
+        if len(coinb_nonce) != self.wb.COINBASE_NONCE_LENGTH:
+            raise ValueError('stratum coinbase_nonce length mismatch: got %d, expected %d' % (len(coinb_nonce), self.wb.COINBASE_NONCE_LENGTH))
         new_packed_gentx = x['coinb1'] + coinb_nonce + x['coinb2']
 
         # Debug: Print stratum's calculation

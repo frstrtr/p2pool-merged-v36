@@ -2098,7 +2098,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # This is needed for vardiff - stratum adjusts target after get_work() returns
             effective_target = submitted_target if submitted_target is not None else target
             
-            assert len(coinbase_nonce) == self.COINBASE_NONCE_LENGTH
+            if len(coinbase_nonce) != self.COINBASE_NONCE_LENGTH:
+                raise ValueError('coinbase_nonce length mismatch: got %d, expected %d' % (len(coinbase_nonce), self.COINBASE_NONCE_LENGTH))
             # IMPORTANT: CachingWorkerBridge modifies x['coinb1'] by appending caching nonce bytes,
             # but ba['coinb1'] is the original. The lambda in CachingWorkerBridge prepends the
             # caching nonce to coinbase_nonce before calling us. So coinbase_nonce is FULL length.
@@ -2264,10 +2265,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 log.err(None, 'Error while processing potential block:')
 
             user, _, _, _, _, _ = self.get_user_details(user)
-            assert header['previous_block'] == ba['previous_block']
+            if header['previous_block'] != ba['previous_block']:
+                raise ValueError('header previous_block does not match work assignment')
             # Note: header['merkle_root'] is calculated in stratum.py with the correct coinbase_nonce
             # Don't recalculate it here because worker_interface.py prepends additional nonce data
-            assert header['bits'] == ba['bits']
+            if header['bits'] != ba['bits']:
+                raise ValueError('header bits does not match work assignment')
 
             # DOA (Dead On Arrival) Share Prevention
             # =============================================

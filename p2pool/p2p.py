@@ -271,7 +271,8 @@ class Protocol(p2protocol.Protocol):
                 self.remote_remembered_txs_size -= sum(100 + get_tx_packed_size(before[x]) for x in removed)
             if added:
                 self.remote_remembered_txs_size += sum(100 + get_tx_packed_size(after[x]) for x in added)
-                assert self.remote_remembered_txs_size <= self.max_remembered_txs_size
+                if self.remote_remembered_txs_size > self.max_remembered_txs_size:
+                    raise ValueError('remote_remembered_txs_size %d exceeds max %d' % (self.remote_remembered_txs_size, self.max_remembered_txs_size))
                 fragment(self.send_remember_tx, tx_hashes=[x for x in added if x in self.remote_tx_hashes], txs=[after[x] for x in added if x not in self.remote_tx_hashes])
             t1 = time.time()
             if p2pool.BENCH and (t1-t0) > .01: print "%8.3f ms for update_remote_view_of_my_mining_txs" % ((t1-t0)*1000.)
@@ -280,7 +281,8 @@ class Protocol(p2protocol.Protocol):
         self.connection_lost_event.watch(lambda: self.node.mining_txs_var.transitioned.unwatch(watch_id2))
         
         self.remote_remembered_txs_size += sum(100 + get_tx_packed_size(x) for x in self.node.mining_txs_var.value.values())
-        assert self.remote_remembered_txs_size <= self.max_remembered_txs_size
+        if self.remote_remembered_txs_size > self.max_remembered_txs_size:
+            raise ValueError('remote_remembered_txs_size %d exceeds max %d' % (self.remote_remembered_txs_size, self.max_remembered_txs_size))
         fragment(self.send_remember_tx, tx_hashes=[], txs=self.node.mining_txs_var.value.values())
     
     message_ping = pack.ComposedType([])
@@ -620,8 +622,10 @@ class ServerFactory(protocol.ServerFactory):
         return p
     
     def _host_to_ident(self, host):
-        a, b, c, d = host.split('.')
-        return a, b
+        parts = host.split('.')
+        if len(parts) == 4:
+            return parts[0], parts[1]
+        return (host,)  # IPv6 — use full address as ident
     
     def proto_made_connection(self, proto):
         ident = self._host_to_ident(proto.transport.getPeer().host)
@@ -663,8 +667,10 @@ class ClientFactory(protocol.ClientFactory):
         self.running = False
     
     def _host_to_ident(self, host):
-        a, b, c, d = host.split('.')
-        return a, b
+        parts = host.split('.')
+        if len(parts) == 4:
+            return parts[0], parts[1]
+        return (host,)  # IPv6 — use full address as ident
     
     def buildProtocol(self, addr):
         p = Protocol(self.node, False)
