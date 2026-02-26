@@ -960,6 +960,9 @@ def run():
         merged_urls.append((merged_url, merged_userpass, merged_paddr))
         print 'Merged mining daemon: %s:%s (user: %s)' % (args.merged_coind_address, args.merged_coind_rpc_port, args.merged_coind_rpc_user)
     
+    if args.coinb_texts:
+        print 'Coinbase text(s): %s' % ', '.join(repr(t) for t in args.coinb_texts)
+    
     if args.logfile is None:
         args.logfile = os.path.join(datadir_path, 'log')
     

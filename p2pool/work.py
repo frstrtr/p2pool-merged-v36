@@ -1948,8 +1948,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 previous_share_hash=self.node.best_share_var.value,
                 coinbase=(script.create_push_script([
                     self.current_work.value['height'],
-                    ] + ([mm_data] if mm_data else []) + [
-                ]) + self.current_work.value['coinbaseflags'] + getattr(self.node.net, 'COINBASEEXT', b''))[:100],
+                    ] + ([mm_data] if mm_data else []) + self.args.coinb_texts
+                ) + self.current_work.value['coinbaseflags'] + getattr(self.node.net, 'COINBASEEXT', b''))[:100],
                 nonce=random.randrange(2**32),
                 subsidy=self.current_work.value['subsidy'],
                 donation=math.perfect_round(65535*self.donation_percentage/100),
