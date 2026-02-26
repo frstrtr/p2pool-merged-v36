@@ -1323,10 +1323,8 @@
                     <div class="stat-card">
                         <h3><span class="icon">🎯</span> Best Share</h3>
                         <div class="stat-value" id="best_share_round">-</div>
-                        <div class="stat-sub">Round: <span id="best_share_round_pct" style="color: var(--primary);">-</span> of block</div>
-                        <div class="stat-sub" id="best_share_merged_line" style="display: none; color: #c3a634; margin-top: -2px;">🐕 Round: <span id="best_share_merged_pct">-</span> of <span id="best_share_merged_symbol">DOGE</span> block</div>
-                        <div class="stat-detail">🏆 Record: <span id="best_share_alltime">-</span> (<span id="best_share_alltime_pct">-</span>)</div>
-                        <div class="stat-detail" id="best_share_merged_record_line" style="display: none; color: #c3a634;">🐕 Record: <span id="best_share_merged_alltime_pct">-</span> of <span id="best_share_merged_alltime_symbol">DOGE</span> block</div>
+                        <div class="stat-sub">Round: <span id="best_share_round_pct" style="color: var(--primary);">-</span><span id="best_share_merged_round_part" style="display: none;"> / <span id="best_share_merged_pct" style="color: #c3a634;">-</span></span></div>
+                        <div class="stat-detail">🏆 Record: <span style="color: var(--primary);"><span id="best_share_alltime">-</span> (<span id="best_share_alltime_pct">-</span>)</span><span id="best_share_merged_record_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_alltime">-</span> (<span id="best_share_merged_alltime_pct">-</span>)</span></span></div>
                     </div>
                 </div>
                 
@@ -2567,18 +2565,17 @@
                         if (!bs) return;
                         // Current round (LTC)
                         d3.select('#best_share_round').text(format_difficulty(bs.round.difficulty));
-                        d3.select('#best_share_round_pct').text(d3.format('.8f')(bs.round.pct_of_block) + '%');
+                        d3.select('#best_share_round_pct').text(d3.format('.4f')(bs.round.pct_of_block) + '%');
                         // All-time record (LTC)
                         d3.select('#best_share_alltime').text(format_difficulty(bs.all_time.difficulty));
-                        d3.select('#best_share_alltime_pct').text(d3.format('.8f')(bs.all_time.pct_of_block) + '%');
-                        // Merged chain (DOGE) stats
+                        d3.select('#best_share_alltime_pct').text(d3.format('.4f')(bs.all_time.pct_of_block) + '%');
+                        // Merged chain (DOGE) stats - inline
                         if (bs.merged) {
-                            d3.select('#best_share_merged_line').style('display', 'block');
-                            d3.select('#best_share_merged_pct').text(d3.format('.8f')(bs.merged.round.pct_of_block) + '%');
-                            d3.select('#best_share_merged_symbol').text(bs.merged.symbol || 'DOGE');
-                            d3.select('#best_share_merged_record_line').style('display', 'block');
-                            d3.select('#best_share_merged_alltime_pct').text(d3.format('.8f')(bs.merged.all_time.pct_of_block) + '%');
-                            d3.select('#best_share_merged_alltime_symbol').text(bs.merged.symbol || 'DOGE');
+                            d3.select('#best_share_merged_round_part').style('display', 'inline');
+                            d3.select('#best_share_merged_pct').text(d3.format('.4f')(bs.merged.round.pct_of_block) + '%');
+                            d3.select('#best_share_merged_record_part').style('display', 'inline');
+                            d3.select('#best_share_merged_alltime').text(format_difficulty(bs.merged.all_time.difficulty));
+                            d3.select('#best_share_merged_alltime_pct').text(d3.format('.4f')(bs.merged.all_time.pct_of_block) + '%');
                         }
                     });
                 });
