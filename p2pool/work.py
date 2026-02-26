@@ -255,6 +255,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Keyed by (user_string, merged_addr_key) — invalidated when miner reconnects with different address.
         self._miner_addr_cache = {}      # user -> (pubkey_hash, pubkey_type, is_convertible, addr_type, error_msg)
         self._miner_merged_cache = {}    # user -> list of {chain_id, script} entries (auto-generated)
+        self._miner_merged_display_cache = {}  # user -> {chain_name: address_string} (auto-converted display addresses)
         self._merged_net_cache = {}      # chain_id -> net object (constant for entire run)
         self._merged_chain_name_cache = {} # chain_id -> name string (constant for entire run)
 
@@ -1355,12 +1356,18 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 cached_merged = self._miner_merged_cache[user]
                                 if cached_merged is not None:
                                     merged_addresses['_validated'] = cached_merged
+                                    # Restore cached display addresses
+                                    cached_display = self._miner_merged_display_cache.get(user, {})
+                                    for chain_name, display_addr in cached_display.items():
+                                        merged_addresses[chain_name] = display_addr
+                                    merged_addresses['_auto_converted'] = True
                             else:
                                 auto_entries = self._auto_generate_merged_addresses(pubkey_hash, addr_type)
                                 if auto_entries:
                                     merged_addresses['_validated'] = auto_entries
                                     self._miner_merged_cache[user] = auto_entries
-                                    # Log once on first auto-conversion
+                                    # Compute and cache display addresses for auto-converted entries
+                                    display_addrs = {}
                                     src_type_names = {
                                         p2pool_data.PUBKEY_TYPE_P2PKH: 'P2PKH',
                                         p2pool_data.PUBKEY_TYPE_P2WPKH: 'BECH32',
@@ -1377,12 +1384,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                             else:
                                                 ae_addr = bitcoin_data.pubkey_hash_to_address(pubkey_hash, ae_net.ADDRESS_VERSION, -1, ae_net)
                                                 dst_label = 'P2PKH'
+                                            display_addrs[ae_chain] = ae_addr
+                                            merged_addresses[ae_chain] = ae_addr
                                             print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> %s %s (chain: %s, script: %s)' % (
                                                 src_label, user, ae_addr, dst_label,
                                                 ae_chain, ae['script'].encode('hex'))
                                         except Exception:
                                             print >>sys.stderr, '[MERGED] Auto-converted %s address %s -> script %s (chain_id: %d)' % (
                                                 src_label, user, ae['script'].encode('hex'), ae['chain_id'])
+                                    self._miner_merged_display_cache[user] = display_addrs
+                                    merged_addresses['_auto_converted'] = True
                                 else:
                                     # Tier 3: unconvertible - merged rewards go to pool distribution
                                     self._miner_merged_cache[user] = None  # cache the negative result too

@@ -1775,6 +1775,13 @@
                     var baseAddress = extractAddress(workerName);
                     var mergedAddr = extractMergedAddress(workerName);
                     
+                    // If no explicit merged address in worker name, check API merged_addresses
+                    var mergedAutoConverted = false;
+                    if (!mergedAddr && workerData.merged_addresses) {
+                        mergedAddr = workerData.merged_addresses['dogecoin'] || null;
+                        mergedAutoConverted = workerData.merged_auto_converted || false;
+                    }
+                    
                     // Get difficulty from connection_difficulties array (use first/current difficulty)
                     var difficulty = 0;
                     if (workerData.connection_difficulties && workerData.connection_difficulties.length > 0) {
@@ -1799,6 +1806,7 @@
                         minerGroups[baseAddress] = {
                             address: baseAddress,
                             mergedAddress: null,
+                            mergedAutoConverted: false,
                             workers: [],
                             totalHashrate: 0,
                             totalEstimatedHashrate: 0,
@@ -1811,6 +1819,7 @@
                     }
                     if (mergedAddr && !minerGroups[baseAddress].mergedAddress) {
                         minerGroups[baseAddress].mergedAddress = mergedAddr;
+                        minerGroups[baseAddress].mergedAutoConverted = mergedAutoConverted;
                     }
                     
                     minerGroups[baseAddress].workers.push({
@@ -1925,6 +1934,12 @@
                             .attr('onclick', 'event.stopPropagation()')
                             .attr('style', 'color: #c3a634; text-decoration: none;')
                             .text(miner.mergedAddress);
+                        if (miner.mergedAutoConverted) {
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #888; font-size: 0.6rem; margin-left: 4px;')
+                                .attr('title', 'Auto-converted from LTC address (same pubkey hash)')
+                                .text('(auto)');
+                        }
                     }
                     if (miner.workers.length > 1) {
                         addressCell.append('span')

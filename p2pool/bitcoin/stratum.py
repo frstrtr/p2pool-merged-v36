@@ -195,11 +195,19 @@ class PoolStatistics(object):
             if hasattr(conn, 'username') and conn.username:
                 worker_name = conn.username
                 if worker_name not in workers:
+                    # Extract display merged addresses (exclude internal keys)
+                    merged_display = {}
+                    conn_merged = getattr(conn, 'merged_addresses', {})
+                    for mk, mv in conn_merged.items():
+                        if not mk.startswith('_') and isinstance(mv, basestring):
+                            merged_display[mk] = mv
                     workers[worker_name] = {
                         'connections': 0,
                         'address': getattr(conn, 'address', None),
                         'difficulties': [],
                         'ips': set(),
+                        'merged_addresses': merged_display,
+                        'merged_auto_converted': bool(conn_merged.get('_auto_converted')),
                     }
                 workers[worker_name]['connections'] += 1
                 if hasattr(conn, 'target') and conn.target:

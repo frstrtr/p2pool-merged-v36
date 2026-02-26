@@ -1033,6 +1033,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 # Get aggregate connection stats
                 conn_aggregate = pool_stats.get_worker_aggregate_stats(worker_name)
                 
+                # Get merged addresses from connected workers if available
+                cw_info = connected_workers.get(worker_name, {})
+                
                 formatted_workers[worker_name] = {
                     'shares': wstats.get('shares', 0),
                     'accepted': wstats.get('accepted', 0),
@@ -1045,6 +1048,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     'active_connections': conn_aggregate.get('active_connections', 0) if conn_aggregate else 0,
                     'backup_connections': conn_aggregate.get('backup_connections', 0) if conn_aggregate else 0,
                     'connection_difficulties': conn_aggregate.get('difficulties', []) if conn_aggregate else [],
+                    'merged_addresses': cw_info.get('merged_addresses', {}),
+                    'merged_auto_converted': cw_info.get('merged_auto_converted', False),
                 }
             
             # Also include currently connected workers (even if no shares yet)
@@ -1061,11 +1066,17 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         'active_connections': 0,
                         'backup_connections': winfo.get('connections', 0),
                         'connection_difficulties': winfo.get('difficulties', []),
+                        'merged_addresses': winfo.get('merged_addresses', {}),
+                        'merged_auto_converted': winfo.get('merged_auto_converted', False),
                     }
                 else:
                     # Update connection info for existing workers
                     formatted_workers[worker_name]['connections'] = winfo.get('connections', 0)
                     formatted_workers[worker_name]['connection_difficulties'] = winfo.get('difficulties', [])
+                    # Add merged addresses if not already set
+                    if 'merged_addresses' not in formatted_workers[worker_name]:
+                        formatted_workers[worker_name]['merged_addresses'] = winfo.get('merged_addresses', {})
+                        formatted_workers[worker_name]['merged_auto_converted'] = winfo.get('merged_auto_converted', False)
             
             return {
                 'pool': stats,
