@@ -56,9 +56,9 @@ CONF_FILE_FUNC = lambda: os.path.join(
     else os.path.expanduser('~/.dogecoin'), 
     'dogecoin.conf'
 )
-BLOCK_EXPLORER_URL_PREFIX = 'https://dogechain.info/block/'
-ADDRESS_EXPLORER_URL_PREFIX = 'https://dogechain.info/address/'
-TX_EXPLORER_URL_PREFIX = 'https://dogechain.info/tx/'
+BLOCK_EXPLORER_URL_PREFIX = 'https://blockchair.com/dogecoin/block/'
+ADDRESS_EXPLORER_URL_PREFIX = 'https://blockchair.com/dogecoin/address/'
+TX_EXPLORER_URL_PREFIX = 'https://blockchair.com/dogecoin/transaction/'
 
 # Dogecoin mainnet target range for stratum vardiff
 # Floor (hardest): diff ~15B for large ASIC farms, Ceiling (easiest): diff ~61 for small miners
