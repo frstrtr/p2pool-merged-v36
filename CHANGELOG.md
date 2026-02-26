@@ -8,6 +8,8 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 - **fix: DOGE donation display shows tiny value (0.11) instead of ≥1 DOGE** — `get_v36_merged_weights()` returns `total_weight` inclusive of donation, but the display code added `donation_weight` a second time, halving the apparent donation ratio. Fixed weight decomposition: `miner_weight = total_weight - donation_weight`. Also enforce DUST_THRESHOLD minimum (1 DOGE) in display to match actual coinbase builder (`ba457df`)
 - **fix: miner page shows 0 blocks for comma-separated merged miners** — Stratum records merged miners as `LTC_ADDR,DOGE_ADDR` but `get_miner_payouts()` / `get_merged_miner_payouts()` only split on `.` `+` `_` `/`, never on comma. Added `.split(',')[0]` to all 6 address-matching locations in `web.py` and `work.py` (`3bee8d6`)
 - **fix: block explorer link uses wrong hash on miners page** — `miners.html` used `pow_hash_hex` (scrypt PoW hash) for the chainz.cryptoid.info link, but the explorer expects the SHA256d block hash. Changed to `block.hash`; display text still shows truncated PoW hash with a tooltip showing both hashes (`4787873`)
+- **fix: transition message not showing on nodes without ecdsa library** — If the authority blob was successfully decrypted but ECDSA signature verification failed (missing `ecdsa`/`coincurve` library), the message was rejected as non-authority and then expired by TTL. Now grants `FLAG_PROTOCOL_AUTHORITY` from successful decryption alone, since only the private key holder could have encrypted the envelope (`a9135c0`)
+- **fix: `git describe --tags` for lightweight tag version display** — Added `--tags` flag so lightweight tags (not just annotated) are recognized in version string (`8b678bd`)
 
 ---
 
