@@ -9,10 +9,13 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 - **fix: miner.html auto-refresh JS errors** - Fixed 30-second auto-refresh referencing non-existent element IDs (`doa_rate`, `time_to_share`) causing `Cannot set properties of null` errors; updated to correct IDs (`doa_rate_inline`, `doa_rate_detail`, `efficiency_value`) (`5e46adf`)
 - **fix: DOGE address missing from Active Miners table** - Auto-converted DOGE addresses now displayed for miners connecting with LTC-only address; exposed `merged_addresses` through stratum API → web API → frontend chain (`5e54852`)
 - **fix: restore --coinbtext support in LTC coinbase** - Regression from jtoomim fork that broke parent chain coinbase text injection (`59ae3dd`)
+- **fix: payout lookup comma split** - Split on comma for merged mining worker names in payout calculations (`93c3ed2`)
+- **fix: comma-split bug in miner/miners pages** - Display both LTC & DOGE addresses correctly (`e18731a`)
+- **fix: message TTL** - Tie to sharechain window, exempt transition signals; consistent 7x max_age in admission and pruning (`b8462a9`, `2b4b5f9`)
 
 ### Security
 - **security: fix 6 MEDIUM audit findings** - M1 (localhost-only ban/unban), M4 (rate limiting), M5 (input validation), M8 (safe defaults), M14 (log sanitization), M16 (error handling) (`f2323e3`)
-- **Security audit fixes** - H1 (localhost-only ban/unban), H2 (64KB POST limit), H4 (assert->raise), H8 (IPv6 crash)
+- **Security audit fixes** - H1 (localhost-only ban/unban), H2 (64KB POST limit), H4 (assert->raise), H8 (IPv6 crash) (`a95e418`)
 
 ### Dashboard UI
 - **Best Share card compact layout** - LTC blue / DOGE gold inline display (`2b0b9e0`)
@@ -24,6 +27,17 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 - **Table initial display** - Show 10 initial entries in payouts, blocks, and peers tables (`e3e14a3`)
 - **Explorer URLs reverted** - LTC back to chainz.cryptoid.info, DOGE back to dogechain.info (`6283786`)
 - **Miners table enhancement** - Added currency symbols and merged payout column (`f43aee0`)
+- **fix: GitHub links and version display** - Fixed links and version in web UI footers (`ef55b7f`)
+- **Progress bar labels** - Embedded percentage labels inside all progress bars, fixed threshold marker overlap (`8fdd0f4`)
+
+### V36 Transition System
+- **Full-chain sharechain scan** - Accurate V36 vote counting across entire tracked chain (`7a5a308`)
+- **Fix chain scan cap** - Cap at CHAIN_LENGTH, not full tracker history (`278e469`)
+- **Full chain length for propagation** - Use full chain length (8640) for propagation target, not 90% (`5ccc4c6`)
+- **Fix transition display** - Overall V36 stats, propagation tracking, clear stage messages (`edfcbb5`)
+- **Fix transition blob loading** - Fix transition message blob loading and classic stat page display (`6564720`)
+- **Authority announcements** - Add authority announcements to dashboard + blob builder + legacy dashboard (`d4067b9`, `457dbe1`)
+- **Transition guide** - Comprehensive V36 transition guide with dashboard legend (`bd3fa8e`)
 
 ### MM Adapter Overhaul
 - **Unified adapter** - Removed legacy `adapter_v2.py`, `adapter_legacy_DEPRECATED.py`, `config_v2.yaml`; single `adapter.py` with multiaddress mode (`2b50d7a`)
@@ -37,11 +51,17 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 - **CHECK 3: actual DOGE address** - Shows converted Dogecoin address (not parent chain address) using dogecoin network module (`6840b14`)
 - **CHECK 6: worker separator clarity** - Uses `<ltc_addr>,<doge_addr>` placeholders to avoid confusion with `_` worker separator (`6840b14`)
 - **CHECK 7: coinbase text display** - Shows parent chain `--coinbtext` and merged chain fallback tag on startup (`6840b14`)
-- **Log blob read errors** - Add `/msg/diag` endpoint for diagnostics
+- **Log blob read errors** - Add `/msg/diag` endpoint for diagnostics (`7ebc7d1`)
+- **Periodically reload blob dirs** - 5-minute debounce for blob directory reload (`6f30bbf`)
+- **Rate-limit MWEB-SKIP logs** - Reduce log spam from MWEB skip messages (`a6c8353`)
+- **Rate-limit merged address validation** - Log once per address instead of every request (`2b2f860`)
+- **Source IP logging** - Add source IP to empty/invalid miner logs (`a7ba671`)
 
 ### Backend
 - **Multiaddress merged mining support** - Mine with separate LTC and DOGE addresses
 - **Share messaging protocol** - P2P share messaging implementation
+- **Live share message ingestion** - Wire live share message ingestion + blob upload API (`e0295c7`)
+- **--merged-operator-address** - Wire operator address for PPLNS fee (`a7ba671`)
 - **DOGE best share tracking** - Track DOGE best share with round reset on DOGE block find (`7f9b0cc`)
 - **Embedded transition blob** - Reliable loading on all nodes without external file (`1719af6`)
 - **V36 bootstrap nodes** - Added 102.160.209.121 and 5.188.104.245 to BOOTSTRAP_ADDRS (`abc56d2`)
