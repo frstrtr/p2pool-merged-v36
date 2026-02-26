@@ -3196,6 +3196,7 @@
                     });
                 tr.append('td').text(function(p) { return p.version || '-'; });
                 tr.append('td')
+                    .style('white-space', 'nowrap')
                     .html(function(p) { 
                         return p.incoming ? 
                             '<span style="color: var(--success)">⬇ Incoming</span>' : 
