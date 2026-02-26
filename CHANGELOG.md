@@ -2,6 +2,33 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.07-alpha] - 2026-02-26
+
+### Hotfix: Miner Page & Dashboard Fixes
+
+#### Critical
+- **fix: miner.html shows 0 blocks for inactive miners** - Restructured `loadMinerStats()` to always load payouts, graphs, and merged blocks regardless of miner active status; previously miners not connected to the viewing node saw an error page with no block history (`5e46adf`)
+- **fix: miner.html auto-refresh JS errors** - Fixed 30-second auto-refresh referencing non-existent element IDs (`doa_rate`, `time_to_share`) causing `Cannot set properties of null` errors; updated to correct IDs (`doa_rate_inline`, `doa_rate_detail`, `efficiency_value`) (`5e46adf`)
+- **fix: DOGE address missing from Active Miners table** - Auto-converted DOGE addresses now displayed for miners connecting with LTC-only address; exposed `merged_addresses` through stratum API → web API → frontend chain (`5e54852`)
+
+#### Dashboard UI
+- **Best Share card compact layout** - LTC blue / DOGE gold inline display (`2b0b9e0`)
+- **fix: double-v in version display** - Corrected `vv36` → `v36` (`ed23899`)
+- **fix: username template format** - Changed to `<ltc_addr>,<doge_addr>.WORKER` matching log format (`259fe38`, `ed23899`)
+- **fix: Workers/Miners decimal values** - Round to integers since graph data averages produce decimals (`7c9b013`)
+- **Node Fee DOGE payout** - Always show DOGE payout in Node Fee card (`d9d1bd9`)
+- **fix: NaN% DOA display** - Fix NaN% DOA and infinity Expected Share when no local miners connected (`9517513`)
+- **Table initial display** - Show 10 initial entries in payouts, blocks, and peers tables (`e3e14a3`)
+- **Explorer URLs reverted** - LTC back to chainz.cryptoid.info, DOGE back to dogechain.info (`6283786`)
+
+#### Backend
+- **DOGE best share tracking** - Track DOGE best share with round reset on DOGE block find (`7f9b0cc`)
+- **Miners table enhancement** - Added currency symbols and merged payout column (`f43aee0`)
+- **Embedded transition blob** - Reliable loading on all nodes without external file (`1719af6`)
+- **V36 bootstrap nodes** - Added 102.160.209.121 and 5.188.104.245 to BOOTSTRAP_ADDRS (`abc56d2`)
+
+---
+
 ## [v36-0.06-alpha] - 2026-02-26
 
 ### Critical Fixes
