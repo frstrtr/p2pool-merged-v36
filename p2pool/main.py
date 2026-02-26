@@ -417,20 +417,26 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                 m_user = m_userpass.split(':')[0] if ':' in m_userpass else m_userpass
                 print '  [CHECK 2] Merged daemon #%d: %s (user: %s)' % (i+1, m_url, m_user)
                 if m_paddr:
-                    print '             Operator payout address: %s' % m_paddr
+                    print '             Operator payout address: %s (explicit)' % m_paddr
                 else:
                     print '             Operator payout address: (auto-convert from parent)'
             print
-            # [CHECK 3] Merged operator address
+            # [CHECK 3] Merged operator address — show actual DOGE address
             if args.merged_operator_address:
                 print '  [CHECK 3] Merged operator address: %s (explicit via --merged-operator-address)' % args.merged_operator_address
             else:
                 try:
-                    from p2pool.data import pubkey_type_to_version_witver as _pt2vw
-                    _dver, _dwitver = _pt2vw(my_pubkey_type, net.PARENT)
-                    merged_operator_addr = bitcoin_data.pubkey_hash_to_address(
-                        my_pubkey_hash, _dver, _dwitver, net.PARENT)
-                    print '  [CHECK 3] Merged operator address: %s (auto-converted from parent)' % merged_operator_addr
+                    # Import dogecoin networks for proper address conversion
+                    from p2pool.work import dogecoin_net as _doge_net, dogecoin_testnet_net as _doge_test_net
+                    _parent_sym = getattr(net.PARENT, 'SYMBOL', '')
+                    _is_testnet = _parent_sym.lower().startswith('t') or 'test' in _parent_sym.lower()
+                    _merged_net = _doge_test_net if _is_testnet else _doge_net
+                    if _merged_net:
+                        merged_operator_addr = bitcoin_data.pubkey_hash_to_address(
+                            my_pubkey_hash, _merged_net.ADDRESS_VERSION, -1, _merged_net)
+                        print '  [CHECK 3] Merged operator address: %s (auto-converted from %s)' % (merged_operator_addr, my_address)
+                    else:
+                        print '  [CHECK 3] Merged operator address: (auto-convert pending — dogecoin network not loaded)'
                 except Exception as e:
                     print '  [CHECK 3] Merged operator address: FAILED to convert (%s)' % e
             print
@@ -449,13 +455,23 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
             print '  [CHECK 5] Node owner fee: %.1f%% (--fee)' % getattr(args, 'worker_fee', 0)
             print '             Donation to devs: %.1f%% (--give-author)' % args.donation_percentage
             print
-            # [CHECK 6] Miner stratum format reminder
+            # [CHECK 6] Miner stratum username format for merged mining
             print '  [CHECK 6] Miner stratum username format for merged mining:'
-            print '             LTC_ADDRESS,DOGE_ADDRESS.WORKER_NAME'
-            print '             LTC_ADDRESS,DOGE_ADDRESS_WORKER_NAME'
+            print '             <ltc_addr>,<doge_addr>.WORKER   (dot separator)'
+            print '             <ltc_addr>,<doge_addr>_WORKER   (underscore separator)'
             print '             Both . and _ are valid worker separators'
             print '             Example: LUSr5EY...,DANxiiX....Rig1'
             print '             Example: LUSr5EY...,DANxiiX..._Rig1'
+            print
+            # [CHECK 7] Coinbase text configuration
+            from p2pool.merged_mining import P2POOL_TAG as _mm_tag
+            print '  [CHECK 7] Coinbase text embedded in blocks:'
+            if args.coinb_texts:
+                print '             Parent chain (LTC scriptSig): %s' % ', '.join(repr(t) for t in args.coinb_texts)
+            else:
+                print '             Parent chain (LTC scriptSig): (none — use --coinbtext to set)'
+            print '             Merged chain (DOGE OP_RETURN):  configured in mm-adapter config.yaml'
+            print '             Merged chain fallback default:  \'%s\'' % _mm_tag
             print
             print '  VERIFY IN LOGS AFTER STARTUP:'
             print '    - Look for: "Detected auxpow-capable merged mining daemon"'
