@@ -404,20 +404,69 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         # Log merged chain operator address configuration
         if merged_urls:
             print
-            print 'Merged mining configuration:'
+            print '=' * 70
+            print '  MERGED MINING STARTUP CHECKLIST'
+            print '=' * 70
+            print
+            # [CHECK 1] Parent chain address
+            print '  [CHECK 1] Parent chain address: %s' % my_address
+            print '             Network: %s (%s)' % (net.PARENT.NAME, net.PARENT.SYMBOL)
+            print
+            # [CHECK 2] Merged daemon connection
+            for i, (m_url, m_userpass, m_paddr) in enumerate(merged_urls):
+                m_user = m_userpass.split(':')[0] if ':' in m_userpass else m_userpass
+                print '  [CHECK 2] Merged daemon #%d: %s (user: %s)' % (i+1, m_url, m_user)
+                if m_paddr:
+                    print '             Operator payout address: %s' % m_paddr
+                else:
+                    print '             Operator payout address: (auto-convert from parent)'
+            print
+            # [CHECK 3] Merged operator address
             if args.merged_operator_address:
-                print '    Using explicit merged chain operator address: %s' % args.merged_operator_address
+                print '  [CHECK 3] Merged operator address: %s (explicit via --merged-operator-address)' % args.merged_operator_address
             else:
-                # Convert parent address to merged chain format for display
                 try:
                     from p2pool.data import pubkey_type_to_version_witver as _pt2vw
                     _dver, _dwitver = _pt2vw(my_pubkey_type, net.PARENT)
                     merged_operator_addr = bitcoin_data.pubkey_hash_to_address(
                         my_pubkey_hash, _dver, _dwitver, net.PARENT)
-                    print '    Auto-converting parent address to merged chain format: %s' % merged_operator_addr
-                    print '    (You can override with --merged-operator-address <dogecoin_address>)'
+                    print '  [CHECK 3] Merged operator address: %s (auto-converted from parent)' % merged_operator_addr
                 except Exception as e:
-                    print '    Note: Could not preview merged chain address conversion: %s' % e
+                    print '  [CHECK 3] Merged operator address: FAILED to convert (%s)' % e
+            print
+            # [CHECK 4] P2P broadcaster config
+            merged_p2p_addr = getattr(args, 'merged_coind_p2p_address', None)
+            merged_p2p_port = getattr(args, 'merged_coind_p2p_port', None)
+            if merged_p2p_addr and merged_p2p_port:
+                print '  [CHECK 4] Merged P2P broadcaster: %s:%s (for fast block relay)' % (merged_p2p_addr, merged_p2p_port)
+            elif merged_p2p_port:
+                merged_rpc_addr = getattr(args, 'merged_coind_address', '127.0.0.1')
+                print '  [CHECK 4] Merged P2P broadcaster: %s:%s (using RPC address, no --merged-coind-p2p-address)' % (merged_rpc_addr, merged_p2p_port)
+            else:
+                print '  [CHECK 4] Merged P2P broadcaster: DISABLED (no --merged-coind-p2p-port)'
+            print
+            # [CHECK 5] Node fee
+            print '  [CHECK 5] Node owner fee: %.1f%% (--fee)' % getattr(args, 'worker_fee', 0)
+            print '             Donation to devs: %.1f%% (--give-author)' % args.donation_percentage
+            print
+            # [CHECK 6] Miner stratum format reminder
+            print '  [CHECK 6] Miner stratum username format for merged mining:'
+            print '             LTC_ADDRESS,DOGE_ADDRESS.WORKER_NAME'
+            print '             Example: LUSr5EY...,DANxiiX...Rig1'
+            print
+            print '  VERIFY IN LOGS AFTER STARTUP:'
+            print '    - Look for: "Detected auxpow-capable merged mining daemon"'
+            print '    - Look for: "[MERGED-REFRESH] NEW BLOCK height=..."'
+            print '    - Look for: "Merged broadcaster started for chainid 98"'
+            print '    - On block found, look for: "[MERGED-DIAG] Parent block found!"'
+            print '    - On twin block: "*** TWIN BLOCK! ***" + "### MERGED BLOCK FOUND! ###"'
+            print
+            print '  IF MERGED BLOCK MISSED, check for:'
+            print '    - "[MERGED-DIAG] WARNING: mm_later is EMPTY" => merged work timing issue'
+            print '    - "[MERGED-SUBMIT] CRITICAL ERROR" => block building/submission failed'
+            print '    - "[MERGED-DIAG] WARNING: _build_user_specific_merged_work failed"'
+            print
+            print '=' * 70
             print
         
         wb = work.WorkerBridge(node, my_pubkey_hash, args.donation_percentage,

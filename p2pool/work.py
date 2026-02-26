@@ -342,6 +342,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         if 'auxpow' in template:
                             if auxpow_capable is None:
                                 print 'Detected auxpow-capable merged mining daemon at %s (multiaddress support enabled)' % (merged_url,)
+                                print '[STARTUP-OK] Merged mining mode: MULTIADDRESS (getblocktemplate+auxpow)'
+                                print '[STARTUP-OK] Chain ID: %s' % template['auxpow'].get('chainid', '?')
+                                print '[STARTUP-OK] Template height: %s' % template.get('height', '?')
                             auxpow_capable = True
                             
                             chainid = template['auxpow']['chainid']
@@ -745,6 +748,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     # Fall back to createauxblock (with address) or getauxblock (wallet-based)
                     if auxpow_capable is None:
                         print 'Auxpow not supported at %s, using createauxblock/getauxblock (single address mode)' % (merged_url,)
+                        print '[STARTUP-OK] Merged mining mode: SINGLE ADDRESS (createauxblock/getauxblock)'
                     auxpow_capable = False
                     
                     # Try createauxblock first (requires payout address, no wallet needed)
