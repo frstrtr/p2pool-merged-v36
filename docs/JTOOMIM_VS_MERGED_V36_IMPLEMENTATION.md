@@ -215,12 +215,12 @@ Debugging:
 
 ---
 
-## Node 30 (Local) Status Check
+## NodeC (Local) Status Check
 
 ### Configuration Required
-To check Node 30's exact version and endpoint compatibility:
+To check NodeC's exact version and endpoint compatibility:
 ```bash
-# If Node 30 is running on port 9327:
+# If NodeC is running on port 9327:
 curl http://localhost:9327/local_stats | jq '.version'
 curl http://localhost:9327/version_signaling | jq
 
@@ -231,11 +231,11 @@ for endpoint in rate difficulty users local_stats version_signaling merged_stats
 done
 ```
 
-**Current Status**: Node 30 not running on localhost:9327
+**Current Status**: NodeC not running on localhost:9327
 
 ---
 
-## Recommendations for Node 30 Deployment
+## Recommendations for NodeC Deployment
 
 ### Use Case 1: Pure Litecoin Mining
 - **Base**: jtoomim/p2pool (v16.0+)
@@ -312,7 +312,7 @@ done
 - ✅ Comprehensive monitoring (38 vs 20 endpoints)
 - ✅ Stable 228+ days proven track record
 
-**Node 30 should use current dashpay-merged-v36 build** for full V36 functionality and merged mining support.
+**NodeC should use current dashpay-merged-v36 build** for full V36 functionality and merged mining support.
 
 ---
 

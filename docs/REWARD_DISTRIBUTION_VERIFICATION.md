@@ -4,18 +4,18 @@
 
 | Component | Details |
 |-----------|---------|
-| **LTC Testnet** | RPC at `192.168.86.26:18332`, height ~4568123 |
-| **DOGE Testnet** | RPC at `192.168.86.27:44555`, height 10152 |
-| **Node29** | `192.168.86.29:19327` — `-f 90 --give-author 0 -a mwQq...` |
-| **Node31** | `192.168.86.31:19327` — `-f 0 --give-author 5 -a mxpt...` |
+| **LTC Testnet** | RPC at `LTC_DAEMON_IP:18332`, height ~4568123 |
+| **DOGE Testnet** | RPC at `DOGE_DAEMON_IP:44555`, height 10152 |
+| **NodeA** | `NODE_A_IP:19327` — `-f 90 --give-author 0 -a mwQq...` |
+| **NodeB** | `NODE_B_IP:19327` — `-f 0 --give-author 5 -a mxpt...` |
 | **Both nodes** | `--merged-operator-address nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T` |
 
 ### Address Mapping (LTC → DOGE, auto-converted from pubkey_hash)
 
 | Miner | LTC Address | DOGE Address | Role |
 |-------|-------------|--------------|------|
-| Node29 | `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW` | `nk63aeL6HZNfzXY2DmVFBAHNvQx8zcrhVk` | Node operator (-f 90) |
-| Node31 | `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g` | `nmW6PGh6pYMVg6a3wJngNfxC6TYGfJppPy` | Node operator (--give-author 5) |
+| NodeA | `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW` | `nk63aeL6HZNfzXY2DmVFBAHNvQx8zcrhVk` | Node operator (-f 90) |
+| NodeB | `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g` | `nmW6PGh6pYMVg6a3wJngNfxC6TYGfJppPy` | Node operator (--give-author 5) |
 | Miner3 | `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ` | `noQ5izpwqkuj2JHX7uWQuqSEbi6FQvvn5s` | Stratum worker |
 | Miner4 | `mzW2hdZN2um7WBvTDerdahKqRgj3md9C29` | `noBEfr9wTGgs94CdGVXGYwsQghEwBsXw4K` | Stratum worker |
 
@@ -25,7 +25,7 @@
 
 ### Result: PERFECT MATCH (0.0000% difference)
 
-Simultaneous API query from Node29:
+Simultaneous API query from NodeA:
 
 ```
 current_payouts (LTC):                      current_merged_payouts (DOGE):
@@ -94,8 +94,8 @@ if random.uniform(0, 100) < self.node_owner_fee:
     pubkey_hash = self.my_pubkey_hash  # Replace miner's address with node operator's
 ```
 
-**Live verification (Node29, `-f 90`)**:
-- Node29 address (mwQq) appears in 65-83% of PPLNS weight across analyzed blocks
+**Live verification (NodeA, `-f 90`)**:
+- NodeA address (mwQq) appears in 65-83% of PPLNS weight across analyzed blocks
 - This is higher than their natural hashrate share because `-f 90` redirects 90% of their stratum workers' shares to the node operator's address
 - Smaller miners (mzis, mzW2) appear with reduced weight — only the 10% of their shares that weren't replaced
 
@@ -107,9 +107,9 @@ if random.uniform(0, 100) < self.node_owner_fee:
 - `share_weight = att * (65535 - donation)` → goes to miner
 - `donation_weight = att * donation` → goes to author/donation
 
-**Live verification (Node31, `--give-author 5`)**:
+**Live verification (NodeB, `--give-author 5`)**:
 
-| LTC Block | Donation % | Node31 (mxpt) % | Expected (mxpt% × 5%) | Diff |
+| LTC Block | Donation % | NodeB (mxpt) % | Expected (mxpt% × 5%) | Diff |
 |-----------|-----------|-----------------|----------------------|------|
 | 4568114 | 1.80% | 34.15% | 1.71% | 0.09% |
 | 4568115 | 1.07% | 20.31% | 1.02% | 0.05% |
@@ -117,7 +117,7 @@ if random.uniform(0, 100) < self.node_owner_fee:
 | 4568122 | 2.09% | 39.72% | 1.99% | 0.10% |
 | 4568123 | 1.85% | 35.08% | 1.75% | 0.09% |
 
-The donation percentage tracks Node31's PPLNS weight × 5% with ~0.05-0.11% error from integer rounding remainder. **Correct behavior.**
+The donation percentage tracks NodeB's PPLNS weight × 5% with ~0.05-0.11% error from integer rounding remainder. **Correct behavior.**
 
 **Effect on merged mining**: In PPLNS mode, `merged_donation_percentage` is derived from the aggregate `donation_weight / total_weight` across the PPLNS window (not from local `--give-author` flag). This ensures consensus across nodes. From `work.py:536-541`:
 ```python
@@ -198,7 +198,7 @@ This confirms: **when the PPLNS window state is the same, the payout distributio
 | Miner count consistency | **PASS** | Same miners on both chains at same PPLNS state |
 | PPLNS window dynamics | **PASS** | Expected behavior — miners enter/leave as shares age |
 | `-f` node owner fee | **PASS** | Probabilistic replacement in shares, propagates to both chains |
-| `--give-author` donation | **PASS** | Donation% tracks Node31 PPLNS weight × 5% (±0.1% rounding) |
+| `--give-author` donation | **PASS** | Donation% tracks NodeB PPLNS weight × 5% (±0.1% rounding) |
 | Finder fee (0.5%) | **PASS** | Paid to actual block finder, not node operator |
 | `merged_node_owner_fee` = 0 | **PASS** | Always 0 in PPLNS mode; operator fee via share replacement |
 | Donation output structure | **PASS** | COMBINED_DONATION_SCRIPT (P2SH) on both chains |
@@ -214,6 +214,6 @@ This confirms: **when the PPLNS window state is the same, the payout distributio
 - **10 LTC blocks**: 4568114-4568123
 
 - **13 DOGE blocks**: 10140-10152
-- **2 P2Pool nodes**: Node29 and Node31 with different fee configurations
+- **2 P2Pool nodes**: NodeA and NodeB with different fee configurations
 - **4 unique miner addresses** tracked across both chains
 - **API endpoints verified**: `current_payouts`, `current_merged_payouts` from both nodes

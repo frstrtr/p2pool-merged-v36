@@ -7,8 +7,8 @@ import sys
 # Known addresses
 KNOWN_ADDRS = {
     # LTC testnet
-    'mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW': 'node29-miner',
-    'mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g': 'node31-miner',
+    'mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW': 'nodeA-miner',
+    'mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g': 'nodeB-miner',
     # Donation scripts (by script hex pattern)
 }
 
@@ -24,11 +24,11 @@ def rpc_call(host, port, user, password, method, params=[]):
         'curl', '-s', '--user', f'{user}:{password}',
         '--data-binary', data,
         '-H', 'content-type:text/plain;',
-        f'http://192.168.86.26:{port}/' if 'ltc' in method or port == 19332 else f'http://127.0.0.1:{port}/'
+        f'http://LTC_DAEMON_IP:{port}/' if 'ltc' in method or port == 19332 else f'http://127.0.0.1:{port}/'
     ]
     # For LTC, RPC is on .26; for DOGE, RPC is on local 127.0.0.1 from inside nodes
     if port == 19332:
-        cmd[-1] = f'http://192.168.86.26:{port}/'
+        cmd[-1] = f'http://LTC_DAEMON_IP:{port}/'
     else:
         cmd[-1] = f'http://127.0.0.1:{port}/'
     
@@ -94,7 +94,7 @@ def check_ltc_blocks(ssh_host, num_blocks=3):
     print('  PARENT CHAIN: Litecoin Testnet (tLTC)')
     print('#'*70)
     
-    height = rpc_call(ssh_host, 19332, 'litecoinrpc', 'litecoinrpc_mainnet_2026',
+    height = rpc_call(ssh_host, 19332, 'litecoinrpc', 'YOUR_LTC_RPC_PASSWORD',
                       'getblockcount')
     if height is None:
         print('ERROR: Cannot reach LTC RPC')
@@ -103,11 +103,11 @@ def check_ltc_blocks(ssh_host, num_blocks=3):
     print(f'Current height: {height}')
     
     for h in range(height, height - num_blocks, -1):
-        bhash = rpc_call(ssh_host, 19332, 'litecoinrpc', 'litecoinrpc_mainnet_2026',
+        bhash = rpc_call(ssh_host, 19332, 'litecoinrpc', 'YOUR_LTC_RPC_PASSWORD',
                          'getblockhash', [h])
         if not bhash:
             continue
-        block = rpc_call(ssh_host, 19332, 'litecoinrpc', 'litecoinrpc_mainnet_2026',
+        block = rpc_call(ssh_host, 19332, 'litecoinrpc', 'YOUR_LTC_RPC_PASSWORD',
                          'getblock', [bhash, 2])
         if not block:
             continue
@@ -146,6 +146,6 @@ def check_doge_blocks(ssh_host, num_blocks=3):
 
 if __name__ == '__main__':
     num = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-    # Use node29 as SSH gateway
-    check_ltc_blocks('192.168.86.29', num)
-    check_doge_blocks('192.168.86.29', num)
+    # Use nodeA as SSH gateway
+    check_ltc_blocks('NODE_A_IP', num)
+    check_doge_blocks('NODE_A_IP', num)

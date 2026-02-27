@@ -19,21 +19,21 @@
 
 #### ✅ Litecoin Core Testnet
 - **Status**: Fully synced and operational
-- **RPC Port**: 19332 (on 192.168.86.26)
+- **RPC Port**: 19332 (on LTC_DAEMON_IP)
 - **Version**: Standard Litecoin Core with Segwit/MWEB support
 
 #### ✅ Dogecoin Core Testnet4alpha
 - **Status**: Running and operational
-- **RPC Port**: 44555 (on 192.168.86.27)
+- **RPC Port**: 44555 (on DOGE_DAEMON_IP)
 - **P2P Port**: 44557 (testnet4alpha — stable alternative to official DOGE testnet)
 - **Version**: v1.14.99.0-436b09bb8 (MODIFIED with auxpow/getblocktemplate)
 - **Feature**: getblocktemplate with auxpow capability ✅ VERIFIED
 - **Note**: testnet4alpha (Dogecoin PR #3967) adds fEnforceStrictMinDifficulty=true to prevent block storms that plague official DOGE testnet
 
 #### ✅ P2Pool V36 Nodes (2 of 3)
-- **node29** (192.168.86.29): V36, miner `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW`, ~1.2 MH/s
-- **node31** (192.168.86.31): V36, miner `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g`, ~1.2 MH/s
-- **node30** (192.168.86.30): V35 (jtoomim baseline), miner `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ`, ~1.2 MH/s
+- **nodeA** (NODE_A_IP): V36, miner `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW`, ~1.2 MH/s
+- **nodeB** (NODE_B_IP): V36, miner `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g`, ~1.2 MH/s
+- **nodeC** (NODE_C_IP): V35 (jtoomim baseline), miner `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ`, ~1.2 MH/s
 - **mm-adapter**: 127.0.0.1:44556 on each V36 node (adapter.py in screen session)
 - **Runtime**: PyPy 2.7 (pypy2.7-v7.3.20-linux64)
 - **Pool Stats**: ~4 MH/s total, ~1000+ shares, 3 peers
@@ -41,9 +41,9 @@
 ### Addresses
 
 #### Litecoin Testnet (per node)
-- **node29**: `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW`
-- **node31**: `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g`
-- **node30**: `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ`
+- **nodeA**: `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW`
+- **nodeB**: `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g`
+- **nodeC**: `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ`
 
 #### Dogecoin Testnet (auto-converted from LTC via pubkey_hash)
 - Address conversion: LTC testnet (v111) → DOGE testnet (v113)

@@ -1036,7 +1036,7 @@ def test_reward_distribution():
 During isolated testnet testing of V35/V36 compatibility, we discovered a **critical protocol flaw** in P2Pool's difficulty adjustment mechanism. When the network hashrate drops suddenly, share difficulty can become stuck at impossibly high levels.
 
 **Test Environment:**
-- 3 isolated P2Pool nodes (.29, .30, .31 on 192.168.86.x)
+- 3 isolated P2Pool nodes (.29, .30, .31 on INTERNAL_NETWORK)
 - 3 weak miners (AntRouter R1, ~1.3 MH/s each, ~4 MH/s total)
 - Nodes isolated from global P2Pool network via iptables
 
@@ -3246,12 +3246,12 @@ Three-node isolated testnet cluster running V35/V36 mixed:
 
 | Node | IP | Version | Miner Address (LTC) | Hashrate |
 |------|----|---------|---------------------|----------|
-| node29 | 192.168.86.29 | V36 | `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW` | ~1.2 MH/s |
-| node31 | 192.168.86.31 | V36 | `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g` | ~1.2 MH/s |
-| node30 | 192.168.86.30 | V35 (jtoomim) | `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ` | ~1.2 MH/s |
+| nodeA | NODE_A_IP | V36 | `mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW` | ~1.2 MH/s |
+| nodeB | NODE_B_IP | V36 | `mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g` | ~1.2 MH/s |
+| nodeC | NODE_C_IP | V35 (jtoomim) | `mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ` | ~1.2 MH/s |
 
-- LTC daemon: 192.168.86.26:19332 (testnet)
-- DOGE daemon: 192.168.86.27:44555 (testnet4alpha, port 44557 P2P)
+- LTC daemon: LTC_DAEMON_IP:19332 (testnet)
+- DOGE daemon: DOGE_DAEMON_IP:44555 (testnet4alpha, port 44557 P2P)
 - mm-adapter: 127.0.0.1:44556 on each V36 node
 - Runtime: PyPy 2.7 (pypy2.7-v7.3.20-linux64)
 
@@ -3293,7 +3293,7 @@ When `give-author=0`, the donation/marker output had value 0. This made the outp
 From DOGE testnet blocks found by V36 nodes:
 
 ```
-Block 2459 (V36 node29):
+Block 2459 (V36 nodeA):
   vout[0]: 152,134.48 DOGE → miner_A (PPLNS ~53%)
   vout[1]:  52,035.70 DOGE → miner_B (PPLNS ~18%)
   vout[2]:  81,463.82 DOGE → miner_C (PPLNS ~29%)
@@ -3303,7 +3303,7 @@ Block 2459 (V36 node29):
 
 Compared to V35 single-output blocks:
 ```
-Block 2452 (V35 node30):
+Block 2452 (V35 nodeC):
   vout[0]: 285,634.00 DOGE → single wallet address (all reward)
 ```
 

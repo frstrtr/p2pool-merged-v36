@@ -1,6 +1,6 @@
 #!/bin/bash
 # Setup Dogecoin Testnet4 - Custom P2Pool merged mining testnet
-# Run this on the Dogecoin node VM (192.168.86.27)
+# Run this on the Dogecoin node VM (DOGE_DAEMON_IP)
 #
 # WHY THIS IS NEEDED:
 # The official Dogecoin testnet has a critical difficulty adjustment bug

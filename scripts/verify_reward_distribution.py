@@ -29,12 +29,12 @@ from collections import OrderedDict, defaultdict
 
 # LTC testnet RPC
 LTC_CLI = "/home/user0/.local/bin/litecoin-cli"
-LTC_CLI_HOST = "192.168.86.26"
+LTC_CLI_HOST = "LTC_DAEMON_IP"
 LTC_RPC_ARGS = ["-testnet"]
 
 # DOGE testnet RPC  
 DOGE_CLI = "/home/user0/dogecoin-1.14.8/bin/dogecoin-cli"
-DOGE_CLI_HOST = "192.168.86.27"
+DOGE_CLI_HOST = "DOGE_DAEMON_IP"
 DOGE_RPC_ARGS = ["-testnet"]
 
 # Known addresses
@@ -53,8 +53,8 @@ COMBINED_DONATION_SCRIPT_HEX = "a9148c6272621d89e8fa526dd86acff60c7136be8e8587"
 LTC_P2SH_DONATION = "QNtPeYciSEQvpbRp2NbfigdAoSbnxBE6d2"  # or 2N... format
 
 # P2Pool API endpoints
-P2POOL_API_29 = "http://192.168.86.29:19327"
-P2POOL_API_31 = "http://192.168.86.31:19327"
+P2POOL_API_A = "http://NODE_A_IP:19327"
+P2POOL_API_B = "http://NODE_B_IP:19327"
 
 # ================= RPC HELPERS =================
 
@@ -215,8 +215,8 @@ def analyze_p2pool_api():
     print("P2POOL API — CURRENT PAYOUT ANALYSIS")
     print("="*80)
     
-    for node_name, api_url in [("Node29 (-f 90, --give-author 0)", P2POOL_API_29), 
-                                ("Node31 (-f 0, --give-author 5)", P2POOL_API_31)]:
+    for node_name, api_url in [("Node29 (-f 90, --give-author 0)", P2POOL_API_A), 
+                                ("Node31 (-f 0, --give-author 5)", P2POOL_API_B)]:
         print(f"\n--- {node_name} ---")
         
         # Get payouts
@@ -308,7 +308,7 @@ def analyze_recent_blocks_from_api():
     print("RECENT P2POOL BLOCKS — COINBASE ANALYSIS")
     print("="*80)
     
-    recent = curl_api(f"{P2POOL_API_29}/recent_blocks")
+    recent = curl_api(f"{P2POOL_API_A}/recent_blocks")
     if not recent or not isinstance(recent, list):
         print("  [ERROR] Could not get recent blocks from API")
         return
@@ -352,7 +352,7 @@ def analyze_twin_blocks():
     
     # Get twin block info from P2Pool log
     result = subprocess.run(
-        ["ssh", "user0@192.168.86.29", 
+        ["ssh", "user0@NODE_A_IP", 
          "grep -A5 'TWIN BLOCK FOUND' ~/p2pool-merged/data/litecoin_testnet/log | tail -30"],
         capture_output=True, text=True, timeout=15
     )
@@ -364,7 +364,7 @@ def analyze_twin_blocks():
     
     # Get merged block info
     result2 = subprocess.run(
-        ["ssh", "user0@192.168.86.29",
+        ["ssh", "user0@NODE_A_IP",
          "grep 'MERGED NETWORK BLOCK FOUND' ~/p2pool-merged/data/litecoin_testnet/log | tail -5"],
         capture_output=True, text=True, timeout=15
     )
@@ -433,17 +433,17 @@ def analyze_edge_cases():
     print("="*80)
     
     # Get current payouts from both nodes
-    payouts_29 = curl_api(f"{P2POOL_API_29}/current_payouts")
-    payouts_31 = curl_api(f"{P2POOL_API_31}/current_payouts")
-    merged_29 = curl_api(f"{P2POOL_API_29}/current_merged_payouts")
+    payouts_29 = curl_api(f"{P2POOL_API_A}/current_payouts")
+    payouts_31 = curl_api(f"{P2POOL_API_B}/current_payouts")
+    merged_29 = curl_api(f"{P2POOL_API_A}/current_merged_payouts")
     
     if payouts_29:
         print("\n  EDGE CASE 1: Miner address = Node owner address")
         print("  " + "-"*50)
-        node29_owner = "mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW"
-        if node29_owner in payouts_29:
-            owner_pct = 100.0 * payouts_29[node29_owner] / sum(payouts_29.values())
-            print(f"  Node29 owner ({node29_owner}) has {owner_pct:.2f}% of payouts")
+        nodeA_owner = "mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW"
+        if nodeA_owner in payouts_29:
+            owner_pct = 100.0 * payouts_29[nodeA_owner] / sum(payouts_29.values())
+            print(f"  Node29 owner ({nodeA_owner}) has {owner_pct:.2f}% of payouts")
             print(f"  With -f 90, most miner shares → node owner address")
             print(f"  When miner IS the node owner, the -f doesn't change anything")
             print(f"  Result: Node owner appears only ONCE in outputs (consolidated)")
@@ -474,10 +474,10 @@ def analyze_edge_cases():
         print(f"  - Both PPLNS weight and finder fee may go to same address")
         print(f"  - In Node29's case: owner gets ~90%+ of weight")
         
-        # Check if node29 owner appears in miner list
-        recent = curl_api(f"{P2POOL_API_29}/recent_blocks")
+        # Check if nodeA owner appears in miner list
+        recent = curl_api(f"{P2POOL_API_A}/recent_blocks")
         if recent:
-            owner_blocks = [b for b in recent if b.get("miner", "").startswith(node29_owner)]
+            owner_blocks = [b for b in recent if b.get("miner", "").startswith(nodeA_owner)]
             total_blocks = len(recent)
             print(f"  Node29 owner mined {len(owner_blocks)}/{total_blocks} recent blocks")
         

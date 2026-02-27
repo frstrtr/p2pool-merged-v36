@@ -387,7 +387,7 @@ cd cpuminer-multi
 ### 2. Test Against P2Pool
 ```bash
 ./cpuminer -a x11 \
-  -o stratum+tcp://192.168.86.244:7903 \
+  -o stratum+tcp://DASH_VM_IP:7903 \
   -u XsFe6mGpLM3R6ZieYJXhsmGyYg8jn3Lth6 \
   -p x \
   -D  # Debug mode to see protocol messages
@@ -395,7 +395,7 @@ cd cpuminer-multi
 
 ### 3. Expected Output (CORRECTED)
 ```
-[2025-12-09 12:34:56] Stratum connection to 192.168.86.244:7903
+[2025-12-09 12:34:56] Stratum connection to DASH_VM_IP:7903
 [2025-12-09 12:34:56] Stratum session id: ae6812eb4cd7735a302a8a9dd95cf71f
 [2025-12-09 12:34:56] Requesting ASICBOOST support...
 [2025-12-09 12:34:56] ✓ ASICBOOST enabled: mask=0x1fffe000 (13 bits)
@@ -406,7 +406,7 @@ cd cpuminer-multi
 ### 4. Verify on P2Pool Side
 P2Pool logs should show:
 ```
->>>Authorize: XsFe6mGpLM3R6ZieYJXhsmGyYg8jn3Lth6 from 192.168.86.245
+>>>Authorize: XsFe6mGpLM3R6ZieYJXhsmGyYg8jn3Lth6 from P2POOL_VM_IP
 ```
 
 ### 5. Verify Protocol with Python Test Script

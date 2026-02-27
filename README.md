@@ -341,12 +341,12 @@ pypy run_p2pool.py ... --redistribute MODE
 - `-f` / `--fee` (node operator fee) is applied **separately** as a percentage of every share. `--redistribute fee` is a distinct mechanism that only kicks in for broken credentials.
 - `--give-author` (donation percentage) is also separate. `--redistribute donate` sends the entire invalid share to the donation address, while `--give-author` donates a fraction of every share.
 
-**Real-world examples on active nodes:**
+**Examples:**
 ```bash
-# Node 29: help small miners get started
+# Help small miners get started
 pypy run_p2pool.py ... --redistribute boost
 
-# Node 31: support development
+# Support development
 pypy run_p2pool.py ... --redistribute donate
 ```
 

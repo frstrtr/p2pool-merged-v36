@@ -2,7 +2,7 @@
 # Add Dogecoin Testnet4Alpha - P2Pool Merged Mining Private Testnet
 #
 # This script manually adds testnet4alpha support to Dogecoin Core.
-# Run this on the Dogecoin node VM (192.168.86.27)
+# Run this on the Dogecoin node VM (DOGE_DAEMON_IP)
 #
 # WHY: Official testnet has block storm bug (PR #3967)
 # See: DOGECOIN_TESTNET_BUG.md

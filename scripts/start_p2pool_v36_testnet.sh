@@ -1,10 +1,10 @@
 #!/bin/bash
 # P2Pool v36 Merged Mining — Litecoin + Dogecoin (Testnet)
-# Phase 2: Experimental v36 node alongside canonical v35 nodes (node30/33)
+# Phase 2: Experimental v36 node alongside canonical v35 nodes (nodeC/33)
 # Updated: 2026-02-14 - Scrypt migration (py-scrypt) + v36 merged mining
 #
 # This script contains credentials - DO NOT COMMIT TO GIT
-# Node: 192.168.86.29 (node29)
+# Node: NODE_A_IP (nodeA)
 
 set -e
 
@@ -16,11 +16,11 @@ NODE_NAME="${1:-p2pool-v36}"
 LTC_ADDRESS="${2:-tltc1q98qmmw559wlpeecgxuzfjge98dljjxnsamltav}"
 
 # Litecoin Testnet RPC (shared daemon on .26)
-LTC_RPC_HOST="192.168.86.26"
+LTC_RPC_HOST="LTC_DAEMON_IP"
 LTC_RPC_PORT="19332"
 LTC_P2P_PORT="19335"
 LTC_RPC_USER="litecoinrpc"
-LTC_RPC_PASS="litecoinrpc_mainnet_2026"
+LTC_RPC_PASS="YOUR_LTC_RPC_PASSWORD"
 
 # Dogecoin Testnet RPC via MM-Adapter (local proxy for coinbase manipulation)
 # The mm-adapter proxies getblocktemplate to the Dogecoin daemon, allowing
@@ -32,7 +32,7 @@ DOGE_RPC_USER="dogecoinrpc"
 DOGE_RPC_PASS="testpass"
 
 # Dogecoin daemon direct connection (for P2P block broadcasting)
-DOGE_P2P_HOST="192.168.86.27"
+DOGE_P2P_HOST="DOGE_DAEMON_IP"
 DOGE_P2P_PORT="44557"
 
 # Dogecoin testnet payout address (operator fee)
@@ -45,8 +45,8 @@ MAX_CONNS="20"
 COINB_TEXT="p2pool-v36-testnet"
 
 # Bootstrap peers (canonical v35 nodes)
-PEER_NODE30="192.168.86.30:19338"
-PEER_NODE33="192.168.86.33:19338"
+PEER_NODE30="NODE_C_IP:19338"
+PEER_NODE33="PEER_IP:19338"
 
 # PyPy path
 PYPY_PATH="$HOME/pypy2.7-v7.3.20-linux64/bin"
@@ -88,7 +88,7 @@ stop_graceful() {
 show_status() {
     echo ""
     echo "=== P2Pool v36 Testnet — Litecoin + Dogecoin Merged Mining ==="
-    echo "Node:      node29 (192.168.86.29)"
+    echo "Node:      nodeA (NODE_A_IP)"
     echo "Code:      p2pool-merged-v36 (experimental v36 shares)"
     echo "Network:   litecoin --testnet"
     echo "LTC RPC:   ${LTC_RPC_HOST}:${LTC_RPC_PORT}"
@@ -105,8 +105,8 @@ show_status() {
     echo "  Web interface:    19327"
     echo ""
     echo "Phase 2 Testing:"
-    echo "  v35 baseline: node30 (.30), node33 (.33)"
-    echo "  v36 experimental: node29 (.29) [this node]"
+    echo "  v35 baseline: nodeC (.30), node33 (.33)"
+    echo "  v36 experimental: nodeA (.29) [this node]"
     echo ""
 }
 
@@ -157,7 +157,7 @@ case "${1:-start}" in
             echo "P2Pool v36 testnet started in screen '$NODE_NAME'"
             echo "  Attach:   screen -r $NODE_NAME"
             echo "  Logs:     tail -f $LOG_FILE"
-            echo "  Web UI:   http://192.168.86.29:19327/"
+            echo "  Web UI:   http://NODE_A_IP:19327/"
         else
             echo "FAILED to start. Check: $LOG_FILE"
             tail -50 "$LOG_FILE" 2>/dev/null
@@ -235,7 +235,7 @@ case "${1:-start}" in
             echo "P2Pool v36 testnet started in screen '$NODE_NAME'"
             echo "  Attach:   screen -r $NODE_NAME"
             echo "  Logs:     tail -f $LOG_FILE"
-            echo "  Web UI:   http://192.168.86.29:19327/"
+            echo "  Web UI:   http://NODE_A_IP:19327/"
         else
             echo "FAILED to start. Check: $LOG_FILE"
             tail -50 "$LOG_FILE" 2>/dev/null

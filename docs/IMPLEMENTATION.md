@@ -6,7 +6,7 @@
 - **Platform**: VMware ESXi 6.7.0
 - **OS**: Ubuntu 24.04.3 LTS (noble)
 - **Hostname**: dashp2pool
-- **IP**: 192.168.86.244
+- **IP**: DASH_VM_IP
 - **Specs**: 4 CPU cores, 8GB RAM, 748GB disk (LVM extended)
 - **SSH**: Passwordless access configured (ed25519 keys)
 
@@ -155,24 +155,24 @@ p2pool.util.jsonrpc.NarrowError: -12345 p2pool is not connected to any peers
 
 ### Start P2Pool
 ```bash
-ssh user0@192.168.86.244
+ssh user0@DASH_VM_IP
 cd ~/p2pool-dash
 pypy run_p2pool.py --net dash --dashd-address 127.0.0.1 --dashd-rpc-port 9998 -a XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u
 ```
 
 ### Monitor P2Pool
 ```bash
-ssh user0@192.168.86.244 'tail -f ~/p2pool-dash/p2pool.log'
+ssh user0@DASH_VM_IP 'tail -f ~/p2pool-dash/p2pool.log'
 ```
 
 ### Test CPU Mining
 ```bash
 cd /home/user0/Github/cpuminer-multi
 # Limited to 4 threads to reduce CPU heat
-./cpuminer -t 4 -a x11 -o stratum+tcp://192.168.86.244:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
+./cpuminer -t 4 -a x11 -o stratum+tcp://DASH_VM_IP:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
 
 # For full speed (28 threads, may overheat):
-# ./cpuminer -a x11 -o stratum+tcp://192.168.86.244:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
+# ./cpuminer -a x11 -o stratum+tcp://DASH_VM_IP:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
 ```
 
 ## Code References

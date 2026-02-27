@@ -52,14 +52,14 @@ This test infrastructure package contains everything needed to set up and run me
 │                                                           │
 │  ┌──────────────────┐  ┌──────────────────┐             │
 │  │ Dogecoin Testnet │  │ Litecoin Testnet │             │
-│  │ 192.168.86.245   │  │ 192.168.86.246   │             │
+│  │ P2POOL_VM_IP   │  │ LTC_VM_IP   │             │
 │  │ RPC: 18332       │  │ RPC: 18332       │             │
 │  └────────┬─────────┘  └────────┬─────────┘             │
 │           └──────────────────┬──────────────────┘        │
 │                              │                           │
 │              ┌───────────────▼──────────────┐            │
 │              │   P2Pool Merged Mining       │            │
-│              │   192.168.86.247             │            │
+│              │   DOGE_VM_IP             │            │
 │              │   Stratum: 7903              │            │
 │              │   Web: 8000                  │            │
 │              └───────────────┬──────────────┘            │
@@ -135,18 +135,18 @@ bash setup_test_infrastructure.sh
 
 ### Hardware Assets
 - **3x AntRouter L1** (Scrypt miners)
-  - 192.168.86.237 (500 MH/s)
-  - 192.168.86.236 (500 MH/s)
-  - 192.168.86.238 (500 MH/s)
+  - MINER_IP_1 (500 MH/s)
+  - MINER_IP_2 (500 MH/s)
+  - MINER_IP_3 (500 MH/s)
   - **Total**: 1.5 GH/s Scrypt
 
 ### VM Specifications
 | VM | IP | CPU | RAM | Disk | Purpose |
 |----|----|----|----|----|---------|
-| doge-testnet-auxpow | 192.168.86.27 / 10.1.1.129 | 4 | 8GB | 500GB | ✅ Dogecoin testnet + auxpow + systemd (DEPLOYED) |
-| ltc-testnet | 192.168.86.26 / 10.1.1.145 | 4 | 8GB | 420GB | ✅ Litecoin testnet + systemd (DEPLOYED) |
-- **Network**: 192.168.86.0/24
-- **Gateway**: 192.168.86.1
+| doge-testnet-auxpow | DOGE_DAEMON_IP / YOUR_PUBLIC_IP_1 | 4 | 8GB | 500GB | ✅ Dogecoin testnet + auxpow + systemd (DEPLOYED) |
+| ltc-testnet | LTC_DAEMON_IP / YOUR_PUBLIC_IP_2 | 4 | 8GB | 420GB | ✅ Litecoin testnet + systemd (DEPLOYED) |
+- **Network**: INTERNAL_SUBNET
+- **Gateway**: GATEWAY_IP
 - **DNS**: 8.8.8.8, 8.8.4.4
 - **Total IPs Required**: 3 for VMs (already allocated)
 
@@ -186,7 +186,7 @@ watch /opt/monitor_merged_mining.sh
 # Individual components
 watch "dogecoin-cli -datadir=/var/dogecoin getblockchaininfo | jq"
 watch "litecoin-cli -datadir=/var/litecoin getblockchaininfo | jq"
-curl http://192.168.86.247:8000/global_stats | jq
+curl http://DOGE_VM_IP:8000/global_stats | jq
 ```
 
 ### Key Metrics to Track

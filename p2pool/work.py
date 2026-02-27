@@ -383,7 +383,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     if chainid == 98:  # Dogecoin
                                         # Get local Dogecoin node's P2P address from args
                                         # --merged-coind-p2p-address overrides --merged-coind-address for P2P
-                                        # This allows RPC to go to mm-adapter (e.g. 127.0.0.1) while P2P goes to the actual node (e.g. 192.168.86.27)
+                                        # This allows RPC to go to mm-adapter (e.g. 127.0.0.1) while P2P goes to the actual node (e.g. DOGE_DAEMON_IP)
                                         merged_p2p_port = getattr(self.args, 'merged_coind_p2p_port', None)
                                         merged_p2p_address = getattr(self.args, 'merged_coind_p2p_address', None) or getattr(self.args, 'merged_coind_address', None)
                                         

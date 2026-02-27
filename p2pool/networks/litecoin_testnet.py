@@ -27,9 +27,9 @@ PERSIST = False
 
 WORKER_PORT = 19327  # Stratum port for miners to connect (stratum+tcp://IP:19327)
 BOOTSTRAP_ADDRS = [
-    '192.168.86.30',  # node30 - canonical v35 test node
-    '192.168.86.33',  # node33 - canonical v35 test node
-    '192.168.86.29',  # node29 - v36 experimental node
+    'NODE_C_IP',  # nodeC - canonical v35 test node
+    'PEER_IP',  # node33 - canonical v35 test node
+    'NODE_A_IP',  # nodeA - v36 experimental node
 ]
 ANNOUNCE_CHANNEL = '#p2pool-alt'
 VERSION_CHECK = lambda v: True  # Accept any version (testnet is permissive)

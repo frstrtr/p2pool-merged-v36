@@ -13,13 +13,13 @@ This test environment uses **Scrypt coins (Dogecoin + Litecoin)** which feature:
 
 ## Network Overview
 ```
-Dogecoin Testnet (auxpow)  → 192.168.86.27 / 10.1.1.129 (RPC: 44555)
-Litecoin Testnet           → 192.168.86.26 / 10.1.1.145 (RPC: 18332)
-P2Pool Aggregator          → 192.168.86.247 (Stratum: 7903)
+Dogecoin Testnet (auxpow)  → DOGE_DAEMON_IP / YOUR_PUBLIC_IP_1 (RPC: 44555)
+Litecoin Testnet           → LTC_DAEMON_IP / YOUR_PUBLIC_IP_2 (RPC: 18332)
+P2Pool Aggregator          → DOGE_VM_IP (Stratum: 7903)
 External IP                → 102.115.4.171
-ASIC Miner 1               → 192.168.86.237
-ASIC Miner 2               → 192.168.86.236
-ASIC Miner 3               → 192.168.86.238
+ASIC Miner 1               → MINER_IP_1
+ASIC Miner 2               → MINER_IP_2
+ASIC Miner 3               → MINER_IP_3
 ```
 
 ---
@@ -29,20 +29,20 @@ ASIC Miner 3               → 192.168.86.238
 ### SSH into VMs
 ```bash
 # Dogecoin testnet (doge-testnet-auxpow)
-ssh user0@192.168.86.27
+ssh user0@DOGE_DAEMON_IP
 
 # Litecoin testnet (ltc-testnet)
-ssh user0@192.168.86.26
+ssh user0@LTC_DAEMON_IP
 
 # P2Pool node
-ssh user0@192.168.86.247
+ssh user0@DOGE_VM_IP
 ```
 
 ---
 
 ## Node Configuration
 
-### Dogecoin Testnet (192.168.86.27)
+### Dogecoin Testnet (DOGE_DAEMON_IP)
 - **Hostname**: doge-testnet-auxpow
 - **RPC Port**: 44555 (testnet)
 - **P2P Port**: 44556
@@ -53,7 +53,7 @@ ssh user0@192.168.86.247
 - **Binary**: /home/user0/dogecoin-1.14.8/bin/dogecoind
 - **Config**: ~/.dogecoin/dogecoin.conf
 
-### Litecoin Testnet (192.168.86.26)
+### Litecoin Testnet (LTC_DAEMON_IP)
 - **Hostname**: ltc-testnet
 - **RPC Port**: 18332 (testnet)
 - **P2P Port**: 18333
@@ -241,33 +241,33 @@ grep "share\|block\|error" /var/log/p2pool-merged.log | tail -20
 # Test RPC connection to Dogecoin
 curl -s -u dogetest:DogeTestPass123! \
   -d '{"jsonrpc":"1.0","id":"test","method":"getblockcount"}' \
-  http://192.168.86.24:18332
+  http://P2POOL_NODE_IP:18332
 
 # Test RPC connection to Litecoin
 curl -s -u ltctest:LtcTestPass123! \
   -d '{"jsonrpc":"1.0","id":"test","method":"getblockcount"}' \
-  http://192.168.86.246:18332
+  http://LTC_VM_IP:18332
 
 # Test Stratum port
-nc -zv 192.168.86.247 7903
+nc -zv DOGE_VM_IP 7903
 
 # Test P2Pool web UI
-curl http://192.168.86.247:8000/global_stats | jq '.pool'
+curl http://DOGE_VM_IP:8000/global_stats | jq '.pool'
 ```
 
 ### P2Pool Monitoring
 ```bash
 # Get global stats
-curl http://192.168.86.247:8000/global_stats | jq
+curl http://DOGE_VM_IP:8000/global_stats | jq
 
 # Get connected miners
-curl http://192.168.86.247:8000/miners_list | jq
+curl http://DOGE_VM_IP:8000/miners_list | jq
 
 # Get worker stats
-curl http://192.168.86.247:8000/worker_stats | jq
+curl http://DOGE_VM_IP:8000/worker_stats | jq
 
 # Access web dashboard
-firefox http://192.168.86.247:8000 &
+firefox http://DOGE_VM_IP:8000 &
 ```
 
 ---
@@ -276,15 +276,15 @@ firefox http://192.168.86.247:8000 &
 
 ### Web UI Access
 ```
-ASIC 1: http://192.168.86.237:8081
-ASIC 2: http://192.168.86.236:8081
-ASIC 3: http://192.168.86.238:8081
+ASIC 1: http://MINER_IP_1:8081
+ASIC 2: http://MINER_IP_2:8081
+ASIC 3: http://MINER_IP_3:8081
 ```
 
 ### CGMiner API (SSH)
 ```bash
 # SSH to miner
-ssh admin@192.168.86.237
+ssh admin@MINER_IP_1
 
 # Check miner summary
 curl http://127.0.0.1:4028/api | jq '.SUMMARY'
@@ -308,11 +308,11 @@ ps aux | grep cgminer
 killall cgminer
 
 # Start new miner instance
-cgminer --scrypt -o stratum+tcp://192.168.86.247:7903 \
+cgminer --scrypt -o stratum+tcp://DOGE_VM_IP:7903 \
   -u WALLET_ADDRESS -p x --api-listen --api-port 4028
 
 # Run in background
-nohup cgminer --scrypt -o stratum+tcp://192.168.86.247:7903 \
+nohup cgminer --scrypt -o stratum+tcp://DOGE_VM_IP:7903 \
   -u WALLET_ADDRESS -p x --api-listen --api-port 4028 > /tmp/cgminer.log 2>&1 &
 ```
 
@@ -330,10 +330,10 @@ echo "=== Litecoin Testnet ==="
 litecoin-cli -datadir=/var/litecoin getblockchaininfo | jq '{blocks, peers: (.connections//"?")}'
 
 echo "=== P2Pool ==="
-curl -s http://192.168.86.247:8000/global_stats | jq '.pool | {hashrate, miners}'
+curl -s http://DOGE_VM_IP:8000/global_stats | jq '.pool | {hashrate, miners}'
 
 echo "=== ASIC Miners ==="
-for ip in 192.168.86.237 192.168.86.236 192.168.86.238; do
+for ip in MINER_IP_1 MINER_IP_2 MINER_IP_3; do
   curl -s http://$ip:4028/api 2>/dev/null | jq ".SUMMARY[0] | {ip: \"$ip\", mhs: .MHS5s}" || echo "{ip: $ip, status: offline}"
 done
 ```
@@ -341,7 +341,7 @@ done
 ### Network Connectivity Check
 ```bash
 # Ping all nodes
-for ip in 192.168.86.24 192.168.86.246 192.168.86.247 192.168.86.237 192.168.86.236 192.168.86.238; do
+for ip in P2POOL_NODE_IP LTC_VM_IP DOGE_VM_IP MINER_IP_1 MINER_IP_2 MINER_IP_3; do
   ping -c 1 -W 2 $ip && echo "$ip OK" || echo "$ip OFFLINE"
 done
 ```
@@ -350,16 +350,16 @@ done
 ```bash
 # Check if ports are listening
 echo "Checking Dogecoin RPC (18332)..."
-nc -zv 192.168.86.24 18332
+nc -zv P2POOL_NODE_IP 18332
 
 echo "Checking Litecoin RPC (18332)..."
-nc -zv 192.168.86.246 18332
+nc -zv LTC_VM_IP 18332
 
 echo "Checking P2Pool Stratum (7903)..."
-nc -zv 192.168.86.247 7903
+nc -zv DOGE_VM_IP 7903
 
 echo "Checking P2Pool Web (8000)..."
-nc -zv 192.168.86.247 8000
+nc -zv DOGE_VM_IP 8000
 ```
 
 ---
@@ -369,13 +369,13 @@ nc -zv 192.168.86.247 8000
 ### Real-time Log Tailing
 ```bash
 # P2Pool logs
-ssh user@192.168.86.247 "tail -f /var/log/p2pool-merged.log"
+ssh user@DOGE_VM_IP "tail -f /var/log/p2pool-merged.log"
 
 # Dogecoin logs
-ssh user@192.168.86.245 "tail -f /var/dogecoin/testnet3/debug.log"
+ssh user@P2POOL_VM_IP "tail -f /var/dogecoin/testnet3/debug.log"
 
 # Litecoin logs
-ssh user@192.168.86.246 "tail -f /var/litecoin/testnet4/debug.log"
+ssh user@LTC_VM_IP "tail -f /var/litecoin/testnet4/debug.log"
 ```
 
 ### Search for Errors
@@ -401,7 +401,7 @@ python3 << 'EOF'
 import socket
 try:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(('192.168.86.245', 18332))
+    s.connect(('P2POOL_VM_IP', 18332))
     print("Dogecoin RPC: REACHABLE")
     s.close()
 except Exception as e:
@@ -409,13 +409,13 @@ except Exception as e:
 EOF
 
 # Alternative using curl
-curl -v telnet://192.168.86.245:18332
+curl -v telnet://P2POOL_VM_IP:18332
 ```
 
 ### Check Firewall Rules
 ```bash
 # SSH to P2Pool node
-ssh user@192.168.86.247
+ssh user@DOGE_VM_IP
 
 # List firewall rules
 sudo ufw status verbose
@@ -434,7 +434,7 @@ python3 << 'EOF'
 import socket
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect(('192.168.86.247', 7903))
+s.connect(('DOGE_VM_IP', 7903))
 s.send(b'{"id": 1, "method": "mining.subscribe", "params": []}\n')
 print(s.recv(1024).decode())
 s.close()
@@ -460,8 +460,8 @@ while true; do
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
     DOGE_BLOCKS=$(dogecoin-cli -datadir=/var/dogecoin getblockcount 2>/dev/null || echo "ERROR")
     LTC_BLOCKS=$(litecoin-cli -datadir=/var/litecoin getblockcount 2>/dev/null || echo "ERROR")
-    MINERS=$(curl -s http://192.168.86.247:8000/miners_list 2>/dev/null | jq 'length' || echo "0")
-    MHS=$(curl -s http://192.168.86.247:8000/global_stats 2>/dev/null | jq '.pool.hashrate' || echo "0")
+    MINERS=$(curl -s http://DOGE_VM_IP:8000/miners_list 2>/dev/null | jq 'length' || echo "0")
+    MHS=$(curl -s http://DOGE_VM_IP:8000/global_stats 2>/dev/null | jq '.pool.hashrate' || echo "0")
     
     echo "$TIMESTAMP,$DOGE_BLOCKS,$LTC_BLOCKS,$MINERS,$MHS" >> $LOG_FILE
     
@@ -485,12 +485,12 @@ alias ltc-info='ltc-cli getblockchaininfo | jq "{blocks, headers, synced: (.bloc
 alias ltc-peers='ltc-cli getpeerinfo | jq length'
 
 # P2Pool shortcuts
-alias p2pool-stats='curl -s http://192.168.86.247:8000/global_stats | jq ".pool"'
-alias p2pool-miners='curl -s http://192.168.86.247:8000/miners_list | jq'
+alias p2pool-stats='curl -s http://DOGE_VM_IP:8000/global_stats | jq ".pool"'
+alias p2pool-miners='curl -s http://DOGE_VM_IP:8000/miners_list | jq'
 alias p2pool-logs='tail -f /var/log/p2pool-merged.log'
 
 # ASIC monitoring
-alias asics='for ip in 192.168.86.237 192.168.86.236 192.168.86.238; do echo "$ip:"; curl -s http://$ip:4028/api | jq ".SUMMARY[0] | {mhs: .MHS5s, accepted: .ACCEPTED, rejected: .REJECTED}"; done'
+alias asics='for ip in MINER_IP_1 MINER_IP_2 MINER_IP_3; do echo "$ip:"; curl -s http://$ip:4028/api | jq ".SUMMARY[0] | {mhs: .MHS5s, accepted: .ACCEPTED, rejected: .REJECTED}"; done'
 ```
 
 ---
@@ -530,9 +530,9 @@ rm -rf data/*.pickle
 ### Tail All Logs Simultaneously
 ```bash
 # In separate terminals
-ssh user@192.168.86.245 "tail -f /var/dogecoin/testnet3/debug.log"
-ssh user@192.168.86.246 "tail -f /var/litecoin/testnet4/debug.log"
-ssh user@192.168.86.247 "tail -f /var/log/p2pool-merged.log"
+ssh user@P2POOL_VM_IP "tail -f /var/dogecoin/testnet3/debug.log"
+ssh user@LTC_VM_IP "tail -f /var/litecoin/testnet4/debug.log"
+ssh user@DOGE_VM_IP "tail -f /var/log/p2pool-merged.log"
 ```
 
 ---
@@ -541,12 +541,12 @@ ssh user@192.168.86.247 "tail -f /var/log/p2pool-merged.log"
 
 | Service | URL | Purpose |
 |---------|-----|---------|
-| P2Pool | http://192.168.86.247:8000 | Pool dashboard |
-| P2Pool Stats API | http://192.168.86.247:8000/global_stats | JSON stats |
-| P2Pool Miners | http://192.168.86.247:8000/miners_list | Connected miners |
-| ASIC 1 Web | http://192.168.86.237:8081 | Miner control |
-| ASIC 2 Web | http://192.168.86.236:8081 | Miner control |
-| ASIC 3 Web | http://192.168.86.238:8081 | Miner control |
+| P2Pool | http://DOGE_VM_IP:8000 | Pool dashboard |
+| P2Pool Stats API | http://DOGE_VM_IP:8000/global_stats | JSON stats |
+| P2Pool Miners | http://DOGE_VM_IP:8000/miners_list | Connected miners |
+| ASIC 1 Web | http://MINER_IP_1:8081 | Miner control |
+| ASIC 2 Web | http://MINER_IP_2:8081 | Miner control |
+| ASIC 3 Web | http://MINER_IP_3:8081 | Miner control |
 
 ---
 

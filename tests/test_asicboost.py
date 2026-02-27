@@ -55,4 +55,4 @@ def test_asicboost(host, port):
     print("\n=== Test Complete ===\n")
 
 if __name__ == '__main__':
-    test_asicboost('192.168.86.244', 7903)
+    test_asicboost('DASH_VM_IP', 7903)

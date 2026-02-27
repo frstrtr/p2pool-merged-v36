@@ -100,7 +100,7 @@ rpcworkqueue=512
 rpcthreads=32
 ```
 
-**Separate-machine setup** (verified production config from node 192.168.86.26):
+**Separate-machine setup** (verified production config from node LTC_DAEMON_IP):
 ```ini
 # ~/.litecoin/litecoin.conf — separate machine, P2Pool on LAN
 server=1
@@ -177,7 +177,7 @@ dbcache=2000
 par=4
 ```
 
-**Separate-machine setup** (verified production config from node 192.168.86.27):
+**Separate-machine setup** (verified production config from node DOGE_DAEMON_IP):
 ```ini
 # ~/.dogecoin/dogecoin.conf — separate machine, adapter/P2Pool on LAN
 server=1
@@ -382,8 +382,8 @@ See the main README for full merged mining startup with MM-Adapter.
 
 > **Note on addresses**: `--coind-address` and `--merged-coind-p2p-address`
 > point to the actual daemon IPs. Use `127.0.0.1` if daemons are local, or
-> the LAN IP if they are on separate machines (e.g., `192.168.86.26` for LTC,
-> `192.168.86.27` for DOGE). The `--merged-coind-address` always points to
+> the LAN IP if they are on separate machines (e.g., `LTC_DAEMON_IP` for LTC,
+> `DOGE_DAEMON_IP` for DOGE). The `--merged-coind-address` always points to
 > the MM-Adapter, which runs on the same machine as P2Pool (`127.0.0.1`).
 
 ```bash

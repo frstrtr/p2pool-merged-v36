@@ -47,13 +47,13 @@ Complete test infrastructure for P2Pool merged mining with Dogecoin, Litecoin, a
 │                                                        │
 └────────────────────────────────────────────────────────┘
          │
-         │ Network Connection (192.168.86.x/24)
+         │ Network Connection (INTERNAL_SUBNET)
          │
     ┌────┴──────────────┐
     │                   │
  ASIC 1            ASIC 2-3
-192.168.86.237   192.168.86.236
-192.168.86.238   (AntRouter L1 - Scrypt)
+MINER_IP_1   MINER_IP_2
+MINER_IP_3   (AntRouter L1 - Scrypt)
 ```
 
 ---
@@ -64,22 +64,22 @@ Complete test infrastructure for P2Pool merged mining with Dogecoin, Litecoin, a
 - **Device**: AntRouter L1 (Scrypt/LTC-DOGE compatible)
 - **Count**: 3 units
 - **IPs**: 
-  - 192.168.86.237
-  - 192.168.86.236
-  - 192.168.86.238
+  - MINER_IP_1
+  - MINER_IP_2
+  - MINER_IP_3
 - **Specs**: ~500MH/s each (Scrypt)
 - **Total Network Hash**: ~1.5GH/s (Scrypt)
 
 ### ESXi Cluster
 - **Host**: VMware ESXi 6.7.0
-- **Current VM**: dashp2pool (192.168.86.244)
+- **Current VM**: dashp2pool (DASH_VM_IP)
   - Status: Active with P2Pool Dash
   - Can be repurposed or cloned
 
 ### Network
-- **Segment**: 192.168.86.0/24
-- **Gateway**: 192.168.86.1
-- **Available IPs**: 192.168.86.245 - 192.168.86.254 (for new VMs)
+- **Segment**: INTERNAL_SUBNET
+- **Gateway**: GATEWAY_IP
+- **Available IPs**: P2POOL_VM_IP - LAST_IP (for new VMs)
 
 ---
 
@@ -89,7 +89,7 @@ Complete test infrastructure for P2Pool merged mining with Dogecoin, Litecoin, a
 
 **Specifications**:
 - **Name**: doge-testnet-auxpow
-- **IP**: `192.168.86.24` (DEPLOYED - originally planned as 192.168.86.245)- **Public IP**: `10.1.1.129` (ens192 - for inbound peer connections)- **OS**: Ubuntu 24.04 LTS
+- **IP**: `P2POOL_NODE_IP` (DEPLOYED - originally planned as P2POOL_VM_IP)- **Public IP**: `YOUR_PUBLIC_IP_1` (ens192 - for inbound peer connections)- **OS**: Ubuntu 24.04 LTS
 - **CPU**: 2 cores
 - **RAM**: 4 GB
 - **Disk**: 50 GB (initial block download ~30GB)
@@ -132,7 +132,7 @@ rpcuser=dogetest
 rpcpassword=DogeTestPass123!
 rpcport=18332
 rpcbind=0.0.0.0
-rpcallowip=192.168.86.0/24
+rpcallowip=INTERNAL_SUBNET
 
 # Network settings
 port=19334
@@ -177,7 +177,7 @@ dogecoin-cli -datadir=/var/dogecoin getnetworkinfo
 
 **Specifications**:
 - **Name**: ltc-testnet
-- **IP**: `192.168.86.26` (DEPLOYED - originally planned as 192.168.86.246)- **Public IP**: `10.1.1.145` (ens192 - for inbound peer connections)- **OS**: Ubuntu 24.04 LTS
+- **IP**: `LTC_DAEMON_IP` (DEPLOYED - originally planned as LTC_VM_IP)- **Public IP**: `YOUR_PUBLIC_IP_2` (ens192 - for inbound peer connections)- **OS**: Ubuntu 24.04 LTS
 - **CPU**: 2 cores
 - **RAM**: 4 GB
 - **Disk**: 50 GB (initial block download ~10GB)
@@ -216,7 +216,7 @@ rpcuser=ltctest
 rpcpassword=LtcTestPass123!
 rpcport=18332
 rpcbind=0.0.0.0
-rpcallowip=192.168.86.0/24
+rpcallowip=INTERNAL_SUBNET
 
 # Network settings
 port=18333
@@ -246,7 +246,7 @@ watch "litecoin-cli -datadir=/var/litecoin getblockchaininfo | jq '.headers, .bl
 
 **Specifications**:
 - **Name**: p2pool-merged-test
-- **IP**: 192.168.86.247
+- **IP**: DOGE_VM_IP
 - **OS**: Ubuntu 24.04 LTS
 - **CPU**: 4 cores
 - **RAM**: 8 GB
@@ -284,21 +284,21 @@ MERGED_MINING_SOURCES = [
     # Dogecoin testnet auxpow
     {
         'name': 'dogecoin_testnet',
-        'rpc_url': 'http://dogetest:DogeTestPass123!@192.168.86.24:18332',
+        'rpc_url': 'http://dogetest:DogeTestPass123!@P2POOL_NODE_IP:18332',
         'coin': 'dogecoin',
         'enabled': True,
     },
     # Litecoin testnet
     {
         'name': 'litecoin_testnet',
-        'rpc_url': 'http://ltctest:LtcTestPass123!@192.168.86.246:18332',
+        'rpc_url': 'http://ltctest:LtcTestPass123!@LTC_VM_IP:18332',
         'coin': 'litecoin',
         'enabled': True,
     },
 ]
 
 # P2Pool Dash primary (for reference)
-DASH_RPC = 'http://dashuser:dashpass@192.168.86.244:9998'
+DASH_RPC = 'http://dashuser:dashpass@DASH_VM_IP:9998'
 
 # Stratum configuration
 STRATUM_CONFIG = {
@@ -325,8 +325,8 @@ EOF
 
 **Status Tracking**:
 ```bash
-# SSH to doge-testnet-auxpow (192.168.86.24)
-ssh user@192.168.86.24
+# SSH to doge-testnet-auxpow (P2POOL_NODE_IP)
+ssh user@P2POOL_NODE_IP
 
 # Monitor progress
 watch -n 5 "dogecoin-cli -datadir=/var/dogecoin getblockchaininfo | \
@@ -351,8 +351,8 @@ tar -xzf dogecoin-testnet-snapshot.tar.gz
 
 **Status Tracking**:
 ```bash
-# SSH to ltc-testnet (192.168.86.246)
-ssh user@192.168.86.246
+# SSH to ltc-testnet (LTC_VM_IP)
+ssh user@LTC_VM_IP
 
 # Monitor progress
 watch -n 5 "litecoin-cli -datadir=/var/litecoin getblockchaininfo | \
@@ -375,8 +375,8 @@ cd /opt/p2pool-merged
 pypy run_p2pool.py \
   --net dogecoin_testnet \
   -a YOUR_DOGE_ADDRESS \
-  --merged http://dogetest:DogeTestPass123!@192.168.86.245:18332 \
-  --merged http://ltctest:LtcTestPass123!@192.168.86.246:18332 \
+  --merged http://dogetest:DogeTestPass123!@P2POOL_VM_IP:18332 \
+  --merged http://ltctest:LtcTestPass123!@LTC_VM_IP:18332 \
   -p 7903 \
   --disable-upnp
 
@@ -384,8 +384,8 @@ pypy run_p2pool.py \
 pypy run_p2pool.py \
   --net dogecoin_testnet \
   -a DOGE_ADDRESS+LTC_ADDRESS \
-  --merged http://dogetest:DogeTestPass123!@192.168.86.245:18332 \
-  --merged http://ltctest:LtcTestPass123!@192.168.86.246:18332 \
+  --merged http://dogetest:DogeTestPass123!@P2POOL_VM_IP:18332 \
+  --merged http://ltctest:LtcTestPass123!@LTC_VM_IP:18332 \
   -p 7903
 ```
 
@@ -416,32 +416,32 @@ pypy run_p2pool.py \
 
 ```bash
 # 1. Access each router via web UI
-# http://192.168.86.237:8081
-# http://192.168.86.236:8081
-# http://192.168.86.238:8081
+# http://MINER_IP_1:8081
+# http://MINER_IP_2:8081
+# http://MINER_IP_3:8081
 
 # 2. Configure mining pool
-# Pool URL: stratum+tcp://192.168.86.247:7903
+# Pool URL: stratum+tcp://DOGE_VM_IP:7903
 # Worker: MINER_ADDRESS (will auto-route to LTC/DOGE)
 # Password: x (dummy)
 
 # 3. Via SSH to verify CGMiner
-ssh admin@192.168.86.237
+ssh admin@MINER_IP_1
 # Check miner status
 curl http://127.0.0.1:4028/api
 
 # 4. Start mining
-cgminer --scrypt -o stratum+tcp://192.168.86.247:7903 \
+cgminer --scrypt -o stratum+tcp://DOGE_VM_IP:7903 \
   -u MINER_WALLET_ADDRESS -p x
 ```
 
 **Monitoring via API**:
 ```bash
 # Get miner summary
-curl http://192.168.86.237:4028/api | jq '.SUMMARY'
+curl http://MINER_IP_1:4028/api | jq '.SUMMARY'
 
 # Watch hashrate
-watch 'curl -s http://192.168.86.237:4028/api | jq ".SUMMARY[0] | {MHS5s: .MHS5s, MHSAV: .MHSAV}"'
+watch 'curl -s http://MINER_IP_1:4028/api | jq ".SUMMARY[0] | {MHS5s: .MHS5s, MHSAV: .MHSAV}"'
 ```
 
 ---
@@ -469,10 +469,10 @@ litecoin-cli -datadir=/var/litecoin \
   -rpcport=18332 getblockchaininfo | jq '{blocks, headers, progress}'
 
 echo -e "\n--- P2Pool Stratum ---"
-curl -s http://192.168.86.247:8000/global_stats 2>/dev/null | jq '.pool' || echo "P2Pool not ready"
+curl -s http://DOGE_VM_IP:8000/global_stats 2>/dev/null | jq '.pool' || echo "P2Pool not ready"
 
 echo -e "\n--- ASIC Miners ---"
-for ip in 192.168.86.237 192.168.86.236 192.168.86.238; do
+for ip in MINER_IP_1 MINER_IP_2 MINER_IP_3; do
   echo "Miner at $ip:"
   curl -s http://$ip:4028/api 2>/dev/null | jq '.SUMMARY[0] | {MHS5s, MHSAV, A}' || echo "Offline"
 done
@@ -527,12 +527,12 @@ watch /opt/monitor_merged_mining.sh
 
 | VM | IP | Role | Ports | Status |
 |----|----|----|----|----|
-| doge-testnet-auxpow | 192.168.86.24 | Dogecoin testnet + auxpow | 18332 (RPC), 19334 (P2P) | ✅ Deployed |
-| ltc-testnet | 192.168.86.246 | Litecoin testnet | 18332 (RPC), 18333 (P2P) | Ready for setup |
-| p2pool-merged-test | 192.168.86.247 | P2Pool merged mining | 7903 (Stratum), 8000 (Web), 8999 (P2P) | Ready for setup |
-| asic-1 | 192.168.86.237 | AntRouter L1 Scrypt | 4028 (API), 8081 (Web) | Already available |
-| asic-2 | 192.168.86.236 | AntRouter L1 Scrypt | 4028 (API), 8081 (Web) | Already available |
-| asic-3 | 192.168.86.238 | AntRouter L1 Scrypt | 4028 (API), 8081 (Web) | Already available |
+| doge-testnet-auxpow | P2POOL_NODE_IP | Dogecoin testnet + auxpow | 18332 (RPC), 19334 (P2P) | ✅ Deployed |
+| ltc-testnet | LTC_VM_IP | Litecoin testnet | 18332 (RPC), 18333 (P2P) | Ready for setup |
+| p2pool-merged-test | DOGE_VM_IP | P2Pool merged mining | 7903 (Stratum), 8000 (Web), 8999 (P2P) | Ready for setup |
+| asic-1 | MINER_IP_1 | AntRouter L1 Scrypt | 4028 (API), 8081 (Web) | Already available |
+| asic-2 | MINER_IP_2 | AntRouter L1 Scrypt | 4028 (API), 8081 (Web) | Already available |
+| asic-3 | MINER_IP_3 | AntRouter L1 Scrypt | 4028 (API), 8081 (Web) | Already available |
 
 ---
 
@@ -592,19 +592,19 @@ litecoin-cli -datadir=/var/litecoin getmempoolinfo
 ### P2Pool Monitoring
 ```bash
 # View web UI
-firefox http://192.168.86.247:8000
+firefox http://DOGE_VM_IP:8000
 
 # Check connected miners
-curl http://192.168.86.247:8000/miners_list
+curl http://DOGE_VM_IP:8000/miners_list
 
 # Get pool stats
-curl http://192.168.86.247:8000/global_stats | jq '.pool'
+curl http://DOGE_VM_IP:8000/global_stats | jq '.pool'
 ```
 
 ### ASIC Status
 ```bash
 # Check all miners
-for ip in 192.168.86.{237,236,238}; do
+for ip in MINER_IP_{1,2,3}; do
   echo "=== $ip ==="
   curl -s http://$ip:4028/api | jq '.SUMMARY[0]'
 done
@@ -643,7 +643,7 @@ done
 2. **Install and configure** Dogecoin testnet (auxpow)
 3. **Install and configure** Litecoin testnet
 4. **Wait for IBD** (~4 hours combined)
-5. **Deploy P2Pool** on 192.168.86.247
+5. **Deploy P2Pool** on DOGE_VM_IP
 6. **Configure ASICs** to point to P2Pool
 7. **Start merged mining** tests
 8. **Monitor and optimize**

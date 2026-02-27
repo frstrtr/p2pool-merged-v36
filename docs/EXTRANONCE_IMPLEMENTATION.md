@@ -75,24 +75,24 @@ Expected results:
 
 1. Stop P2Pool:
 ```bash
-ssh user0@192.168.86.244 'screen -S p2pool_dash -X quit'
+ssh user0@DASH_VM_IP 'screen -S p2pool_dash -X quit'
 ```
 
 2. Copy updated files:
 ```bash
 rsync -avz --exclude='.git' --exclude='*.pyc' --exclude='__pycache__' \
   /home/user0/Github/p2pool-dash/ \
-  user0@192.168.86.244:/home/user0/p2pool-dash/
+  user0@DASH_VM_IP:/home/user0/p2pool-dash/
 ```
 
 3. Restart P2Pool:
 ```bash
-ssh user0@192.168.86.244 'cd /home/user0/p2pool-dash && screen -S p2pool_dash -d -m python2 run_p2pool.py --net dash XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u'
+ssh user0@DASH_VM_IP 'cd /home/user0/p2pool-dash && screen -S p2pool_dash -d -m python2 run_p2pool.py --net dash XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u'
 ```
 
 4. Verify:
 ```bash
-python3 /home/user0/Github/p2pool-dash/test_extranonce.py 192.168.86.244 7903
+python3 /home/user0/Github/p2pool-dash/test_extranonce.py DASH_VM_IP 7903
 ```
 
 ## Benefits
@@ -125,7 +125,7 @@ Implements:
 ### Compatibility Test (test_extranonce_compatibility.py)
 ```
 Testing P2Pool Extranonce Support
-Server: 192.168.86.244:7903
+Server: DASH_VM_IP:7903
 
 Test 1: NiceHash-style (mining.extranonce.subscribe)
   ✅ PASS - NiceHash method supported

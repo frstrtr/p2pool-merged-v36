@@ -2,10 +2,10 @@
 # Check payout distribution in recent p2pool-mined blocks
 # Usage: bash check_blocks.sh [num_blocks]
 NUM=${1:-3}
-SSH_NODE="192.168.86.29"
+SSH_NODE="NODE_A_IP"
 
 ltc_rpc() {
-    ssh $SSH_NODE "curl -s --user litecoinrpc:litecoinrpc_mainnet_2026 --data-binary '{\"jsonrpc\":\"1.0\",\"method\":\"$1\",\"params\":$2}' -H 'content-type:text/plain;' http://192.168.86.26:19332/" 2>/dev/null
+    ssh $SSH_NODE "curl -s --user litecoinrpc:YOUR_LTC_RPC_PASSWORD --data-binary '{\"jsonrpc\":\"1.0\",\"method\":\"$1\",\"params\":$2}' -H 'content-type:text/plain;' http://LTC_DAEMON_IP:19332/" 2>/dev/null
 }
 
 doge_rpc() {
@@ -26,8 +26,8 @@ for ((i=0; i<NUM; i++)); do
 import json, sys
 
 KNOWN = {
-    'mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW': 'node29-miner',
-    'mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g': 'node31-miner',
+    'mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW': 'nodeA-miner',
+    'mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g': 'nodeB-miner',
 }
 KNOWN_HEX = {
     '4104ffd03de44a6e11b9917f3a29f9443283d9871c9d743ef30d5eddcd37094b64d1b3d8090496b53256786bf5c82932ec23c3b74d9f05a6f95a8b5529352656664bac': 'DONATION(P2PK,pre-V36)',
@@ -95,8 +95,8 @@ import json, sys
 
 KNOWN_DOGE = {
     'nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T': 'merged-operator',
-    'nUYUjP3X8PuHULZz3jZ5HvVVkc2aT3Tr8t': 'node29-doge-addr',
-    'neu16vaJrZtDvpWy8EfE4KPYMRUXFsCh9t': 'node31-doge-addr',
+    'nUYUjP3X8PuHULZz3jZ5HvVVkc2aT3Tr8t': 'nodeA-doge-addr',
+    'neu16vaJrZtDvpWy8EfE4KPYMRUXFsCh9t': 'nodeB-doge-addr',
 }
 
 resp = json.load(sys.stdin)
