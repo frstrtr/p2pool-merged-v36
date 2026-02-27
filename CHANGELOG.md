@@ -2,6 +2,32 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.04-alpha] - 2026-02-27
+
+### Features
+- **feat: `--redistribute` system with 4 modes** — configurable policy for shares from unnamed/broken miners:
+  - `pplns` (default) — proportional PPLNS weight distribution (original behavior)
+  - `fee` — 100% to node operator
+  - `boost` — inverse-weighted PPLNS favoring connected miners with zero shares in the window (helps tiny miners who are hashing but haven't found a share yet); falls back to `pplns` if no zero-share miners are connected
+  - `donate` — 100% to donation script
+  
+  Event-driven cache invalidation for boost mode — zero CPU cost when no broken miners are present. (`de76224`, `7b9a3c7`, `7684fb4`)
+
+### Dashboard UI
+- **ui: Best Share card redesign** — hero percentage display with big bold integer + small decimal (`format_pct_fancy`), removed redundant difficulty numbers from record line, added network difficulty to subtitle (share_diff / net_diff for LTC · DOGE) (`499fd1b`, `763dfe9`, `0208810`)
+- **ui: Share version counts in Shares card** — inline version format counts and desired version counts next to the big share number (e.g. `0  V35:8640 | want V35:7476 V36:1164`), color-coded green for target version, grey for old (`63d36ec`, `4d8fa44`, `e42b015`, `2db3a99`)
+- **ui: Version Signaling block golden border + transition message** — golden (#f59e0b) pulsing glow border on version-signaling block, context-aware transition status message bar showing phase-specific text (building_chain, waiting, signaling, signaling_strong, activating, propagating) (`5526270`)
+- **ui: Shares card transition glow** — amber pulsing border on Shares card when network is transitioning between share versions (`4d8fa44`)
+- **fix: peer direction column wrapping** — `white-space: nowrap` on direction column prevents arrow + text wrapping to two lines (`6bfb2dc`)
+
+### Performance
+- **perf: load transition blobs once at startup** — blob directories and hardcoded blobs now load once instead of re-scanning, re-reading, re-decrypting, and re-verifying ECDSA every 5 minutes (`bee3b96`)
+
+### Documentation
+- **docs: FUTURE.md full refactor** — separated chain-agnostic sections from coin-specific parts, removed already-implemented features (belong in CHANGELOG), added C++ migration section for c2pool with architecture diagram and porting priority matrix, added share redistribution roadmap (graduated boost, hybrid mode, share-rate threshold, explicit opt-in, anti-gaming analysis) (`a0187d7`, `b7f4b05`)
+
+---
+
 ## [v36-0.03-alpha] - 2026-02-26
 
 ### Bug Fixes
