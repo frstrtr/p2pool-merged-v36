@@ -2133,7 +2133,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 share_data_base['pubkey_type'] = pubkey_type  # 0=P2PKH, 1=P2WPKH/bech32, 2=P2SH
             elif share_type.VERSION >= 34:
                 # V34-V35: use 'address' as a string
-                share_data_base['address'] = bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT)
+                _v35_ver, _v35_wv = p2pool_data.pubkey_type_to_version_witver(pubkey_type, self.node.net.PARENT)
+                share_data_base['address'] = bitcoin_data.pubkey_hash_to_address(pubkey_hash, _v35_ver, _v35_wv, self.node.net.PARENT)
             else:
                 # Older share versions use 'pubkey_hash' as an integer  
                 share_data_base['pubkey_hash'] = pubkey_hash
@@ -2223,8 +2224,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 # print >>sys.stderr, '[SHARE DEBUG] MAX_TARGET = %x' % self.node.net.MAX_TARGET
                 # print >>sys.stderr, '[SHARE DEBUG] MIN_TARGET = %x' % self.node.net.MIN_TARGET
                 # print >>sys.stderr, '[SHARE DEBUG] SANE_TARGET_RANGE = (%x, %x)' % self.node.net.PARENT.SANE_TARGET_RANGE
+                _display_ver, _display_wv = p2pool_data.pubkey_type_to_version_witver(pubkey_type, self.node.net.PARENT)
                 print 'New work for worker %s! Difficulty: %.06f Share difficulty: %.06f (%sH/s) Total block value: %.6f %s including %i transactions' % (
-                    bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT),
+                    bitcoin_data.pubkey_hash_to_address(pubkey_hash, _display_ver, _display_wv, self.node.net.PARENT),
                     bitcoin_data.target_to_difficulty(target),
                     bitcoin_data.target_to_difficulty(share_info['bits'].target),
                     math.format(int(local_addr_rates.get(pubkey_hash, 0))),
@@ -2234,7 +2236,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 print_throttle = time.time()
 
         #need this for stats
-        self.last_work_shares.value[bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT)]=share_info['bits']
+        _stats_ver, _stats_wv = p2pool_data.pubkey_type_to_version_witver(pubkey_type, self.node.net.PARENT)
+        self.last_work_shares.value[bitcoin_data.pubkey_hash_to_address(pubkey_hash, _stats_ver, _stats_wv, self.node.net.PARENT)]=share_info['bits']
 
         coinbase_payload_data_size = 0
         if gentx['version'] == 3 and gentx['type'] == 5:
@@ -3115,6 +3118,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         t1 = time.time()
         if p2pool.BENCH:
-            print "%8.3f ms for work.py:get_work(%s)" % ((t1-t0)*1000., bitcoin_data.pubkey_hash_to_address(pubkey_hash, self.node.net.PARENT.ADDRESS_VERSION, -1, self.node.net.PARENT))
+            _bench_ver, _bench_wv = p2pool_data.pubkey_type_to_version_witver(pubkey_type, self.node.net.PARENT)
+            print "%8.3f ms for work.py:get_work(%s)" % ((t1-t0)*1000., bitcoin_data.pubkey_hash_to_address(pubkey_hash, _bench_ver, _bench_wv, self.node.net.PARENT))
         
         return ba, got_response
