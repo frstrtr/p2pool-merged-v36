@@ -57,6 +57,7 @@ The installation guide covers:
 | [SHARE_ARCHIVE_README.md](docs/SHARE_ARCHIVE_README.md) | Share archival and recovery |
 | [V36_TRANSITION_GUIDE.md](docs/V36_TRANSITION_GUIDE.md) | V35→V36 transition stages, AutoRatchet, dashboard legend |
 | [SECURITY_AUDIT_2026_02.md](docs/SECURITY_AUDIT_2026_02.md) | Security audit report — 41 findings, origin classification, fix status |
+| [FUTURE.md](docs/FUTURE.md) | Roadmap — redistribution system (`--redistribute`), graduated boost, hybrid mode |
 
 ---
 

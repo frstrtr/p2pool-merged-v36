@@ -393,6 +393,145 @@ This benchmarking capability already exists in p2pool-dash via the `--bench` fla
 
 ---
 
+## Share Redistribution System (`--redistribute`)
+
+### Current Implementation (v36-0.03)
+
+The `--redistribute` flag controls what happens to shares from unnamed or broken miners
+(empty stratum username, invalid/unparseable address). These shares would otherwise be
+lost or default to the node operator.
+
+| Mode | Recipient | Use Case |
+|--------|---------------------------------------------|------------------------------------------|
+| `pplns` | Existing PPLNS miners (proportional weight) | Default — neutral, as if share didn't exist |
+| `fee` | Node operator (100%) | Incentivizes running public nodes |
+| `boost` | Connected miners with zero PPLNS shares | Helps tiny miners who can't find shares |
+| `donate` | Development donation script (P2SH/P2PK) | Funds protocol maintenance |
+
+Caches use **event-driven invalidation** — zero CPU cost when nothing changes, instant
+response when the share chain advances or stratum connections change, with a 10-second
+rate limit on recomputation.
+
+### Anti-Gaming Properties
+
+The boost mode is naturally resistant to exploitation:
+
+- **Hash power attacker**: Would quickly earn PPLNS shares and lose boost eligibility
+- **Zero-hash attacker**: Opens stratum connections but submits no pseudoshares — gains
+  nothing since boost only fires when a *different* broken miner's share triggers
+  redistribution (rare event)
+- **Multi-connection attacker**: Per-IP connection limits in `pool_stats` cap the number
+  of unique addresses an attacker can register from a single IP
+- **Sybil via multiple IPs**: Each fake identity must maintain an active stratum
+  connection, and the total redistributable share volume is tiny (only broken miners
+  generate it), making the attack uneconomical
+
+### Planned Enhancement: Graduated Boost
+
+**Difficulty:** Medium | **Impact:** High
+
+Instead of equal probability for all zero-PPLNS miners, weight by **persistence** —
+a miner who has been hashing for 12 hours with zero shares deserves more boost than
+one who connected 5 minutes ago.
+
+Weighting factors (combined):
+
+1. **Uptime weight** — `min(connection_duration_hours, 24)` capped at 24h to prevent
+   indefinite accumulation. A miner connected for 6 hours gets 6× the boost of a
+   1-hour miner.
+2. **Pseudoshare weight** — Total accepted pseudoshares submitted on this connection.
+   This directly measures contributed work. A miner submitting 1000 pseudoshares at
+   difficulty 512 has clearly contributed more than one with 10 pseudoshares at
+   difficulty 1.
+3. **Combined score** — `uptime_hours * pseudoshare_count * avg_difficulty` produces
+   a single weight per zero-PPLNS miner. Selection probability is proportional to
+   this score.
+
+This creates a **persistence reward**: the longer you hash without finding a share,
+the more likely you are to receive a boosted share. Once you find a real PPLNS share,
+you graduate out of boost eligibility naturally.
+
+Data sources already available:
+- `conn.connection_time` in `StratumRPCMiningProvider.__init__`
+- `conn.shares_accepted` / `conn.shares_submitted` per-connection counters
+- `conn.target` for current pseudoshare difficulty
+
+### Planned Enhancement: Hybrid Mode
+
+**Difficulty:** Medium | **Impact:** High
+
+Allow operators to split redistributed shares across multiple modes with a single
+CLI flag:
+
+```bash
+--redistribute boost:70,donate:20,fee:10
+```
+
+This allocates each redistributable share probabilistically:
+- 70% chance → boost (zero-PPLNS miner)
+- 20% chance → donation script
+- 10% chance → node operator fee
+
+Implementation: parse the colon-separated weights, normalize to percentages,
+`random.random()` selects the mode per share. Single-mode syntax (`--redistribute boost`)
+remains backward-compatible with 100% weight.
+
+This lets operators balance incentives — e.g., a public node might run
+`boost:50,donate:30,fee:20` to help tiny miners, fund development, and cover
+operating costs simultaneously.
+
+### Planned Enhancement: Share-Rate Threshold Boost
+
+**Difficulty:** Hard | **Impact:** Medium
+
+Rather than only boosting miners with **zero** PPLNS shares, boost miners whose
+PPLNS weight is **below their expected contribution** based on their stratum
+pseudoshare rate.
+
+Example: A miner submits pseudoshares at difficulty 512 every 10 seconds, implying
+~50 GH/s. Over 24 hours at that rate, they should statistically have found
+N shares in the PPLNS window. If their actual PPLNS weight is <10% of expected,
+they qualify for threshold boost.
+
+This extends boost beyond pure zero-share miners to miners who are statistically
+"unlucky" — they're contributing real work but variance has denied them fair
+representation in the PPLNS window.
+
+Calculation:
+```
+expected_shares = (miner_hashrate / pool_hashrate) * PPLNS_window_size
+actual_weight = miner_pplns_weight / total_pplns_weight
+expected_weight = miner_hashrate / pool_hashrate
+underrepresentation_ratio = actual_weight / expected_weight
+
+if underrepresentation_ratio < 0.1:  # less than 10% of expected
+    eligible_for_threshold_boost = True
+```
+
+This is harder to implement because it requires estimating each miner's true
+hash rate from pseudoshare submissions, which is noisy for small miners.
+
+### Planned Enhancement: Explicit Opt-In
+
+**Difficulty:** Easy | **Impact:** Medium
+
+Miners signal boost eligibility via their stratum password field:
+
+```
+Username: LTC_ADDRESS,DOGE_ADDRESS
+Password: boost:true
+```
+
+Only miners who explicitly opt in receive boosted shares. This avoids surprises
+and lets miners make an informed choice. The password field is already unused
+by p2pool (it accepts any value), making it a natural channel for miner preferences.
+
+Parsing: split password on `,` for key-value pairs. Recognized keys:
+- `boost:true` / `boost:false` — opt in/out of boost eligibility
+- Future: `d=N` for minimum difficulty, `notify:true` for share notifications
+
+---
+
 ## Code Quality Improvements
 
 ### Known XXX/TODO Comments
