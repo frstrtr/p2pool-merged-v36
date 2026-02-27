@@ -205,7 +205,25 @@
             border-radius: 8px;
             padding: 15px 20px;
             margin-bottom: 20px;
-            border: 1px solid rgba(111, 66, 193, 0.3);
+            border: 2px solid #f59e0b;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+            animation: signaling-glow 3s ease-in-out infinite;
+        }
+        @keyframes signaling-glow {
+            0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.1); }
+            50% { box-shadow: 0 0 22px rgba(245, 158, 11, 0.3); }
+        }
+        .version-signaling .transition-status-msg {
+            background: rgba(245, 158, 11, 0.1);
+            border-radius: 6px;
+            padding: 8px 14px;
+            margin-bottom: 12px;
+            font-size: 0.92em;
+            color: #f59e0b;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .signaling-header {
@@ -1217,6 +1235,7 @@
                 <span class="signaling-title">Version Transition Status</span>
                 <span class="signaling-badge" id="signaling-status">-</span>
             </div>
+            <div id="transition-status-msg" class="transition-status-msg" style="display: none;"></div>
             <div class="signaling-content">
                 <!-- Chain maturity bar (shown when chain not ready) -->
                 <div id="chain-maturity-section" style="display: none;">
@@ -2214,6 +2233,34 @@
                     
                     // Update title
                     d3.select('.signaling-title').text('V' + vs.current_share_type + ' \u2192 V' + vs.target_version + ' Transition');
+                    
+                    // Transition status message
+                    var statusMsg = '';
+                    var statusIcon = '\u26A1';
+                    if (vs.status === 'building_chain') {
+                        statusMsg = 'Building share chain\u2026 Collecting shares before transition signaling can begin.';
+                        statusIcon = '\u23F3';
+                    } else if (vs.status === 'waiting') {
+                        statusMsg = 'Waiting for enough shares to start version signaling.';
+                        statusIcon = '\u23F3';
+                    } else if (vs.status === 'signaling') {
+                        statusMsg = 'Network is signaling for V' + vs.target_version + ' upgrade. ' + d3.format('.1f')(vs.target_percentage || 0) + '% of shares signal V' + vs.target_version + '.';
+                        statusIcon = '\uD83D\uDCE1';
+                    } else if (vs.status === 'signaling_strong') {
+                        statusMsg = 'Strong signaling! ' + d3.format('.1f')(vs.target_percentage || 0) + '% of shares signal V' + vs.target_version + ' \u2014 activation approaching.';
+                        statusIcon = '\uD83D\uDD25';
+                    } else if (vs.status === 'activating') {
+                        statusMsg = 'V' + vs.target_version + ' activation threshold reached! Confirming upgrade\u2026';
+                        statusIcon = '\u2705';
+                    } else if (vs.status === 'propagating') {
+                        statusMsg = 'V' + vs.target_version + ' shares propagating through the network.';
+                        statusIcon = '\uD83C\uDF10';
+                    }
+                    if (statusMsg) {
+                        d3.select('#transition-status-msg').style('display', 'flex').html(statusIcon + ' ' + statusMsg);
+                    } else {
+                        d3.select('#transition-status-msg').style('display', 'none');
+                    }
                     
                     // Update status badge (including propagating)
                     var badge = d3.select('#signaling-status');
