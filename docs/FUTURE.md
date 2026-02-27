@@ -1,127 +1,39 @@
-# Future Enhancements for p2pool-dash
+# Roadmap & Future Enhancements
 
-This document outlines potential future improvements for the p2pool-dash mining pool software.
+This document outlines the forward-looking roadmap for p2pool development.
+All enhancements are designed **chain-agnostic** unless tagged **[COIN-SPECIFIC]**.
+The ultimate goal is migrating proven features into
+[c2pool](https://github.com/frstrtr/c2pool) (C++ reimplementation).
 
-## Current Status (v1.2.1)
-
-The following features are already implemented:
-
-| Feature | Version | Status |
-|---------|---------|--------|
-| ASIC Support (vardiff, short job IDs, rate limiting) | v1.0.0 | ✅ |
-| ASICBoost/Version Rolling (BIP320) | v1.0.0 | ✅ |
-| `mining.suggest_difficulty` | v1.2.0 | ✅ |
-| `minimum-difficulty` (BIP310) | v1.2.0 | ✅ |
-| `subscribe-extranonce` (NiceHash) | v1.0.0 | ✅ |
-| Session resumption | v1.2.0 | ✅ |
-| `client.reconnect` | v1.2.0 | ✅ |
-| Per-worker statistics | v1.2.0 | ✅ |
-| Dynamic share rate | v1.2.0 | ✅ |
-| Stratum stats web page | v1.2.0 | ✅ |
-| `/stratum_stats` API | v1.2.0 | ✅ |
-| Pool safeguards (min/max difficulty, rate limiting) | v1.2.0 | ✅ |
-| `--bench` flag | v1.1.0 | ✅ |
-| Dust threshold protection | v1.0.0 | ✅ |
-| Block explorer links | v1.0.0 | ✅ |
-| Block submission logging with chainlock monitoring | v1.2.1 | ✅ |
-| BIP 22 compliant transaction handling | v1.2.1 | ✅ |
+> **Scope**: This file covers *future work only*. For already-implemented features,
+> see [CHANGELOG.md](../CHANGELOG.md) and [README.md](../README.md).
 
 ---
 
-## Critical Priority Enhancements
+## Stratum Protocol Enhancements
 
-### 1. Direct Dash Network Peer Connections for Block Propagation
-**Difficulty:** Hard | **Impact:** Critical | **Competitive Advantage:** HIGH
-
-**Problem:** Currently P2Pool only sends blocks to the local dashd node, which then broadcasts to its peers. This adds latency in block propagation, which can cause orphaned blocks when competing with large mining pools that have direct connections to many network nodes.
-
-**Solution:** Implement direct P2P connections from P2Pool to multiple Dash network nodes for parallel block broadcasting:
-
-```python
-class DashNetworkBroadcaster:
-    """Broadcast blocks directly to multiple Dash network peers"""
-    def __init__(self, peer_list):
-        self.peer_connections = []  # List of direct P2P connections
-        # Connect to multiple Dash nodes (miners, exchanges, explorers)
-        for peer in peer_list:
-            conn = self.connect_to_peer(peer['host'], peer['port'])
-            self.peer_connections.append(conn)
-    
-    def broadcast_block(self, block):
-        """Send block to ALL connected peers simultaneously"""
-        for conn in self.peer_connections:
-            conn.send_block(block=block)  # Parallel broadcast
-```
-
-**Configuration:**
-```bash
---dash-peer-list FILE      # JSON file with Dash network nodes
-                           # Format: [{"host": "1.2.3.4", "port": 9999}, ...]
---broadcast-peers NUM      # Number of peers to broadcast to (default: 10)
-```
-
-**Benefits:**
-- ✅ **Faster block propagation** - parallel broadcast to multiple nodes
-- ✅ **Reduced orphan risk** - blocks reach miners/pools faster
-- ✅ **Competitive with large pools** - matches their network advantage
-- ✅ **Redundancy** - if local dashd fails, still broadcasts to network
-
-**Peer Strategy:**
-- Mining pools (to prevent them getting advantage)
-- Block explorers (high uptime, well-connected)
-- Exchange nodes (critical for network security)
-- Masternode network (Dash-specific advantage)
-
-**Is it Feasible to Compete?**
-YES! This would level the playing field:
-- Large pools broadcast to 50-100+ peers instantly
-- Solo miners with single dashd only reach ~8-10 peers initially
-- Adding direct broadcast makes solo mining **equally competitive**
-- Dash's ChainLock system makes this even more critical (first to quorum wins)
-
-**Files to modify:** 
-- `p2pool/dash/helper.py` (add parallel broadcast)
-- `p2pool/dash/p2p.py` (multiple peer connections)
-- `p2pool/main.py` (peer list configuration)
-- `p2pool/networks/dash.py` (default peer lists)
-
-**Estimated Impact:** Could reduce orphan rate from ~5% to <1% for solo miners
-
----
-
-## High Priority Enhancements
-
-### 2. Command-Line Configuration for Safeguards
-**Difficulty:** Easy | **Impact:** High
-
-Expose pool safeguard values as command-line arguments instead of hardcoded values:
-
-```bash
---min-difficulty DIFF      # Minimum difficulty floor (default: 0.001)
---max-difficulty DIFF      # Maximum difficulty ceiling (default: 1000000)
---max-connections NUM      # Maximum concurrent connections (default: 10000)
---session-timeout SECS     # Session expiration time (default: 3600)
-```
-
-**Files to modify:** `p2pool/main.py`, `p2pool/dash/stratum.py`
-
-### 2. `mining.ping` Support
+### 1. `mining.ping` Support
 **Difficulty:** Easy | **Impact:** Medium
 
-Add ping/pong support for connection health monitoring:
+Ping/pong for connection health monitoring. Detects dead connections faster,
+reduces stale work submissions.
 
 ```python
 def rpc_ping(self):
-    """Handle mining.ping - connection health check"""
     return "pong"
 ```
 
-**Benefits:**
-- Detect dead connections faster
-- Reduce stale work submissions
-- Better network quality monitoring
+### 2. SSL/TLS Stratum
+**Difficulty:** Hard | **Impact:** High
 
-**Files to modify:** `p2pool/dash/stratum.py`
+Encrypted stratum connections — protects against MITM attacks and hash-rate
+hijacking on untrusted networks.
+
+```bash
+--stratum-ssl-port PORT    # SSL stratum port (e.g., 3334)
+--ssl-cert FILE            # Path to SSL certificate
+--ssl-key FILE             # Path to SSL private key
+```
 
 ### 3. Worker Auto-Banning
 **Difficulty:** Medium | **Impact:** High
@@ -134,27 +46,63 @@ Automatically ban misbehaving workers temporarily:
 
 ```python
 class WorkerBanList:
-    def __init__(self, ban_duration=300):  # 5 minute default ban
+    def __init__(self, ban_duration=300):  # 5-minute default
         self.banned = {}  # {ip: ban_expiry_time}
-    
-    def ban(self, ip, reason):
-        self.banned[ip] = time.time() + self.ban_duration
-        log.msg("BANNED %s for %s" % (ip, reason))
-    
-    def is_banned(self, ip):
-        if ip in self.banned:
-            if time.time() < self.banned[ip]:
-                return True
-            del self.banned[ip]
-        return False
+
+    def check_and_ban(self, ip, reject_rate):
+        if reject_rate > 0.5:
+            self.banned[ip] = time.time() + self.ban_duration
 ```
 
-**Files to modify:** `p2pool/dash/stratum.py`
+### 4. `mining.set_version_mask`
+**Difficulty:** Easy | **Impact:** Medium
 
-### 4. Prometheus Metrics Endpoint
+Allow dynamic version-rolling mask updates mid-session without reconnection:
+
+```python
+def rpc_set_version_mask(self, mask):
+    self.pool_version_mask = int(mask, 16)
+    return True
+```
+
+### 5. `client.show_message`
+**Difficulty:** Easy | **Impact:** Low
+
+Broadcast operator messages to all connected miners — useful for maintenance
+announcements, pool updates, emergency notifications:
+
+```python
+def broadcast_message(self, message):
+    for conn in pool_stats.connections.values():
+        conn.other.svc_client.rpc_show_message(message)
+```
+
+### 6. `client.get_version`
+**Difficulty:** Easy | **Impact:** Low
+
+Request miner software version for diagnostics and compatibility tracking.
+
+---
+
+## Pool Infrastructure
+
+### 7. CLI Safeguard Arguments
+**Difficulty:** Easy | **Impact:** High
+
+Expose pool safety parameters as command-line arguments instead of hardcoded
+values:
+
+```bash
+--min-difficulty DIFF      # Minimum difficulty floor (default: 0.001)
+--max-difficulty DIFF      # Maximum difficulty ceiling (default: 1000000)
+--max-connections NUM      # Maximum concurrent connections (default: 10000)
+--session-timeout SECS     # Session expiration time (default: 3600)
+```
+
+### 8. Prometheus `/metrics` Endpoint
 **Difficulty:** Medium | **Impact:** High
 
-Add `/metrics` endpoint in Prometheus format for Grafana dashboards:
+Standard Prometheus format for Grafana dashboards:
 
 ```
 # HELP p2pool_connected_workers Number of connected workers
@@ -169,151 +117,51 @@ p2pool_pool_hashrate 948000000000
 # TYPE p2pool_shares_accepted counter
 p2pool_shares_accepted 15234
 
-# HELP p2pool_shares_rejected Total rejected shares
-# TYPE p2pool_shares_rejected counter
-p2pool_shares_rejected 12
-
 # HELP p2pool_blocks_found Total blocks found
 # TYPE p2pool_blocks_found counter
 p2pool_blocks_found 3
 ```
 
-**Files to modify:** `p2pool/web.py`
-
-### 5. SSL/TLS Stratum Support
-**Difficulty:** Hard | **Impact:** High
-
-Add encrypted stratum connections:
-
-```bash
---stratum-ssl-port PORT    # SSL stratum port (e.g., 3334)
---ssl-cert FILE            # Path to SSL certificate
---ssl-key FILE             # Path to SSL private key
-```
-
-**Benefits:**
-- Encrypted communication
-- Man-in-the-middle protection
-- Required by some mining software
-
-**Files to modify:** `p2pool/main.py`, `p2pool/dash/stratum.py`
-
----
-
-## Medium Priority Enhancements
-
-### 6. `mining.set_version_mask` 
+### 9. Block Found Webhook
 **Difficulty:** Easy | **Impact:** Medium
 
-Allow dynamic version mask updates during mining session:
-
-```python
-def rpc_set_version_mask(self, mask):
-    """Update version rolling mask mid-session"""
-    self.pool_version_mask = int(mask, 16)
-    return True
-```
-
-### 7. Historical Worker Statistics
-**Difficulty:** Medium | **Impact:** Medium
-
-Persist worker statistics to disk for historical analysis:
-
-- SQLite database for lightweight storage
-- Configurable retention period
-- API endpoints for historical queries
+Notify external services when the pool finds a block:
 
 ```bash
---stats-db FILE            # Path to statistics database
---stats-retention DAYS     # How long to keep historical data (default: 30)
+--block-webhook URL        # URL to POST on block found
 ```
 
-### 8. Block Found Webhook
-**Difficulty:** Easy | **Impact:** Medium
-
-Notify external services when pool finds a block:
-
-```bash
---block-webhook URL        # URL to POST when block found
-```
-
-Payload:
 ```json
 {
   "event": "block_found",
   "block_hash": "00000000...",
   "block_height": 123456,
   "timestamp": 1702300000,
-  "value": 1.77
+  "value": 12.5
 }
 ```
 
-### 9. Per-Worker Hash Rate Graphs
+### 10. Historical Worker Statistics DB
 **Difficulty:** Medium | **Impact:** Medium
 
-Add graphing capability for individual worker hash rates:
+Persist worker statistics to SQLite for historical analysis:
 
-- Track hash rate samples over time (memory or disk)
-- New web page `/static/worker.html?name=<worker>`
-- D3.js line charts similar to `graphs.html`
-
-### 10. Mobile-Responsive Web UI
-**Difficulty:** Easy | **Impact:** Medium
-
-Update CSS for responsive design:
-
-```css
-@media (max-width: 768px) {
-    .stats-grid {
-        grid-template-columns: 1fr;
-    }
-    table {
-        font-size: 12px;
-    }
-}
+```bash
+--stats-db FILE            # Path to statistics database
+--stats-retention DAYS     # Retention period (default: 30)
 ```
 
----
-
-## Lower Priority Enhancements
-
-### 11. `client.show_message`
-**Difficulty:** Easy | **Impact:** Low
-
-Broadcast messages to all connected miners:
-
-```python
-def broadcast_message(self, message):
-    """Send message to all connected miners"""
-    for conn in pool_stats.connections.values():
-        conn.other.svc_client.rpc_show_message(message)
-```
-
-Use cases:
-- Maintenance announcements
-- Pool updates
-- Emergency notifications
-
-### 12. WebSocket Real-time Updates
-**Difficulty:** Hard | **Impact:** Medium
-
-Replace HTTP polling with WebSocket for live dashboard updates:
-
-- Instant statistics updates
-- Reduced server load
-- Better user experience
-
-### 13. API Authentication
+### 11. API Authentication
 **Difficulty:** Medium | **Impact:** Low
 
-Add optional API key authentication for sensitive endpoints:
+Optional API key for sensitive endpoints:
 
 ```bash
 --api-key KEY              # Required key for API access
---api-key-endpoints LIST   # Comma-separated list of protected endpoints
+--api-key-endpoints LIST   # Comma-separated protected endpoints
 ```
 
-### 14. Email/SMS Alerts
+### 12. Email/SMS Alerts
 **Difficulty:** Medium | **Impact:** Medium
 
 Configurable alerts for important events:
@@ -321,75 +169,37 @@ Configurable alerts for important events:
 ```bash
 --alert-email ADDRESS      # Email for alerts
 --alert-smtp-server HOST   # SMTP server
---alert-events LIST        # Events to alert on (block_found,node_down,etc)
-```
-
-### 15. `client.get_version`
-**Difficulty:** Easy | **Impact:** Low
-
-Request miner software version for diagnostics:
-
-```python
-def request_miner_version(self):
-    """Request miner version information"""
-    return self.other.svc_client.rpc_get_version()
+--alert-events LIST        # Events: block_found, node_down, hashrate_drop
 ```
 
 ---
 
-## Evaluated and Rejected Improvements
+## Web UI
 
-This section documents improvements from other p2pool forks that were evaluated but deemed unnecessary or inapplicable for p2pool-dash.
+### 13. WebSocket Real-Time Updates
+**Difficulty:** Hard | **Impact:** Medium
 
-### Transaction Caching System (from jtoomim/p2pool)
+Replace HTTP polling with WebSocket for live dashboard updates — instant
+statistics, reduced server load, better UX.
 
-**Source:** [jtoomim/p2pool](https://github.com/jtoomim/p2pool) - Bitcoin Cash focused fork
+### 14. Mobile-Responsive Design
+**Difficulty:** Easy | **Impact:** Medium
 
-**Evaluated Features:**
+CSS breakpoints for tablets and phones:
 
-1. **`txidcache`** - Cache mapping raw transaction hex → txid
-   - Purpose: Avoid rehashing the same raw transaction hex multiple times
-   - Implementation: Dictionary cleared every 30 minutes
-   
-2. **`feecache`** - Cache mapping txid → fee
-   - Purpose: Store transaction fees from getblocktemplate for later share validation
-   - Implementation: LRU queue with max 100,000 entries
-
-3. **`known_txs`** - Cache of already-unpacked transaction objects
-   - Purpose: Reuse parsed transaction objects instead of re-parsing
-
-4. **Naughty Share Detection** - Mark shares as "naughty" if they claim excessive block rewards
-   - Uses `feecache` to validate that claimed subsidy ≤ sum(tx fees) + base_subsidy
-   - Propagates punishment to descendants ("to the third and fourth generation")
-
-**Why These Are Not Needed for Dash:**
-
-| Feature | Reason for Rejection |
-|---------|---------------------|
-| `txidcache` | Dash has 2.5 minute blocks (vs Bitcoin's 10 min). With ~24 blocks/hour, the mempool churn is much faster and cache hit rate would be low. The computational overhead of maintaining the cache may exceed the savings. |
-| `feecache` | This is designed for Bitcoin's share structure (VERSION < 34) where subsidy is embedded in shares. Dash uses DIP (Dash Improvement Proposals) coinbase transactions where fees/rewards are validated by the dashd node itself during block template generation. |
-| `known_txs` | Same reasoning as `txidcache` - low cache hit rate with fast block times. |
-| Naughty detection | Not applicable to Dash's payment system. Masternode/superblock payments are validated by dashd, not by the p2pool share validation logic. |
-
-**What We Kept:**
-
-✅ **Transaction dependency handling** - Like jtoomim, we include ALL transactions from getblocktemplate in BIP 22 order. The original p2pool code incorrectly skipped transactions with a `depends` field, even when dependencies were satisfied. This was fixed in commit 17a2260.
-
-```python
-# Correct approach (matches jtoomim):
-for x in work.get('transactions', []):
-    packed_transactions.append(x['data'].decode('hex'))
+```css
+@media (max-width: 768px) {
+    .stats-grid { grid-template-columns: 1fr; }
+    table { font-size: 12px; }
+}
 ```
 
-**Performance Note:**
+### 15. Per-Worker Hash Rate Graphs
+**Difficulty:** Medium | **Impact:** Medium
 
-jtoomim's fork includes `--bench` timing for debugging:
-```python
-if p2pool.BENCH:
-    print "%8.3f ms for helper.py:getwork(). Cache: %i hits %i misses..."
-```
-
-This benchmarking capability already exists in p2pool-dash via the `--bench` flag (added in v1.1.0), though it measures different aspects of performance.
+Track hash rate samples over time per worker. New page at
+`/static/worker.html?name=<worker>` with D3.js line charts matching the
+existing `graphs.html` style.
 
 ---
 
@@ -397,9 +207,9 @@ This benchmarking capability already exists in p2pool-dash via the `--bench` fla
 
 ### Current Implementation (v36-0.03)
 
-The `--redistribute` flag controls what happens to shares from unnamed or broken miners
-(empty stratum username, invalid/unparseable address). These shares would otherwise be
-lost or default to the node operator.
+The `--redistribute` flag controls what happens to shares from unnamed or broken
+miners (empty stratum username, invalid/unparseable address). These shares would
+otherwise be lost or default to the node operator.
 
 | Mode | Recipient | Use Case |
 |--------|---------------------------------------------|------------------------------------------|
@@ -408,165 +218,252 @@ lost or default to the node operator.
 | `boost` | Connected miners with zero PPLNS shares | Helps tiny miners who can't find shares |
 | `donate` | Development donation script (P2SH/P2PK) | Funds protocol maintenance |
 
-Caches use **event-driven invalidation** — zero CPU cost when nothing changes, instant
-response when the share chain advances or stratum connections change, with a 10-second
-rate limit on recomputation.
+Caches use **event-driven invalidation** — zero CPU cost when nothing changes,
+instant response when the share chain advances or stratum connections change,
+with a 10-second rate limit on recomputation.
 
 ### Anti-Gaming Properties
 
 The boost mode is naturally resistant to exploitation:
 
-- **Hash power attacker**: Would quickly earn PPLNS shares and lose boost eligibility
-- **Zero-hash attacker**: Opens stratum connections but submits no pseudoshares — gains
-  nothing since boost only fires when a *different* broken miner's share triggers
-  redistribution (rare event)
-- **Multi-connection attacker**: Per-IP connection limits in `pool_stats` cap the number
-  of unique addresses an attacker can register from a single IP
+- **Hash power attacker**: Would quickly earn PPLNS shares and lose boost
+  eligibility
+- **Zero-hash attacker**: Opens stratum connections but submits no pseudoshares
+  — gains nothing since boost only fires when a *different* broken miner's share
+  triggers redistribution (rare event)
+- **Multi-connection attacker**: Per-IP connection limits in `pool_stats` cap
+  the number of unique addresses per IP
 - **Sybil via multiple IPs**: Each fake identity must maintain an active stratum
-  connection, and the total redistributable share volume is tiny (only broken miners
+  connection, and redistributable share volume is tiny (only broken miners
   generate it), making the attack uneconomical
 
-### Planned Enhancement: Graduated Boost
-
+### Planned: Graduated Boost
 **Difficulty:** Medium | **Impact:** High
 
-Instead of equal probability for all zero-PPLNS miners, weight by **persistence** —
-a miner who has been hashing for 12 hours with zero shares deserves more boost than
-one who connected 5 minutes ago.
+Weight by **persistence** instead of equal probability — a miner hashing for
+12 hours with zero shares deserves more boost than one connected 5 minutes ago.
 
-Weighting factors (combined):
+Combined score: `uptime_hours × pseudoshare_count × avg_difficulty`
 
-1. **Uptime weight** — `min(connection_duration_hours, 24)` capped at 24h to prevent
-   indefinite accumulation. A miner connected for 6 hours gets 6× the boost of a
-   1-hour miner.
-2. **Pseudoshare weight** — Total accepted pseudoshares submitted on this connection.
-   This directly measures contributed work. A miner submitting 1000 pseudoshares at
-   difficulty 512 has clearly contributed more than one with 10 pseudoshares at
-   difficulty 1.
-3. **Combined score** — `uptime_hours * pseudoshare_count * avg_difficulty` produces
-   a single weight per zero-PPLNS miner. Selection probability is proportional to
-   this score.
+1. **Uptime weight** — `min(connection_duration_hours, 24)`, capped to prevent
+   indefinite accumulation
+2. **Pseudoshare weight** — Total accepted pseudoshares on this connection,
+   directly measuring contributed work
+3. **Selection** — Probability proportional to combined score
 
-This creates a **persistence reward**: the longer you hash without finding a share,
-the more likely you are to receive a boosted share. Once you find a real PPLNS share,
-you graduate out of boost eligibility naturally.
+Data sources already available: `conn.connection_time`,
+`conn.shares_accepted`, `conn.target`.
 
-Data sources already available:
-- `conn.connection_time` in `StratumRPCMiningProvider.__init__`
-- `conn.shares_accepted` / `conn.shares_submitted` per-connection counters
-- `conn.target` for current pseudoshare difficulty
-
-### Planned Enhancement: Hybrid Mode
-
+### Planned: Hybrid Mode
 **Difficulty:** Medium | **Impact:** High
 
-Allow operators to split redistributed shares across multiple modes with a single
-CLI flag:
+Split redistributed shares across multiple modes:
 
 ```bash
 --redistribute boost:70,donate:20,fee:10
 ```
 
-This allocates each redistributable share probabilistically:
-- 70% chance → boost (zero-PPLNS miner)
-- 20% chance → donation script
-- 10% chance → node operator fee
+Per-share probabilistic allocation. Single-mode syntax (`--redistribute boost`)
+remains backward-compatible at 100% weight.
 
-Implementation: parse the colon-separated weights, normalize to percentages,
-`random.random()` selects the mode per share. Single-mode syntax (`--redistribute boost`)
-remains backward-compatible with 100% weight.
-
-This lets operators balance incentives — e.g., a public node might run
-`boost:50,donate:30,fee:20` to help tiny miners, fund development, and cover
-operating costs simultaneously.
-
-### Planned Enhancement: Share-Rate Threshold Boost
-
+### Planned: Share-Rate Threshold Boost
 **Difficulty:** Hard | **Impact:** Medium
 
-Rather than only boosting miners with **zero** PPLNS shares, boost miners whose
-PPLNS weight is **below their expected contribution** based on their stratum
-pseudoshare rate.
+Boost miners whose PPLNS weight is **below their expected contribution** based
+on their stratum pseudoshare rate:
 
-Example: A miner submits pseudoshares at difficulty 512 every 10 seconds, implying
-~50 GH/s. Over 24 hours at that rate, they should statistically have found
-N shares in the PPLNS window. If their actual PPLNS weight is <10% of expected,
-they qualify for threshold boost.
-
-This extends boost beyond pure zero-share miners to miners who are statistically
-"unlucky" — they're contributing real work but variance has denied them fair
-representation in the PPLNS window.
-
-Calculation:
 ```
-expected_shares = (miner_hashrate / pool_hashrate) * PPLNS_window_size
-actual_weight = miner_pplns_weight / total_pplns_weight
 expected_weight = miner_hashrate / pool_hashrate
-underrepresentation_ratio = actual_weight / expected_weight
+actual_weight   = miner_pplns_weight / total_pplns_weight
 
-if underrepresentation_ratio < 0.1:  # less than 10% of expected
+if actual_weight / expected_weight < 0.1:
     eligible_for_threshold_boost = True
 ```
 
-This is harder to implement because it requires estimating each miner's true
-hash rate from pseudoshare submissions, which is noisy for small miners.
+Extends boost beyond zero-share miners to statistically "unlucky" miners.
 
-### Planned Enhancement: Explicit Opt-In
-
+### Planned: Explicit Opt-In
 **Difficulty:** Easy | **Impact:** Medium
 
-Miners signal boost eligibility via their stratum password field:
+Miners signal boost eligibility via stratum password field:
 
 ```
 Username: LTC_ADDRESS,DOGE_ADDRESS
 Password: boost:true
 ```
 
-Only miners who explicitly opt in receive boosted shares. This avoids surprises
-and lets miners make an informed choice. The password field is already unused
-by p2pool (it accepts any value), making it a natural channel for miner preferences.
-
-Parsing: split password on `,` for key-value pairs. Recognized keys:
-- `boost:true` / `boost:false` — opt in/out of boost eligibility
-- Future: `d=N` for minimum difficulty, `notify:true` for share notifications
+The password field is already unused by p2pool, making it a natural channel for
+miner preferences. Future keys: `d=N` (min difficulty), `notify:true` (share
+notifications).
 
 ---
 
-## Code Quality Improvements
+## Block Propagation
+
+### 16. Direct Peer Broadcast
+**Difficulty:** Hard | **Impact:** Critical
+
+**Problem:** P2Pool sends found blocks only to the local coin daemon, which
+then broadcasts to its ~8 peers. Large pools broadcast to 50–100+ peers
+instantly.
+
+**Solution:** Parallel P2P broadcast to multiple full nodes:
+
+```bash
+--peer-list FILE           # JSON: [{"host": "1.2.3.4", "port": 9333}, ...]
+--broadcast-peers NUM      # Number of peers to broadcast to (default: 10)
+```
+
+**Strategy:**
+- Mining pools (prevent them getting unfair advantage)
+- Block explorers (high uptime, well-connected)
+- Exchange nodes (critical for network security)
+
+**Estimated impact:** Could reduce orphan rate from ~5% to <1% for solo miners.
+
+> **[COIN-SPECIFIC]** Chains with instant finality mechanisms (e.g., Dash
+> ChainLock) benefit most — first block to reach the quorum wins.
+
+---
+
+## C++ Migration — c2pool
+
+[c2pool](https://github.com/frstrtr/c2pool) is a near-complete C++
+reimplementation of p2pool's sharechain protocol. Started in 2020, it provides
+a modern, high-performance foundation for the next generation of decentralized
+mining pools.
+
+**Repository:** https://github.com/frstrtr/c2pool
+**Community:** [Telegram](https://t.me/c2pooldev) ·
+[Discord](https://discord.gg/yb6ujsPRsv)
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                  c2pool (C++)                   │
+├─────────────────────────────────────────────────┤
+│  ┌─────────────────┐  ┌─────────────────────┐  │
+│  │  Web Server      │  │  P2P Node           │  │
+│  │  (Mining)        │  │  (Sharechain)       │  │
+│  │                  │  │                     │  │
+│  │  • Stratum       │  │  • Share sync       │  │
+│  │  • JSON-RPC      │  │  • Peer management  │  │
+│  │  • getwork       │  │  • LTC protocol     │  │
+│  │  • submitblock   │  │                     │  │
+│  └─────────────────┘  └─────────────────────┘  │
+├─────────────────────────────────────────────────┤
+│  hashrate/  difficulty/  storage/  node/        │
+│  (tracking)  (VARDIFF)   (LevelDB)  (NodeImpl)  │
+└─────────────────────────────────────────────────┘
+```
+
+### Already Implemented in c2pool
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| LTC sharechain integration | ✅ Done | Production-ready `NodeImpl` |
+| Persistent storage (LevelDB) | ✅ Done | Binary shares + JSON index, auto-backup/recovery |
+| Stratum server | ✅ Done | HTTP/JSON-RPC mining interface |
+| VARDIFF | ✅ Done | Automatic difficulty adjustment |
+| Share serialization | ✅ Done | Network-compatible with Python p2pool |
+| Peer management | ✅ Done | Address discovery, connection handling |
+| Build system (CMake) | ✅ Done | Builds on Linux, FreeBSD, Windows |
+| YAML configuration | ✅ Done | `~/.c2pool/settings.yaml` |
+
+### To Port from p2pool-merged-v36
+
+| Feature | Priority | Complexity | Description |
+|---------|----------|------------|-------------|
+| V36 share format | **Critical** | Hard | Version-aware ratchet, AutoRatchet, `PUBKEY_TYPE` field |
+| Merged mining | **Critical** | Hard | Auxpow construction, multi-chain coinbase, `getblocktemplate` + `submitauxblock` |
+| Address conversion | **High** | Medium | P2PKH/P2WPKH/P2SH cross-chain conversion for merged payouts |
+| Share redistribution | **High** | Medium | 4-mode `--redistribute` with event-driven cache invalidation |
+| Transition messaging | **Medium** | Medium | ECDSA-signed protocol upgrade signals embedded in shares |
+| Stratum monitor web UI | **Medium** | Easy | `/stratum_stats` page, security dashboard |
+| Pool statistics | **Medium** | Easy | `PoolStatistics` singleton, per-worker tracking |
+| Event-driven caching | **Low** | Easy | Pattern: invalidate on state change, rate-limit recomputation |
+
+### Migration Strategy
+
+The recommended approach is **incremental porting** — implement features in
+p2pool-merged-v36 (Python) first, validate on production, then port the proven
+design to c2pool (C++). This reduces risk: the Python implementation serves as
+both a working reference and a test suite.
+
+**Porting order:**
+1. **Share format** — V36 shares must be wire-compatible between Python and C++
+   nodes on the same p2pool network
+2. **Merged mining** — Requires coinbase construction, auxpow proof generation,
+   and multi-daemon RPC orchestration
+3. **Stratum enhancements** — SSL/TLS, worker banning, CLI safeguards
+4. **Web UI** — Port last; web frontends can be shared or swapped independently
+
+---
+
+## Fork Archaeology
+
+Features evaluated from other p2pool forks. This section documents what was
+kept, what was rejected, and why — as guidance for future contributors.
+
+### jtoomim/p2pool (Bitcoin Cash Fork)
+
+**Source:** [jtoomim/p2pool](https://github.com/jtoomim/p2pool)
+
+**Evaluated features:**
+
+| Feature | Description | Verdict | Reason |
+|---------|-------------|---------|--------|
+| `txidcache` | Cache raw tx hex → txid | **Rejected** | Fast-block chains (2.5 min) have high mempool churn; cache hit rate too low to justify overhead |
+| `feecache` | Cache txid → fee (LRU, 100K entries) | **Rejected** | Designed for old share structure (VERSION < 34) where subsidy is embedded in shares; modern nodes validate fees in `getblocktemplate` |
+| `known_txs` | Reuse parsed transaction objects | **Rejected** | Same reasoning as `txidcache` — low hit rate with fast blocks |
+| Naughty share detection | Mark shares claiming excessive rewards | **Rejected** | Not applicable — block reward validation is handled by the coin daemon, not p2pool's share validation |
+
+**What was kept:**
+
+- ✅ **Transaction dependency handling** — Include ALL transactions from
+  `getblocktemplate` in BIP 22 order. Original p2pool incorrectly skipped
+  transactions with a `depends` field even when dependencies were satisfied.
+- ✅ **`--bench` flag** — Performance timing for debugging, adapted to measure
+  different aspects than the BCH fork.
+
+---
+
+## Code Quality
 
 ### Known XXX/TODO Comments
 
-1. **`p2pool/util/graph.py`** - Exception handling marked as "XXX blah"
-2. **`p2pool/data.py`** - Uses local stale rate instead of global for pool hash calculation
-3. **`p2pool/main.py`** - Windows file rename workaround could use better cross-platform handling
+1. `p2pool/util/graph.py` — Exception handling marked as "XXX blah"
+2. `p2pool/data.py` — Uses local stale rate instead of global for pool hash
+   calculation
+3. `p2pool/main.py` — Windows file rename workaround needs better
+   cross-platform handling
 
 ### Testing Improvements
 
-- Add unit tests for new stratum extensions
-- Integration tests with mock miners
-- Performance benchmarks for high-load scenarios
+- Unit tests for stratum extensions (VARDIFF, version-rolling, session
+  resumption)
+- Integration tests with mock miners (simulated ASIC behavior)
+- Performance benchmarks for high-load scenarios (1000+ concurrent connections)
 
 ---
 
 ## Contributing
 
-To contribute an enhancement:
-
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/enhancement-name`)
 3. Implement the enhancement
-4. Add/update documentation
-5. Submit a pull request
-
-Please reference this document in your PR description.
+4. Add/update tests and documentation
+5. Submit a pull request referencing this document
 
 ---
 
-## Version Roadmap
+## Roadmap
 
-| Version | Target Features |
-|---------|-----------------|
-| v1.3.0 | CLI safeguard args, `mining.ping`, worker banning |
-| v1.4.0 | Prometheus metrics, block webhooks |
-| v1.5.0 | SSL/TLS stratum, historical stats |
-| v2.0.0 | WebSocket updates, major UI refresh |
+| Phase | Focus | Key Items |
+|-------|-------|-----------|
+| **v36-0.04** | Stratum hardening | CLI safeguards, `mining.ping`, worker banning, graduated boost |
+| **v36-0.05** | Observability | Prometheus metrics, block webhooks, historical stats DB |
+| **v36-0.06** | Security & UX | SSL/TLS stratum, API auth, hybrid redistribute, mobile UI |
+| **v36-1.0** | Stable release | Full test coverage, documentation freeze, production hardening |
+| **c2pool** | C++ migration | Port V36 share format, merged mining, redistribution, stratum enhancements |
