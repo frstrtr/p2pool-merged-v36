@@ -1144,13 +1144,20 @@ class WorkerBridge(worker_interface.WorkerBridge):
             self._merged_op_addr_cache[cache_key] = ''  # Cache the negative result
             return None
 
-    def _pick_random_pplns_miner(self):
-        """Pick a random miner (pubkey_hash, pubkey_type) weighted by PPLNS hashrate.
+    def _pick_random_pplns_miner(self, prefer_small=True):
+        """Pick a random miner (pubkey_hash, pubkey_type) from the PPLNS window.
 
         Used for probabilistic redistribution of invalid/missing miner addresses.
         Same consensus-safe model as the node operator fee (-f flag): the chosen
         miner's address is baked into the share at creation time, invisible to
         consensus validation.
+
+        When prefer_small=True (default), uses INVERSE weighting so the smallest
+        miners in the PPLNS window get the highest probability of receiving credit.
+        This helps tiny miners who struggle to find shares stay in the payout window.
+
+        When prefer_small=False, uses normal hashrate-proportional weighting
+        (original behavior).
 
         Returns (pubkey_hash, pubkey_type) of a randomly selected valid miner,
         or (self.my_pubkey_hash, self.my_pubkey_type) if no PPLNS data available.
@@ -1192,15 +1199,43 @@ class WorkerBridge(worker_interface.WorkerBridge):
             return self.my_pubkey_hash, self.my_pubkey_type
 
         entries = self._pplns_cache
-        total = sum(w for _, w, _, _ in entries)
-        r = random.randint(0, total - 1)
-        cumulative = 0
-        for addr, w, ph, pt in entries:
-            cumulative += w
-            if r < cumulative:
-                return ph, pt
-        # Fallback (shouldn't reach here)
-        return entries[-1][2], entries[-1][3]
+
+        if prefer_small and len(entries) > 1:
+            # Inverse weighting: smallest miners get highest probability.
+            # A miner with 1 share gets max_weight chance; the biggest miner
+            # gets 1 chance. This gives tiny struggling miners a real boost
+            # from work submitted by unnamed/broken/unauthenticated workers.
+            #
+            # Formula: inverse_weight = max_weight / weight
+            # This makes smallest miner's probability proportional to
+            # (biggest_weight / smallest_weight) relative to the biggest miner.
+            max_w = max(w for _, w, _, _ in entries)
+            # Use float division for precise inverse weighting
+            inverse_weights = []
+            for addr, w, ph, pt in entries:
+                # Clamp minimum weight to 1 to prevent division by zero
+                iw = float(max_w) / max(w, 1)
+                inverse_weights.append((addr, iw, ph, pt))
+            total = sum(iw for _, iw, _, _ in inverse_weights)
+            r = random.uniform(0.0, total)
+            cumulative = 0.0
+            for addr, iw, ph, pt in inverse_weights:
+                cumulative += iw
+                if r < cumulative:
+                    return ph, pt
+            # Fallback
+            return inverse_weights[-1][2], inverse_weights[-1][3]
+        else:
+            # Original: weight by PPLNS hashrate (proportional)
+            total = sum(w for _, w, _, _ in entries)
+            r = random.randint(0, total - 1)
+            cumulative = 0
+            for addr, w, ph, pt in entries:
+                cumulative += w
+                if r < cumulative:
+                    return ph, pt
+            # Fallback (shouldn't reach here)
+            return entries[-1][2], entries[-1][3]
 
     def get_user_details(self, username, peer_addr=None):
         # Debug: Uncomment to trace user details lookup
@@ -1320,10 +1355,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
         else:
             try:
                 if not user or not user.strip():
-                    # Empty address: redistribute parent chain to random PPLNS miner
-                    # Valid merged addresses (if any) are preserved
-                    pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
-                    print >>sys.stderr, '[POOL] Empty miner address from %s - share credited to random PPLNS miner' % (peer_addr or 'unknown',)
+                    # Empty address: redistribute to smallest PPLNS miner (inverse-weighted)
+                    # This helps tiny miners struggling to stay in the 8640-share window
+                    pubkey_hash, pubkey_type = self._pick_random_pplns_miner(prefer_small=True)
+                    print >>sys.stderr, '[POOL] Empty miner address from %s - share credited to small PPLNS miner (inverse-weighted)' % (peer_addr or 'unknown',)
                 else:
                     # Cache miner address resolution — same address produces same result every time
                     cached_addr = self._miner_addr_cache.get(user)
@@ -1405,10 +1440,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                         pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
             except: # Invalid/unparseable address - probabilistic redistribution
-                # Parent chain: redistribute to random PPLNS miner
+                # Parent chain: redistribute to smallest PPLNS miner (inverse-weighted)
                 # Merged chain: preserve valid explicit address if provided
-                pubkey_hash, pubkey_type = self._pick_random_pplns_miner()
-                print >>sys.stderr, '[POOL] Invalid miner address %s from %s - share credited to random PPLNS miner' % (
+                pubkey_hash, pubkey_type = self._pick_random_pplns_miner(prefer_small=True)
+                print >>sys.stderr, '[POOL] Invalid miner address %s from %s - share credited to small PPLNS miner (inverse-weighted)' % (
                     user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown')
         
         # Append worker name to user for identification

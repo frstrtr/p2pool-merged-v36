@@ -11,6 +11,9 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 - **fix: transition message not showing on nodes without ecdsa library** — ECDSA signature verification is required for authority messages; nodes missing `ecdsa`/`coincurve` now log a clear warning: `pypy -m pip install ecdsa`. The decryption-only fallback was removed as insecure (pubkeys are public constants, so anyone could forge an encrypted envelope). Install `ecdsa` to see transition messages (`a9135c0`)
 - **fix: `git describe --tags` for lightweight tag version display** — Added `--tags` flag so lightweight tags (not just annotated) are recognized in version string (`8b678bd`)
 
+### Improvements
+- **feat: small miner redistribution — inverse-weighted PPLNS for unnamed workers** — Shares from miners with empty/invalid/broken stratum credentials are now credited to the **smallest** active PPLNS miners (inverse-weighted by hashrate) instead of the largest. This helps tiny miners struggling to stay in the 8640-share payout window. A miner with 1 share gets `max_weight/1` chance vs a miner with 1000 shares getting `max_weight/1000` chance. Consensus-safe: only affects which `pubkey_hash` is stamped into the share at creation time.
+
 ---
 
 ## [v36-0.02-alpha] - 2026-02-26
