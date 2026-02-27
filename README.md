@@ -270,6 +270,27 @@ When mining Litecoin + Dogecoin, miner payouts are distributed on **both chains*
 | `LTC_ADDR` only (P2SH) | Auto-converts `HASH160(script)` → DOGE P2SH | See ⚠️ warning below |
 | `LTC_ADDR,INVALID_ADDR` | Logs warning, falls back to auto-conversion | Invalid addresses are rejected gracefully |
 
+> ### ⚠️ V35→V36 Transition: Merged Address Limitations
+>
+> **Current status (Feb 2026):** The network is in hybrid mode — nodes create **V35 shares** while voting for V36 activation (95% threshold). V35 shares structurally **cannot store** explicit merged chain addresses. This has important consequences:
+>
+> | Scenario | DOGE Payout Address Used |
+> |---|---|
+> | **Your node** finds a merged block | ✅ Your explicit DOGE address (from stratum) — used for the 0.5% finder fee AND the PPLNS distribution on your local node |
+> | **Another node** finds a merged block | ❌ Auto-converted from your LTC pubkey_hash — the other node has no access to your stratum session and V35 shares don't carry merged addresses |
+>
+> **What this means for miners:**
+> - If you use a **P2PKH** LTC address (`L...`), the auto-converted DOGE address is derived from the **same public key hash**. If you control the private key, you likely control both addresses. The explicit DOGE address you provide may differ but is only used when your local node finds the block.
+> - If you use a **bech32** LTC address (`ltc1q...`), the auto-converted DOGE address is a P2PKH derived from the same 20-byte hash — same situation as P2PKH.
+> - If you use a **P2SH** LTC address (`M...`/`3...`), the auto-converted DOGE P2SH may be **unspendable** (see P2SH warning below). Providing an explicit DOGE address via stratum only protects you on your own node's blocks.
+>
+> **What this means for node operators:**
+> - The `current_merged_payouts` API endpoint shows the correct stratum-explicit address for locally connected miners (marked `source: "stratum-explicit"`).
+> - Shares from remote peers always use auto-converted addresses until V36 activates.
+> - Check `/local_stats` for `v36_active` and `auto_ratchet_state` to monitor activation progress.
+>
+> **After V36 activates:** Every V36 share embeds the miner's explicit DOGE address in the share chain (`merged_addresses` field). All nodes — local and remote — will use the correct address for PPLNS distribution. This is the permanent fix.
+
 #### Invalid Address Redistribution
 
 When a miner connects with an invalid or unparseable parent chain (LTC) address, their mining
