@@ -1322,9 +1322,9 @@
                     
                     <div class="stat-card">
                         <h3><span class="icon">🎯</span> Best Share</h3>
-                        <div class="stat-value" id="best_share_round">-</div>
-                        <div class="stat-sub">Round: <span id="best_share_round_pct" style="color: var(--primary);">-</span><span id="best_share_merged_round_part" style="display: none;"> / <span id="best_share_merged_pct" style="color: #c3a634;">-</span></span></div>
-                        <div class="stat-detail">🏆 Record: <span style="color: var(--primary);"><span id="best_share_alltime">-</span> (<span id="best_share_alltime_pct">-</span>)</span><span id="best_share_merged_record_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_alltime">-</span> (<span id="best_share_merged_alltime_pct">-</span>)</span></span></div>
+                        <div class="stat-value" style="display: flex; align-items: baseline; justify-content: center; gap: 4px;"><span id="best_share_round_pct_fancy" style="color: var(--primary);">-</span><span id="best_share_merged_round_part" style="display: none;"> / <span id="best_share_merged_pct_fancy" style="color: #c3a634;">-</span></span></div>
+                        <div class="stat-sub" id="best_share_round_diff" style="font-size: 0.85em;">-</div>
+                        <div class="stat-detail">🏆 <span style="color: var(--primary);"><span id="best_share_alltime_pct_fancy">-</span></span><span id="best_share_merged_record_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_alltime_pct_fancy">-</span></span></span></div>
                     </div>
                 </div>
                 
@@ -1706,6 +1706,18 @@
             if (d < 1000) return d3.format('.2f')(d) + ' T';
             d = d / 1000;
             return d3.format('.2f')(d) + ' P';
+        }
+
+        // Format percentage with big integer + small decimal parts
+        // Returns HTML string: "<span style='font-size:1em;font-weight:700'>0</span><span style='font-size:0.65em'>.4623%</span>"
+        function format_pct_fancy(pct) {
+            if (pct == null || !isFinite(pct)) return '-';
+            var full = d3.format('.4f')(pct);
+            var dot = full.indexOf('.');
+            var intPart = full.substring(0, dot);
+            var decPart = full.substring(dot) + '%';
+            return '<span style="font-size:1em;font-weight:700">' + intPart + '</span>' +
+                   '<span style="font-size:0.65em">' + decPart + '</span>';
         }
         
         function format_time_short(timestamp) {
@@ -2575,19 +2587,17 @@
                     // Fetch best share stats (BitAxe style)
                     d3.json('../best_share', function(bs) {
                         if (!bs) return;
-                        // Current round (LTC)
-                        d3.select('#best_share_round').text(format_difficulty(bs.round.difficulty));
-                        d3.select('#best_share_round_pct').text(d3.format('.4f')(bs.round.pct_of_block) + '%');
-                        // All-time record (LTC)
-                        d3.select('#best_share_alltime').text(format_difficulty(bs.all_time.difficulty));
-                        d3.select('#best_share_alltime_pct').text(d3.format('.4f')(bs.all_time.pct_of_block) + '%');
+                        // Current round — fancy percentage as hero value
+                        d3.select('#best_share_round_pct_fancy').html(format_pct_fancy(bs.round.pct_of_block));
+                        d3.select('#best_share_round_diff').text(format_difficulty(bs.round.difficulty));
+                        // All-time record — percentage only (no redundant difficulty)
+                        d3.select('#best_share_alltime_pct_fancy').html(format_pct_fancy(bs.all_time.pct_of_block));
                         // Merged chain (DOGE) stats - inline
                         if (bs.merged) {
                             d3.select('#best_share_merged_round_part').style('display', 'inline');
-                            d3.select('#best_share_merged_pct').text(d3.format('.4f')(bs.merged.round.pct_of_block) + '%');
+                            d3.select('#best_share_merged_pct_fancy').html(format_pct_fancy(bs.merged.round.pct_of_block));
                             d3.select('#best_share_merged_record_part').style('display', 'inline');
-                            d3.select('#best_share_merged_alltime').text(format_difficulty(bs.merged.all_time.difficulty));
-                            d3.select('#best_share_merged_alltime_pct').text(d3.format('.4f')(bs.merged.all_time.pct_of_block) + '%');
+                            d3.select('#best_share_merged_alltime_pct_fancy').html(format_pct_fancy(bs.merged.all_time.pct_of_block));
                         }
                     });
                 });
