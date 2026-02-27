@@ -351,6 +351,16 @@
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         }
+
+        .stat-card.transitioning {
+            border-color: #f59e0b;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+            animation: transition-pulse 3s ease-in-out infinite;
+        }
+        @keyframes transition-pulse {
+            0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.1); }
+            50% { box-shadow: 0 0 18px rgba(245, 158, 11, 0.25); }
+        }
         
         .stat-card h3 {
             font-size: 0.85rem;
@@ -1313,7 +1323,7 @@
                         <div class="stat-detail">Expected Share: <span id="time_to_share">-</span></div>
                     </div>
                     
-                    <div class="stat-card">
+                    <div class="stat-card" id="shares_card">
                         <h3><span class="icon">📊</span> Shares</h3>
                         <div class="stat-value" id="shares_total">-</div>
                         <div class="stat-sub">Orphan: <span id="shares_orphan">-</span> | Dead: <span id="shares_dead">-</span></div>
@@ -2165,24 +2175,32 @@
                 d3.json('../version_signaling', function(vs) {
                     // Share version + desired version counts in Shares card
                     if (vs) {
-                        var parts = [];
-                        // Share format counts (e.g. "V35:380 V36:20")
+                        var html = '';
+                        var isTransitioning = vs.show_transition;
+                        // Share format counts with color coding
                         if (vs.share_types) {
-                            var stParts = [];
                             Object.keys(vs.share_types).sort().forEach(function(v) {
-                                stParts.push('V' + v + ':' + vs.share_types[v].count);
+                                var st = vs.share_types[v];
+                                var color = (parseInt(v) >= (vs.target_version || 36)) ? '#22c55e' : '#94a3b8';
+                                if (html) html += ' ';
+                                html += '<span style="color:' + color + '">V' + v + ':' + st.count + '</span>';
                             });
-                            if (stParts.length) parts.push(stParts.join(' '));
                         }
-                        // Desired version counts (e.g. "want V35:380 V36:42")
+                        // Separator + desired version counts
                         if (vs.full_chain_versions) {
-                            var dvParts = [];
+                            html += ' <span style="opacity:0.5">|</span> want ';
+                            var first = true;
                             Object.keys(vs.full_chain_versions).sort().forEach(function(v) {
-                                dvParts.push('V' + v + ':' + vs.full_chain_versions[v].count);
+                                var dv = vs.full_chain_versions[v];
+                                var color = (parseInt(v) >= (vs.target_version || 36)) ? '#22c55e' : '#94a3b8';
+                                if (!first) html += ' ';
+                                html += '<span style="color:' + color + '">V' + v + ':' + dv.count + '</span>';
+                                first = false;
                             });
-                            if (dvParts.length) parts.push('want ' + dvParts.join(' '));
                         }
-                        d3.select('#share_versions_line').text(parts.join(' | '));
+                        d3.select('#share_versions_line').html(html);
+                        // Apply transitioning visual to Shares card
+                        d3.select('#shares_card').classed('transitioning', !!isTransitioning);
                     }
                     if (!vs) {
                         d3.select('#version-signaling').style('display', 'none');
