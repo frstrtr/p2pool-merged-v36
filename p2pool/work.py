@@ -635,9 +635,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     
                                     mining_address = getattr(self.args, 'address', None)
                                     if not mining_address and self.my_pubkey_hash:
-                                        # Convert pubkey_hash to merged chain address
+                                        # Convert pubkey_hash to merged chain address (respect P2SH)
+                                        _m_ver = self._merged_addr_ver(self.my_pubkey_type, merged_addr_net)
                                         mining_address = bitcoin_data.pubkey_hash_to_address(
-                                            self.my_pubkey_hash, merged_addr_net.ADDRESS_VERSION,
+                                            self.my_pubkey_hash, _m_ver,
                                             -1, merged_addr_net)
                                     shareholders = {mining_address: 1.0} if mining_address else {}
                                     pass  # Suppressed: print >>sys.stderr, '[MERGED] No share chain yet, using single address: %s' % mining_address
@@ -779,12 +780,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         is_testnet = parent_symbol.lower().startswith('t') or 'test' in parent_symbol.lower()
                         
                         if is_testnet and dogecoin_testnet_net:
+                            _m_ver = self._merged_addr_ver(self.my_pubkey_type, dogecoin_testnet_net)
                             effective_payout_address = bitcoin_data.pubkey_hash_to_address(
-                                self.my_pubkey_hash, dogecoin_testnet_net.ADDRESS_VERSION,
+                                self.my_pubkey_hash, _m_ver,
                                 -1, dogecoin_testnet_net)
                         elif dogecoin_net:
+                            _m_ver = self._merged_addr_ver(self.my_pubkey_type, dogecoin_net)
                             effective_payout_address = bitcoin_data.pubkey_hash_to_address(
-                                self.my_pubkey_hash, dogecoin_net.ADDRESS_VERSION,
+                                self.my_pubkey_hash, _m_ver,
                                 -1, dogecoin_net)
                         
                         if effective_payout_address:
@@ -1269,6 +1272,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         return self._zero_pplns_cache
 
+    @staticmethod
+    def _merged_addr_ver(pubkey_type, merged_net):
+        """Pick ADDRESS_VERSION or ADDRESS_P2SH_VERSION for pubkey_hash→merged-chain address.
+
+        bech32 (P2WPKH) falls back to P2PKH on merged chains that lack segwit (e.g. Dogecoin).
+        """
+        if pubkey_type == p2pool_data.PUBKEY_TYPE_P2SH:
+            return merged_net.ADDRESS_P2SH_VERSION
+        return merged_net.ADDRESS_VERSION
+
     def _redistribute_share(self):
         """Pick a (pubkey_hash, pubkey_type) for shares from unnamed/broken miners.
 
@@ -1278,6 +1291,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
           boost  : give to active stratum miners with ZERO PPLNS shares,
                    falls back to PPLNS if no zero-share miners connected
           donate : 100% to donation script (P2SH combined or P2PK legacy)
+
+        This only affects which pubkey_hash is stamped into the share
+        for redistribution. It does NOT change consensus rules.
 
         Returns (pubkey_hash, pubkey_type).
         """
@@ -2858,7 +2874,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                                 merged_addr = bitcoin_data.pubkey_hash_to_address(pkh, m_net.ADDRESS_P2SH_VERSION, -1, m_net)
                                                             else:
                                                                 merged_addr = bitcoin_data.pubkey_hash_to_address(pkh, m_net.ADDRESS_VERSION, -1, m_net)
-                                                            merged_addr = bitcoin_data.pubkey_hash_to_address(pkh, m_net.ADDRESS_VERSION, -1, m_net)
                                                             for addr, val in sh.iteritems():
                                                                 if addr == merged_addr:
                                                                     frac = val[0] if isinstance(val, tuple) else val
