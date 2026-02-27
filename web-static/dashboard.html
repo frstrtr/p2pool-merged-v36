@@ -1317,7 +1317,8 @@
                         <h3><span class="icon">📊</span> Shares</h3>
                         <div class="stat-value" id="shares_total">-</div>
                         <div class="stat-sub">Orphan: <span id="shares_orphan">-</span> | Dead: <span id="shares_dead">-</span></div>
-                        <div class="stat-detail">Efficiency: <span id="efficiency">-</span> &nbsp;|&nbsp; <span id="share_version_label" style="opacity:0.7">-</span></div>
+                        <div class="stat-detail">Efficiency: <span id="efficiency">-</span></div>
+                        <div class="stat-detail" id="share_versions_line" style="opacity:0.7; font-size:0.8em;">-</div>
                     </div>
                     
                     <div class="stat-card">
@@ -2162,13 +2163,26 @@
                 
                 // Version Signaling Status - Universal transition display
                 d3.json('../version_signaling', function(vs) {
-                    // Share version label in Shares card
-                    if (vs && vs.current_share_type != null) {
-                        var verText = 'V' + vs.current_share_type;
-                        if (vs.target_version != null && vs.target_version !== vs.current_share_type) {
-                            verText += ' \u2192 V' + vs.target_version;
+                    // Share version + desired version counts in Shares card
+                    if (vs) {
+                        var parts = [];
+                        // Share format counts (e.g. "V35:380 V36:20")
+                        if (vs.share_types) {
+                            var stParts = [];
+                            Object.keys(vs.share_types).sort().forEach(function(v) {
+                                stParts.push('V' + v + ':' + vs.share_types[v].count);
+                            });
+                            if (stParts.length) parts.push(stParts.join(' '));
                         }
-                        d3.select('#share_version_label').text(verText);
+                        // Desired version counts (e.g. "want V35:380 V36:42")
+                        if (vs.full_chain_versions) {
+                            var dvParts = [];
+                            Object.keys(vs.full_chain_versions).sort().forEach(function(v) {
+                                dvParts.push('V' + v + ':' + vs.full_chain_versions[v].count);
+                            });
+                            if (dvParts.length) parts.push('want ' + dvParts.join(' '));
+                        }
+                        d3.select('#share_versions_line').text(parts.join(' | '));
                     }
                     if (!vs) {
                         d3.select('#version-signaling').style('display', 'none');
