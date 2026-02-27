@@ -1326,9 +1326,8 @@
                     <div class="stat-card" id="shares_card">
                         <h3><span class="icon">📊</span> Shares</h3>
                         <div class="stat-value" id="shares_total">-</div>
-                        <div class="stat-sub">Orphan: <span id="shares_orphan">-</span> | Dead: <span id="shares_dead">-</span></div>
+                        <div class="stat-sub"><span id="share_versions_line"></span>Orphan: <span id="shares_orphan">-</span> | Dead: <span id="shares_dead">-</span></div>
                         <div class="stat-detail">Efficiency: <span id="efficiency">-</span></div>
-                        <div class="stat-detail" id="share_versions_line" style="opacity:0.7; font-size:0.8em;">-</div>
                     </div>
                     
                     <div class="stat-card">
@@ -2198,7 +2197,7 @@
                                 first = false;
                             });
                         }
-                        d3.select('#share_versions_line').html(html);
+                        d3.select('#share_versions_line').html(html ? html + ' <span style="opacity:0.4">|</span> ' : '');
                         // Apply transitioning visual to Shares card
                         d3.select('#shares_card').classed('transitioning', !!isTransitioning);
                     }
