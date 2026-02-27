@@ -1317,7 +1317,7 @@
                         <h3><span class="icon">📊</span> Shares</h3>
                         <div class="stat-value" id="shares_total">-</div>
                         <div class="stat-sub">Orphan: <span id="shares_orphan">-</span> | Dead: <span id="shares_dead">-</span></div>
-                        <div class="stat-detail">Efficiency: <span id="efficiency">-</span></div>
+                        <div class="stat-detail">Efficiency: <span id="efficiency">-</span> &nbsp;|&nbsp; <span id="share_version_label" style="opacity:0.7">-</span></div>
                     </div>
                     
                     <div class="stat-card">
@@ -1709,15 +1709,15 @@
         }
 
         // Format percentage with big integer + small decimal parts
-        // Returns HTML string: "<span style='font-size:1em;font-weight:700'>0</span><span style='font-size:0.65em'>.4623%</span>"
+        // Format percentage with big bold integer + smaller decimal
         function format_pct_fancy(pct) {
             if (pct == null || !isFinite(pct)) return '-';
             var full = d3.format('.4f')(pct);
             var dot = full.indexOf('.');
             var intPart = full.substring(0, dot);
             var decPart = full.substring(dot) + '%';
-            return '<span style="font-size:1em;font-weight:700">' + intPart + '</span>' +
-                   '<span style="font-size:0.65em">' + decPart + '</span>';
+            return '<span style="font-size:1.3em;font-weight:800;line-height:1">' + intPart + '</span>' +
+                   '<span style="font-size:0.55em;font-weight:400;opacity:0.85">' + decPart + '</span>';
         }
         
         function format_time_short(timestamp) {
@@ -2162,6 +2162,14 @@
                 
                 // Version Signaling Status - Universal transition display
                 d3.json('../version_signaling', function(vs) {
+                    // Share version label in Shares card
+                    if (vs && vs.current_share_type != null) {
+                        var verText = 'V' + vs.current_share_type;
+                        if (vs.target_version != null && vs.target_version !== vs.current_share_type) {
+                            verText += ' \u2192 V' + vs.target_version;
+                        }
+                        d3.select('#share_version_label').text(verText);
+                    }
                     if (!vs) {
                         d3.select('#version-signaling').style('display', 'none');
                         return;
