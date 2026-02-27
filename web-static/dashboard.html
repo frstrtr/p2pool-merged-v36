@@ -1323,7 +1323,7 @@
                     <div class="stat-card">
                         <h3><span class="icon">🎯</span> Best Share</h3>
                         <div class="stat-value" style="display: flex; align-items: baseline; justify-content: center; gap: 4px;"><span id="best_share_round_pct_fancy" style="color: var(--primary);">-</span><span id="best_share_merged_round_part" style="display: none;"> / <span id="best_share_merged_pct_fancy" style="color: #c3a634;">-</span></span></div>
-                        <div class="stat-sub" id="best_share_round_diff" style="font-size: 0.85em;">-</div>
+                        <div class="stat-sub" style="font-size: 0.85em;"><span id="best_share_round_diff" style="color: var(--primary);">-</span> / <span id="best_share_net_diff" style="opacity: 0.55;">-</span><span id="best_share_merged_diff_part" style="display: none;"> &nbsp;·&nbsp; <span id="best_share_merged_round_diff" style="color: #c3a634;">-</span> / <span id="best_share_merged_net_diff" style="opacity: 0.55;">-</span></span></div>
                         <div class="stat-detail">🏆 <span style="color: var(--primary);"><span id="best_share_alltime_pct_fancy">-</span></span><span id="best_share_merged_record_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_alltime_pct_fancy">-</span></span></span></div>
                     </div>
                 </div>
@@ -2589,7 +2589,9 @@
                         if (!bs) return;
                         // Current round — fancy percentage as hero value
                         d3.select('#best_share_round_pct_fancy').html(format_pct_fancy(bs.round.pct_of_block));
+                        // Share diff vs network diff subtitle
                         d3.select('#best_share_round_diff').text(format_difficulty(bs.round.difficulty));
+                        d3.select('#best_share_net_diff').text(format_difficulty(bs.network_difficulty));
                         // All-time record — percentage only (no redundant difficulty)
                         d3.select('#best_share_alltime_pct_fancy').html(format_pct_fancy(bs.all_time.pct_of_block));
                         // Merged chain (DOGE) stats - inline
@@ -2598,6 +2600,10 @@
                             d3.select('#best_share_merged_pct_fancy').html(format_pct_fancy(bs.merged.round.pct_of_block));
                             d3.select('#best_share_merged_record_part').style('display', 'inline');
                             d3.select('#best_share_merged_alltime_pct_fancy').html(format_pct_fancy(bs.merged.all_time.pct_of_block));
+                            // Merged diff subtitle
+                            d3.select('#best_share_merged_diff_part').style('display', 'inline');
+                            d3.select('#best_share_merged_round_diff').text(format_difficulty(bs.merged.round.difficulty));
+                            d3.select('#best_share_merged_net_diff').text(format_difficulty(bs.merged.network_difficulty));
                         }
                     });
                 });
