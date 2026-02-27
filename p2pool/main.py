@@ -806,6 +806,16 @@ def run():
     worker_group.add_argument('-s', '--share-rate', metavar='SECONDS_PER_SHARE',
         help='Auto-adjust mining difficulty on each connection to target this many seconds per pseudoshare (default: %3.0f)' % 3.,
         type=float, action='store', default=3., dest='share_rate')
+    worker_group.add_argument('--redistribute', metavar='MODE',
+        help='How to redistribute shares from miners with empty/invalid/broken stratum credentials. '
+             'pplns = distribute by PPLNS weight proportionally (default); '
+             'fee = 100%% to node operator (same as -f 100 for these shares); '
+             'boost = give to active stratum miners who have ZERO shares in the PPLNS window '
+             '(helps tiny miners struggling to get their first share); '
+             'donate = 100%% to donation script. '
+             'Consensus-safe: only affects pubkey_hash stamped into shares on this node.',
+        type=str, action='store', default='pplns', dest='redistribute_mode',
+        choices=['pplns', 'fee', 'boost', 'donate'])
     
     bitcoind_group = parser.add_argument_group('coin daemon interface')
     bitcoind_group.add_argument('--bitcoind-config-path', '--coind-config-path', metavar='COIND_CONFIG_PATH',

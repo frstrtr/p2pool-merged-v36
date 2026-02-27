@@ -194,6 +194,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.auto_ratchet = p2pool_data.AutoRatchet(ratchet_datadir)
         print '[WorkerBridge] AutoRatchet initialized: %s' % self.auto_ratchet
 
+        # Redistribute mode for unnamed/broken miner shares
+        self._redistribute_mode = getattr(args, 'redistribute_mode', 'pplns')
+        print '[WorkerBridge] Redistribute mode: %s (--redistribute)' % self._redistribute_mode
+
         self.net = self.node.net.PARENT
         self.running = True
         self.pseudoshare_received = variable.Event()
@@ -1144,29 +1148,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
             self._merged_op_addr_cache[cache_key] = ''  # Cache the negative result
             return None
 
-    def _pick_random_pplns_miner(self, prefer_small=True):
-        """Pick a random miner (pubkey_hash, pubkey_type) from the PPLNS window.
+    def _get_pplns_entries(self):
+        """Get cached PPLNS weight entries. Refreshed every 30 seconds.
 
-        Used for probabilistic redistribution of invalid/missing miner addresses.
-        Same consensus-safe model as the node operator fee (-f flag): the chosen
-        miner's address is baked into the share at creation time, invisible to
-        consensus validation.
-
-        When prefer_small=True (default), uses INVERSE weighting so the smallest
-        miners in the PPLNS window get the highest probability of receiving credit.
-        This helps tiny miners who struggle to find shares stay in the payout window.
-
-        When prefer_small=False, uses normal hashrate-proportional weighting
-        (original behavior).
-
-        Returns (pubkey_hash, pubkey_type) of a randomly selected valid miner,
-        or (self.my_pubkey_hash, self.my_pubkey_type) if no PPLNS data available.
-
-        Results are cached for 30 seconds to avoid expensive weight recalculation
-        on every work request.
+        Returns list of (address, weight, pubkey_hash, pubkey_type) or None.
         """
         now = time.time()
-        # Cache: refresh every 30 seconds or on first call
         if not hasattr(self, '_pplns_cache') or (now - self._pplns_cache_time) > 30:
             self._pplns_cache = None
             self._pplns_cache_time = now
@@ -1181,7 +1168,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(block_target),
                     )
                     if weights:
-                        # Build list of (address, weight, pubkey_hash, pubkey_type)
                         entries = []
                         for addr, w in weights.iteritems():
                             try:
@@ -1189,53 +1175,127 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 pt = p2pool_data.get_pubkey_type(ver, witver, self.node.net.PARENT)
                                 entries.append((addr, w, ph, pt))
                             except Exception:
-                                pass  # skip undecodable addresses (e.g. donation scripts)
+                                pass
                         if entries:
                             self._pplns_cache = entries
             except Exception:
                 pass
+        return self._pplns_cache
 
-        if not self._pplns_cache:
+    def _get_connected_zero_pplns_miners(self):
+        """Get miners connected via stratum that have ZERO weight in PPLNS.
+
+        These are tiny miners actively hashing but haven't found a single share
+        in the 8640-share window. They need the most help.
+
+        Returns list of (pubkey_hash, pubkey_type) or empty list.
+        Cached for 30 seconds.
+        """
+        now = time.time()
+        if hasattr(self, '_zero_pplns_cache') and (now - self._zero_pplns_cache_time) < 30:
+            return self._zero_pplns_cache
+
+        self._zero_pplns_cache = []
+        self._zero_pplns_cache_time = now
+
+        try:
+            from p2pool.bitcoin.stratum import pool_stats
+            connected = pool_stats.get_connected_workers()
+            if not connected:
+                return self._zero_pplns_cache
+
+            # Get addresses currently in PPLNS
+            pplns_entries = self._get_pplns_entries()
+            pplns_addresses = set()
+            if pplns_entries:
+                for addr, w, ph, pt in pplns_entries:
+                    pplns_addresses.add(addr)
+
+            # Find connected miners NOT in PPLNS
+            zero_miners = []
+            seen = set()
+            for worker_name, info in connected.items():
+                # Extract base address (strip worker name)
+                addr = info.get('address')
+                if not addr or addr in seen:
+                    continue
+                seen.add(addr)
+                # Parse actual address (strip worker suffix, comma-separated merged addr)
+                base_addr = addr.split(',')[0].split('.')[0].split('_')[0]
+                if not base_addr or base_addr in pplns_addresses:
+                    continue
+                # Resolve to pubkey_hash
+                try:
+                    ph, ver, witver = bitcoin_data.address_to_pubkey_hash(base_addr, self.node.net.PARENT)
+                    pt = p2pool_data.get_pubkey_type(ver, witver, self.node.net.PARENT)
+                    zero_miners.append((ph, pt))
+                except Exception:
+                    pass  # skip invalid addresses
+
+            self._zero_pplns_cache = zero_miners
+        except Exception:
+            pass
+
+        return self._zero_pplns_cache
+
+    def _redistribute_share(self):
+        """Pick a (pubkey_hash, pubkey_type) for shares from unnamed/broken miners.
+
+        Controlled by --redistribute CLI flag:
+          pplns  : distribute by PPLNS weight proportionally (default)
+          fee    : 100% to node operator
+          boost  : give to active stratum miners with ZERO PPLNS shares,
+                   falls back to PPLNS if no zero-share miners connected
+          donate : 100% to donation script (P2SH combined or P2PK legacy)
+
+        Returns (pubkey_hash, pubkey_type).
+        """
+        mode = getattr(self.args, 'redistribute_mode', 'pplns')
+
+        # ---- MODE: fee ----
+        if mode == 'fee':
             return self.my_pubkey_hash, self.my_pubkey_type
 
-        entries = self._pplns_cache
+        # ---- MODE: donate ----
+        if mode == 'donate':
+            from p2pool.data import (COMBINED_DONATION_SCRIPT, DONATION_SCRIPT,
+                                     combined_donation_script_to_address,
+                                     donation_script_to_address,
+                                     COMBINED_DONATION_PUBKEY_HASH)
+            v36_active, _ = self.is_v36_active()
+            if v36_active:
+                # Use the combined donation pubkey_hash (P2SH)
+                return COMBINED_DONATION_PUBKEY_HASH, p2pool_data.PUBKEY_TYPE_P2SH
+            else:
+                # Pre-V36: use original donation P2PK — map to P2PKH hash
+                # DONATION_SCRIPT is a P2PK output, extract the pubkey hash
+                import hashlib
+                pubkey = DONATION_SCRIPT[1:-1]  # strip OP_PUSHDATA + OP_CHECKSIG
+                h = hashlib.new('ripemd160', hashlib.sha256(pubkey).digest()).digest()
+                return int(h.encode('hex'), 16), p2pool_data.PUBKEY_TYPE_P2PKH
 
-        if prefer_small and len(entries) > 1:
-            # Inverse weighting: smallest miners get highest probability.
-            # A miner with 1 share gets max_weight chance; the biggest miner
-            # gets 1 chance. This gives tiny struggling miners a real boost
-            # from work submitted by unnamed/broken/unauthenticated workers.
-            #
-            # Formula: inverse_weight = max_weight / weight
-            # This makes smallest miner's probability proportional to
-            # (biggest_weight / smallest_weight) relative to the biggest miner.
-            max_w = max(w for _, w, _, _ in entries)
-            # Use float division for precise inverse weighting
-            inverse_weights = []
-            for addr, w, ph, pt in entries:
-                # Clamp minimum weight to 1 to prevent division by zero
-                iw = float(max_w) / max(w, 1)
-                inverse_weights.append((addr, iw, ph, pt))
-            total = sum(iw for _, iw, _, _ in inverse_weights)
-            r = random.uniform(0.0, total)
-            cumulative = 0.0
-            for addr, iw, ph, pt in inverse_weights:
-                cumulative += iw
-                if r < cumulative:
-                    return ph, pt
-            # Fallback
-            return inverse_weights[-1][2], inverse_weights[-1][3]
-        else:
-            # Original: weight by PPLNS hashrate (proportional)
-            total = sum(w for _, w, _, _ in entries)
-            r = random.randint(0, total - 1)
-            cumulative = 0
-            for addr, w, ph, pt in entries:
-                cumulative += w
-                if r < cumulative:
-                    return ph, pt
-            # Fallback (shouldn't reach here)
-            return entries[-1][2], entries[-1][3]
+        # ---- MODE: boost ----
+        if mode == 'boost':
+            zero_miners = self._get_connected_zero_pplns_miners()
+            if zero_miners:
+                # Equal chance for each zero-share miner (they're all equally tiny)
+                ph, pt = random.choice(zero_miners)
+                return ph, pt
+            # Fallback: no zero-share miners connected, use PPLNS
+            # (fall through to pplns mode)
+
+        # ---- MODE: pplns (default + fallback) ----
+        entries = self._get_pplns_entries()
+        if not entries:
+            return self.my_pubkey_hash, self.my_pubkey_type
+        total = sum(w for _, w, _, _ in entries)
+        r = random.randint(0, total - 1)
+        cumulative = 0
+        for addr, w, ph, pt in entries:
+            cumulative += w
+            if r < cumulative:
+                return ph, pt
+        return entries[-1][2], entries[-1][3]
 
     def get_user_details(self, username, peer_addr=None):
         # Debug: Uncomment to trace user details lookup
@@ -1355,10 +1415,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         else:
             try:
                 if not user or not user.strip():
-                    # Empty address: redistribute to smallest PPLNS miner (inverse-weighted)
-                    # This helps tiny miners struggling to stay in the 8640-share window
-                    pubkey_hash, pubkey_type = self._pick_random_pplns_miner(prefer_small=True)
-                    print >>sys.stderr, '[POOL] Empty miner address from %s - share credited to small PPLNS miner (inverse-weighted)' % (peer_addr or 'unknown',)
+                    # Empty address: redistribute per --redistribute mode
+                    pubkey_hash, pubkey_type = self._redistribute_share()
+                    print >>sys.stderr, '[POOL] Empty miner address from %s - redistributed (%s mode)' % (peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
                 else:
                     # Cache miner address resolution — same address produces same result every time
                     cached_addr = self._miner_addr_cache.get(user)
@@ -1440,11 +1499,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                         pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
             except: # Invalid/unparseable address - probabilistic redistribution
-                # Parent chain: redistribute to smallest PPLNS miner (inverse-weighted)
+                # Parent chain: redistribute per --redistribute mode
                 # Merged chain: preserve valid explicit address if provided
-                pubkey_hash, pubkey_type = self._pick_random_pplns_miner(prefer_small=True)
-                print >>sys.stderr, '[POOL] Invalid miner address %s from %s - share credited to small PPLNS miner (inverse-weighted)' % (
-                    user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown')
+                pubkey_hash, pubkey_type = self._redistribute_share()
+                print >>sys.stderr, '[POOL] Invalid miner address %s from %s - redistributed (%s mode)' % (
+                    user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
         
         # Append worker name to user for identification
         if worker:

@@ -12,7 +12,13 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 - **fix: `git describe --tags` for lightweight tag version display** — Added `--tags` flag so lightweight tags (not just annotated) are recognized in version string (`8b678bd`)
 
 ### Improvements
-- **feat: small miner redistribution — inverse-weighted PPLNS for unnamed workers** — Shares from miners with empty/invalid/broken stratum credentials are now credited to the **smallest** active PPLNS miners (inverse-weighted by hashrate) instead of the largest. This helps tiny miners struggling to stay in the 8640-share payout window. A miner with 1 share gets `max_weight/1` chance vs a miner with 1000 shares getting `max_weight/1000` chance. Consensus-safe: only affects which `pubkey_hash` is stamped into the share at creation time.
+- **feat: `--redistribute` flag for unnamed/broken miner shares** — Configurable redistribution policy for shares from miners with empty/invalid/broken stratum credentials. Four modes:
+  - `pplns` (default) — proportional PPLNS weight distribution (original behavior)
+  - `fee` — 100% to node operator
+  - `boost` — give to active stratum miners with **zero** PPLNS shares (helps tiny miners who are hashing but haven't found a single share in the 8640-share window). Falls back to `pplns` if no zero-share miners connected.
+  - `donate` — 100% to donation script
+  
+  Usage: `--redistribute boost`. Consensus-safe: only affects `pubkey_hash` stamped into shares on this node.
 
 ---
 
