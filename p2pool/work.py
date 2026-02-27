@@ -1149,57 +1149,88 @@ class WorkerBridge(worker_interface.WorkerBridge):
             return None
 
     def _get_pplns_entries(self):
-        """Get cached PPLNS weight entries. Refreshed every 30 seconds.
+        """Get cached PPLNS weight entries.
+
+        Event-driven invalidation: cache stays valid while the share chain
+        head (best_share_var) is unchanged.  When a new share arrives, the
+        cache is invalidated but recomputation is rate-limited to at most
+        once every 10 seconds to avoid thrashing during rapid share bursts.
 
         Returns list of (address, weight, pubkey_hash, pubkey_type) or None.
         """
         now = time.time()
-        if not hasattr(self, '_pplns_cache') or (now - self._pplns_cache_time) > 30:
-            self._pplns_cache = None
-            self._pplns_cache_time = now
-            try:
-                best = self.node.best_share_var.value
-                if best is not None:
-                    tracker = self.node.tracker
-                    block_target = self.current_work.value['bits'].target
-                    weights, total_weight, donation_weight = tracker.get_cumulative_weights(
-                        best,
-                        min(tracker.get_height(best), self.node.net.REAL_CHAIN_LENGTH),
-                        65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(block_target),
-                    )
-                    if weights:
-                        entries = []
-                        for addr, w in weights.iteritems():
-                            try:
-                                ph, ver, witver = bitcoin_data.address_to_pubkey_hash(addr, self.node.net.PARENT)
-                                pt = p2pool_data.get_pubkey_type(ver, witver, self.node.net.PARENT)
-                                entries.append((addr, w, ph, pt))
-                            except Exception:
-                                pass
-                        if entries:
-                            self._pplns_cache = entries
-            except Exception:
-                pass
+        current_best = self.node.best_share_var.value
+
+        if hasattr(self, '_pplns_cache'):
+            # Same share chain head — cache is perfectly valid
+            if getattr(self, '_pplns_cache_best', None) == current_best:
+                return self._pplns_cache
+            # Share chain changed, but rate-limit recomputation (10s min)
+            if (now - getattr(self, '_pplns_cache_time', 0)) < 10:
+                return self._pplns_cache
+
+        self._pplns_cache = None
+        self._pplns_cache_time = now
+        self._pplns_cache_best = current_best
+        try:
+            if current_best is not None:
+                tracker = self.node.tracker
+                block_target = self.current_work.value['bits'].target
+                weights, total_weight, donation_weight = tracker.get_cumulative_weights(
+                    current_best,
+                    min(tracker.get_height(current_best), self.node.net.REAL_CHAIN_LENGTH),
+                    65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(block_target),
+                )
+                if weights:
+                    entries = []
+                    for addr, w in weights.iteritems():
+                        try:
+                            ph, ver, witver = bitcoin_data.address_to_pubkey_hash(addr, self.node.net.PARENT)
+                            pt = p2pool_data.get_pubkey_type(ver, witver, self.node.net.PARENT)
+                            entries.append((addr, w, ph, pt))
+                        except Exception:
+                            pass
+                    if entries:
+                        self._pplns_cache = entries
+        except Exception:
+            pass
         return self._pplns_cache
 
     def _get_connected_zero_pplns_miners(self):
         """Get miners connected via stratum that have ZERO weight in PPLNS.
 
         These are tiny miners actively hashing but haven't found a single share
-        in the 8640-share window. They need the most help.
+        in the 8640-share window.  They need the most help.
+
+        Event-driven invalidation:
+          - Connection count changed  → a miner joined/left, recompute
+          - PPLNS entries changed     → a miner may have graduated, recompute
+          - Otherwise                 → cache stays valid indefinitely
+        Rate-limited to at most once per 10 seconds.
 
         Returns list of (pubkey_hash, pubkey_type) or empty list.
-        Cached for 30 seconds.
         """
         now = time.time()
-        if hasattr(self, '_zero_pplns_cache') and (now - self._zero_pplns_cache_time) < 30:
-            return self._zero_pplns_cache
+
+        from p2pool.bitcoin.stratum import pool_stats
+        current_conn_count = pool_stats.connection_count
+
+        if hasattr(self, '_zero_pplns_cache'):
+            same_conns = (getattr(self, '_zero_pplns_conn_count', -1) == current_conn_count)
+            same_pplns = (getattr(self, '_zero_pplns_pplns_best', None) == self.node.best_share_var.value)
+            if same_conns and same_pplns:
+                # Nothing changed — cache is perfectly valid
+                return self._zero_pplns_cache
+            if (now - getattr(self, '_zero_pplns_cache_time', 0)) < 10:
+                # Rate limit: something changed but we just recomputed
+                return self._zero_pplns_cache
 
         self._zero_pplns_cache = []
         self._zero_pplns_cache_time = now
+        self._zero_pplns_conn_count = current_conn_count
+        self._zero_pplns_pplns_best = self.node.best_share_var.value
 
         try:
-            from p2pool.bitcoin.stratum import pool_stats
             connected = pool_stats.get_connected_workers()
             if not connected:
                 return self._zero_pplns_cache
