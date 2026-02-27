@@ -2,6 +2,14 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.05-alpha] - 2026-02-27
+
+### Critical Fixes
+- **fix: P2SH miner address displayed as P2PKH in logs and stats** — miners connecting with a P2SH address (e.g. `MLhSmVQ...`) were shown as a different P2PKH address (`LY2EoGp...`) in "New work for worker" log lines, `last_work_shares` stats keys, BENCH timing, and V35 `share_data['address']`. Root cause: `pubkey_hash_to_address()` was hardcoded to `ADDRESS_VERSION` (P2PKH version 48) instead of using `ADDRESS_P2SH_VERSION` (50) for P2SH addresses — same 20-byte hash, wrong version byte. Now uses `pubkey_type_to_version_witver()` to select the correct version. (`1c538aa`)
+- **fix: P2SH address handling in merged chain conversion** — three additional locations in merged mining (operator fallback address, Dogecoin `createauxblock` payout address for both testnet and mainnet) were hardcoded to `ADDRESS_VERSION`, producing a P2PKH Dogecoin address (`Dxxx`) instead of a P2SH one (`9xxx`/`Axxx`) for P2SH miners. Added `_merged_addr_ver()` static helper that returns `ADDRESS_P2SH_VERSION` for P2SH pubkey types, `ADDRESS_VERSION` otherwise. Also removed a duplicate line that always overwrote P2SH→P2PKH in the merged payout lookup, silently breaking P2SH merged payouts. (`d6cdd40`)
+
+---
+
 ## [v36-0.04-alpha] - 2026-02-27
 
 ### Features
