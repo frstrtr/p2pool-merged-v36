@@ -1,6 +1,34 @@
 # P2Pool Merged Mining (V36)
 
-Decentralized pool mining software for Litecoin and Dogecoin (merged mining).
+> **Lineage:** [`p2pool/p2pool`](https://github.com/p2pool/p2pool) (forrestv) → [`jtoomim/p2pool`](https://github.com/jtoomim/p2pool) (V35) → **`frstrtr/p2pool-merged-v36`** (V36 + merged mining)
+
+[![Latest Release](https://img.shields.io/github/v/release/frstrtr/p2pool-merged-v36)](https://github.com/frstrtr/p2pool-merged-v36/releases/latest)
+[![License](https://img.shields.io/github/license/frstrtr/p2pool-merged-v36)](LICENSE)
+
+Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), building on the p2pool protocol with V36 share format.
+
+## What's different from jtoomim/p2pool (V35)
+
+### Protocol & Consensus
+- **V36 share format** — extends the share chain with `pubkey_type` field (native P2SH and bech32 address support) and AuxPoW commitment fields; backward-compatible transition via built-in version signaling with 95% activation threshold
+- **Merged mining (AuxPoW)** — mine LTC and DOGE simultaneously on the same decentralized share chain; merged chain rewards are distributed through the same PPLNS consensus mechanism as parent chain rewards
+- **MM-Adapter bridge** — Python 3 adapter that translates between P2Pool's merged mining protocol and standard Dogecoin Core RPC (`createauxblock`/`submitauxblock`), enabling merged mining without custom daemon patches
+- **Multi-chain address handling** — automatic cross-chain address conversion (LTC P2SH → DOGE P2SH, bech32 → P2PKH for chains without SegWit); full validation pipeline for P2PKH, P2SH, P2WPKH
+
+### Node Operation
+- **Share redistribution (`--redistribute`)** — configurable handling of shares from unnamed/broken miners: `pplns` (proportional), `fee` (operator), `boost` (help tiny miners get their first payout), `donate` (development fund)
+- **Multiaddress coinbase** — miners specify both LTC and DOGE payout addresses via stratum; each chain's coinbase pays to the miner's native address format
+
+### Dashboard
+- Live V35→V36 transition signaling with version counts and activation progress
+- Best share display with network difficulty comparison (parent + merged chains)
+- Share format distribution visualization
+- Context-aware transition status indicators
+
+### Architecture
+- Event-driven cache invalidation (replaces fixed-interval polling)
+- Clean separation of parent/merged chain logic throughout the codebase
+- Comprehensive address type preservation across all code paths
 
 ## 🎉 Litecoin + Dogecoin Merged Mining
 
