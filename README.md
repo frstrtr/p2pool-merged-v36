@@ -203,6 +203,7 @@ pypy run_p2pool.py \
     --address YOUR_LEGACY_LTC_ADDRESS \
     --give-author 1 \
     -f 1 \
+    --redistribute pplns \
     --disable-upnp \
     litecoinrpc YOUR_LTC_RPC_PASSWORD
 ```
@@ -317,6 +318,37 @@ that prevent parsing will make the address invalid, triggering redistribution.
 
 **Example:** A miner connecting as `XXX_rig1` has user=`XXX` (invalid LTC address), worker=`rig1`.
 Their share rewards go to a randomly-selected valid miner from the PPLNS window.
+
+#### `--redistribute` Mode
+
+The `--redistribute` flag controls **how** shares from miners with invalid/empty/broken stratum
+credentials are handled. It only affects the `pubkey_hash` stamped into shares created on your
+node — no consensus or coinbase changes are required, so all modes are safe to use on any node.
+
+```bash
+pypy run_p2pool.py ... --redistribute MODE
+```
+
+| Mode | Behaviour | Use Case |
+|---|---|---|
+| `pplns` | **Default.** Redistributes to a random valid miner, weighted by PPLNS hashrate share. Equivalent to spreading the invalid miner's rewards across all current miners proportionally. | Fair default — rewards flow back to the pool in proportion to work done. |
+| `fee` | 100 % to the **node operator** (same address as `-f 100` would use for these shares). | Node operators who want to capture unclaimed rewards as additional operator income. |
+| `boost` | Gives the share to a random **connected stratum miner who currently has zero shares** in the PPLNS window. If no zero-share miners are connected, falls back to `pplns` behaviour. | Altruistic nodes that want to help tiny/new miners get their first payout faster. |
+| `donate` | 100 % to the **development donation address**. V36-aware: uses a combined P2SH donation address when V36 is active, otherwise uses the legacy P2PK→P2PKH donation script. | Support continued P2Pool development with unclaimed shares. |
+
+**Interaction with other flags:**
+- `--redistribute` only applies to shares where the miner's parent-chain address is invalid. Miners with valid addresses are never affected.
+- `-f` / `--fee` (node operator fee) is applied **separately** as a percentage of every share. `--redistribute fee` is a distinct mechanism that only kicks in for broken credentials.
+- `--give-author` (donation percentage) is also separate. `--redistribute donate` sends the entire invalid share to the donation address, while `--give-author` donates a fraction of every share.
+
+**Real-world examples on active nodes:**
+```bash
+# Node 29: help small miners get started
+pypy run_p2pool.py ... --redistribute boost
+
+# Node 31: support development
+pypy run_p2pool.py ... --redistribute donate
+```
 
 > ⚠️ **P2SH Conversion Warning:** When a P2SH Litecoin address (starting with `M` or `3`) is auto-converted to Dogecoin, the resulting DOGE P2SH address references the **same redeem script hash**. P2Pool cannot reverse a script hash to inspect the underlying redeem script, so it converts all P2SH addresses unconditionally. Miners using P2SH have **two options**:
 >
