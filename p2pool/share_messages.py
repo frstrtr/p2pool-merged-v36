@@ -1188,7 +1188,11 @@ class BanList(object):
             tmp = self._persist_path + '.tmp'
             with open(tmp, 'w') as f:
                 json.dump(data, f, indent=2)
-            os.rename(tmp, self._persist_path)
+            try:
+                os.rename(tmp, self._persist_path)
+            except OSError:  # Windows can't overwrite with rename
+                os.remove(self._persist_path)
+                os.rename(tmp, self._persist_path)
         except (IOError, OSError):
             pass
 

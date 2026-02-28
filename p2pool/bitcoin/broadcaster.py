@@ -1103,7 +1103,11 @@ class NetworkBroadcaster(object):
             with open(tmp_path, 'wb') as f:
                 f.write(json.dumps(data, indent=2))
             
-            os.rename(tmp_path, db_path)
+            try:
+                os.rename(tmp_path, db_path)
+            except OSError:  # Windows can't overwrite with rename
+                os.remove(db_path)
+                os.rename(tmp_path, db_path)
             
         except Exception as e:
             print('Broadcaster[%s]: Error saving peer database: %s' % (
