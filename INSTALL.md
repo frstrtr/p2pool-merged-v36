@@ -2,6 +2,8 @@
 
 Complete installation guide for P2Pool on Ubuntu/Debian systems with Litecoin (scrypt) mining and Dogecoin merged mining.
 
+> **Windows 10/11 users**: See [WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md) for WSL2, Docker, and native Windows deployment instructions.
+
 ## Table of Contents
 - [System Requirements](#system-requirements)
 - [Litecoin Core Installation](#litecoin-core-installation)

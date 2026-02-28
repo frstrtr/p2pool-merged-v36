@@ -12,6 +12,7 @@ This folder contains comprehensive analysis of the P2Pool Litecoin network topol
 1. **Start here**: [VERSION_QUICK_REFERENCE.txt](VERSION_QUICK_REFERENCE.txt) (2 min read)
 2. **Then read**: [JTOOMIM_VERSION_16_0_204_ANALYSIS.md](JTOOMIM_VERSION_16_0_204_ANALYSIS.md) (5 min read)
 3. **Action items**: Both documents list required next steps
+4. **Windows users**: [WINDOWS_DEPLOYMENT.md](WINDOWS_DEPLOYMENT.md) (WSL2, Docker, Native)
 
 ### For Developers (Deep Dive)
 1. **Overview**: [VERSION_DIVERGENCE_ANALYSIS.md](VERSION_DIVERGENCE_ANALYSIS.md) (10 min read)

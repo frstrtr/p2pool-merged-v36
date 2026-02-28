@@ -74,6 +74,8 @@ The installation guide covers:
 - ✅ Common issues and solutions (OpenSSL, missing modules, etc.)
 - ✅ Performance tuning and security
 
+> **Windows users**: See **[WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md)** for WSL2, Docker, and native Windows setup instructions.
+
 ### Other Documentation
 
 | Document | Description |
@@ -84,6 +86,7 @@ The installation guide covers:
 | [ASIC_SUPPORT_COMPLETE.md](docs/ASIC_SUPPORT_COMPLETE.md) | BIP320 version-rolling & Scrypt ASIC support details |
 | [SHARE_ARCHIVE_README.md](docs/SHARE_ARCHIVE_README.md) | Share archival and recovery |
 | [V36_TRANSITION_GUIDE.md](docs/V36_TRANSITION_GUIDE.md) | V35→V36 transition stages, AutoRatchet, dashboard legend |
+| [WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md) | Windows 10/11 deployment (WSL2, Docker, Native) — tested end-to-end |
 | [SECURITY_AUDIT_2026_02.md](docs/SECURITY_AUDIT_2026_02.md) | Security audit report — 41 findings, origin classification, fix status |
 | [FUTURE.md](docs/FUTURE.md) | Roadmap — redistribution system (`--redistribute`), graduated boost, hybrid mode |
 
