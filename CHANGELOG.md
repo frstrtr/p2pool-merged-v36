@@ -5,13 +5,24 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 ## [v36-0.08-alpha] - 2026-02-28
 
 ### Features
-- **Docker deployment** — Added root `Dockerfile` (multi-stage: Ubuntu 22.04 + PyPy 2.7 + all deps), `docker-compose.yml` (P2Pool + MM-Adapter with healthchecks), `.env.example`, `.dockerignore`, and `mm-adapter/config.docker.example.yaml`. Full merged mining stack starts with `docker compose up -d`.
-- **README Docker quick start** — Added Docker quick start section with build time estimates and share sync notes.
-- **Windows deployment guide update** — `docs/WINDOWS_DEPLOYMENT.md` Option 2 (Docker) now references the shipped Docker files instead of inline Dockerfile/compose.
+- **Docker deployment** — Added root `Dockerfile` (multi-stage: Ubuntu 22.04 + PyPy 2.7 + all deps), `docker-compose.yml` (P2Pool + MM-Adapter with healthchecks), `.env.example`, `.dockerignore`, and `mm-adapter/config.docker.example.yaml`. Full merged mining stack starts with three commands:
+  ```bash
+  cp .env.example .env && vi .env
+  cp mm-adapter/config.docker.example.yaml mm-adapter/config.docker.yaml
+  docker compose up -d
+  ```
+- **Windows 10/11 deployment guide** — New `docs/WINDOWS_DEPLOYMENT.md` with three tested paths: WSL2 (recommended), Docker on WSL2, and Native Windows. End-to-end tested on Windows 11 + WSL2 Ubuntu 22.04 with LTC+DOGE merged mining.
+- **README Docker quick start** — Added Docker quick start section with prerequisites, build time estimates (~3 min first build), and share sync notes.
+- **WSL2 startup helper** — `scripts/start_wsl_pool.sh` launches MM-Adapter + P2Pool in one command.
 
 ### Bug Fixes
 - **fix: `--help` crash** — `--merged_addr` argparse help string had a bare `%` in `payout%http://...` that caused `ValueError: unsupported format character` during `--help` rendering. Escaped as `%%`.
 - **fix: mm-adapter Dockerfile port** — Changed `EXPOSE 44555` to `EXPOSE 44556` to match the actual default server port.
+- **fix: `.gitignore` credential safety** — Added `.env`, `.env.*` (except `.env.example`), and `mm-adapter/config.docker.yaml` to `.gitignore` to prevent accidental credential commits.
+
+### Testing
+- **WSL2**: Clean Docker build from scratch (2m43s), `docker compose up -d` — both containers healthy, 67 GH/s pool, 85 peers, dashboard OK.
+- **Node 30** (Ubuntu 24.04, bare metal): Fresh `git clone` + Docker install + `docker compose up -d` — both containers healthy in ~10s, share chain synced 15k/17k in 60s, dashboard at `:9327` returns 200.
 
 ---
 
