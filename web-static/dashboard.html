@@ -1306,6 +1306,8 @@
                 </div>
                 <!-- Authority announcements (shown independent of transition state) -->
                 <div id="authority-announcements-section" style="display: none; margin-top: 12px;"></div>
+                <!-- Address format warnings (node-generated, shown during transition) -->
+                <div id="address-warnings-section" style="display: none; margin-top: 12px;"></div>
                 <div class="signaling-stats">
                     <span class="signaling-message" id="signaling-message" style="font-size: 0.9em;"></span>
                 </div>
@@ -2492,6 +2494,61 @@
                         });
                     } else {
                         announcementsDiv.style('display', 'none');
+                    }
+                    
+                    // Update address format warnings (node-generated)
+                    var addrWarnings = vs.address_warnings || [];
+                    var addrDiv = d3.select('#address-warnings-section');
+                    addrDiv.selectAll('*').remove();
+                    if (addrWarnings.length > 0) {
+                        addrDiv.style('display', 'block');
+                        var awUrgStyles = {
+                            'info': { bg: 'rgba(33, 150, 243, 0.06)', border: '#2196F3', fg: '#90CAF9', icon: '\u2139\uFE0F' },
+                            'recommended': { bg: 'rgba(255, 152, 0, 0.06)', border: '#FF9800', fg: '#FFE0B2', icon: '\u26A0\uFE0F' },
+                            'required': { bg: 'rgba(244, 67, 54, 0.06)', border: '#F44336', fg: '#FFCDD2', icon: '\uD83D\uDEA8' }
+                        };
+                        // Collapsible header
+                        var headerDiv = addrDiv.append('div')
+                            .style('display', 'flex').style('align-items', 'center')
+                            .style('gap', '8px').style('cursor', 'pointer')
+                            .style('padding', '6px 0').style('user-select', 'none');
+                        headerDiv.append('span').style('font-size', '1em').text('\uD83D\uDCCB');
+                        headerDiv.append('span')
+                            .style('font-weight', '600').style('font-size', '0.88em')
+                            .style('color', '#FF9800')
+                            .text('Address Format Guide (' + addrWarnings.length + ')');
+                        var toggleIcon = headerDiv.append('span')
+                            .style('font-size', '0.8em').style('color', '#888')
+                            .style('margin-left', 'auto').text('\u25B6');
+                        var cardsContainer = addrDiv.append('div')
+                            .style('display', 'none').style('margin-top', '6px');
+                        headerDiv.on('click', function() {
+                            var visible = cardsContainer.style('display') !== 'none';
+                            cardsContainer.style('display', visible ? 'none' : 'block');
+                            toggleIcon.text(visible ? '\u25B6' : '\u25BC');
+                        });
+                        addrWarnings.forEach(function(w) {
+                            var urg = w.urgency || 'info';
+                            var style = awUrgStyles[urg] || awUrgStyles['info'];
+                            var card = cardsContainer.append('div')
+                                .style('padding', '8px 12px')
+                                .style('border-radius', '6px')
+                                .style('border-left', '3px solid ' + style.border)
+                                .style('background', style.bg)
+                                .style('margin-bottom', '6px');
+                            var hdr = card.append('div')
+                                .style('display', 'flex').style('align-items', 'center')
+                                .style('gap', '6px').style('margin-bottom', '3px');
+                            hdr.append('span').style('font-size', '0.95em').text(style.icon);
+                            hdr.append('span')
+                                .style('font-weight', '600').style('font-size', '0.85em')
+                                .style('color', style.fg).text(w.title || '');
+                            card.append('div')
+                                .style('color', '#bbb').style('font-size', '0.82em')
+                                .style('line-height', '1.45').text(w.text || '');
+                        });
+                    } else {
+                        addrDiv.style('display', 'none');
                     }
                     
                     // Update version breakdown — show FULL CHAIN desired_version votes

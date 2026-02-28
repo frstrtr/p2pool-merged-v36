@@ -425,6 +425,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             transition_message=_get_transition_message(),
             # Authority announcements (non-transition, always shown)
             authority_announcements=_get_authority_announcements(),
+            # Address format warnings during transition
+            address_warnings=_get_address_warnings(
+                is_transitioning, ratchet_confirmed, effective_target),
         )
     
     def _get_authority_announcements():
@@ -473,12 +476,69 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except Exception:
             return []
 
-    # Hardcoded transition blobs -- guaranteed to load regardless of file paths.
-    # These are authority-signed encrypted blobs (same format as .hex files).
-    # Add new blobs here when creating new transition messages.
+    def _get_address_warnings(is_transitioning, ratchet_confirmed, effective_target):
+        """Generate address format warnings relevant during V35->V36 transition.
+
+        These are node-generated (not authority-signed) informational
+        messages shown alongside the transition widget.  Hidden once the
+        transition is confirmed and complete.
+        """
+        if ratchet_confirmed:
+            return []
+        # Only show during V36 transition
+        if effective_target is not None and effective_target < 36:
+            return []
+
+        warnings = []
+
+        # Core address format warning — always relevant during transition
+        parent_symbol = getattr(node.net.PARENT, 'SYMBOL', 'LTC') if hasattr(node.net, 'PARENT') else 'LTC'
+        warnings.append(dict(
+            id='multiaddr_format',
+            urgency='recommended',
+            title='Multi-Address Mining Format',
+            text=(
+                'V36 introduces merged mining. To receive rewards on both '
+                'chains, configure your miner\'s stratum username as: '
+                '%s_ADDRESS,DOGE_ADDRESS.worker_name  '
+                'Example: Labc...xyz,D9ab...def.rig1'
+            ) % parent_symbol,
+        ))
+
+        # Auto-conversion warning
+        warnings.append(dict(
+            id='auto_convert',
+            urgency='info',
+            title='Address Auto-Conversion',
+            text=(
+                'If you only provide a %s address, a DOGE address will be '
+                'auto-derived from its public key hash. This derived address '
+                'may NOT match your actual DOGE wallet — you could lose '
+                'merged mining rewards. Always specify your own DOGE address '
+                'explicitly.'
+            ) % parent_symbol,
+        ))
+
+        # Invalid address redistribution warning
+        warnings.append(dict(
+            id='invalid_addr_redist',
+            urgency='info',
+            title='Invalid Address Redistribution',
+            text=(
+                'Miners with invalid or unparseable DOGE addresses will NOT '
+                'receive merged mining rewards. Their share of merged rewards '
+                'is redistributed probabilistically to other PPLNS miners '
+                'with valid addresses.'
+            ),
+        ))
+
+        return warnings
+
+    # Builtin transition blobs — loaded as fallback if file-based loading fails.
+    # Prefer shipping blobs in transition_messages/*.hex instead of embedding here.
+    # The ECDSA import fix (coincurve) ensures file-based loading now works reliably.
     _BUILTIN_TRANSITION_BLOBS = [
-        # V35 -> V36 mainnet transition signal (created 2026-02-24)
-        '017c9299b7c4579e67c0e7670dfc9c4207c045f7c7cc28f8eee9a11e1779f41440b240f6c66376d03d5ecd2d03a896ab93135f354ac895032c72486ee15202bfbaea01e595d5ef8c49a8c66a0a5da39fa1e5ef4ad669874582380dc0915f8eafb7697b55f6ba8208c017ccd112710cf8f06cd6b17fb9f22889c6c1dcbbf636e0c70963ee8ad00825f95b9f6c7d42089ba271155b8d8420e38d6d8925f91cd348c7e517a9461fd1574e990d682cedc4c5c646612b0d91c6662afb91c2d157859230d6185e31e8c2c4e98273f824e3c48f9d372f5fc65bfcd8d10e1ff729f9b87c9c841a1f087055703d1e85b9039c3cd87184a66abf589c0642f3243cba67b5aa3ed7154f75350af5752652795709b7537f3a18f05bfaa2a88895e3e2afe7195a2f39f67ba0ccb3f7ab6779ffdb0ddf02fed2d661fb474b6fc5cafa76dc087cd6927bf5595237e7531927b2e6f688584c5608d6905347460bf82e5449eede31dae5a848199a2fd6166f3c0e',
+        # V35 -> V36 mainnet blob moved to transition_messages/transition_v35_v36_mainnet.hex
     ]
 
     _blobs_loaded = [False]
