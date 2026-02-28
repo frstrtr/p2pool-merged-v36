@@ -1,6 +1,6 @@
 # P2Pool runtime dependencies (PyPy 2.7)
 # Install with: pypy -m pip install -r requirements.txt
-twisted==19.10.0
+twisted==20.3.0
 pycryptodome
 scrypt>=0.8.0,<=0.8.22
 ecdsa>=0.18.0
