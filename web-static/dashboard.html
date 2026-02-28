@@ -2246,10 +2246,10 @@
                         statusMsg = 'Waiting for enough shares to start version signaling.';
                         statusIcon = '\u23F3';
                     } else if (vs.status === 'signaling') {
-                        statusMsg = 'Network is signaling for V' + vs.target_version + ' upgrade. ' + d3.format('.1f')(vs.target_percentage || 0) + '% of shares signal V' + vs.target_version + '.';
+                        statusMsg = 'Network is signaling for V' + vs.target_version + ' upgrade. ' + d3.format('.1f')(vs.sampling_signaling || 0) + '% of sampling window signals V' + vs.target_version + '.';
                         statusIcon = '\uD83D\uDCE1';
                     } else if (vs.status === 'signaling_strong') {
-                        statusMsg = 'Strong signaling! ' + d3.format('.1f')(vs.target_percentage || 0) + '% of shares signal V' + vs.target_version + ' \u2014 activation approaching.';
+                        statusMsg = 'Strong signaling! ' + d3.format('.1f')(vs.sampling_signaling || 0) + '% of sampling window signals V' + vs.target_version + ' \u2014 activation approaching.';
                         statusIcon = '\uD83D\uDD25';
                     } else if (vs.status === 'activating') {
                         statusMsg = 'V' + vs.target_version + ' activation threshold reached! Confirming upgrade\u2026';
@@ -2391,7 +2391,7 @@
                             d3.select('#sampling-signaling-text').text(samplingText);
                         } else {
                             d3.select('#sampling-signaling-text').text(
-                                d3.format('.1f')(vs.target_percentage) + '% overall signaling for V' + vs.target_version +
+                                d3.format('.1f')(vs.overall_v36_vote_pct || vs.target_percentage) + '% overall signaling for V' + vs.target_version +
                                 ' (sampling window activates at ' + vs.chain_length_required + ' shares)');
                         }
                     }

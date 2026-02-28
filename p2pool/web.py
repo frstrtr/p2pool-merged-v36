@@ -387,7 +387,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             # The effective target (SUCCESSOR version or dominant vote)
             target_version=effective_target,
             target_version_name=effective_target_name,
-            target_percentage=round(target_percentage, 2),
+            # When successor overrides the dominant vote, report the effective
+            # target's actual signaling % — not the dominant vote's %.
+            target_percentage=round(sampling_signaling if successor_transition else target_percentage, 2),
             # Successor info
             successor_version=successor_version,
             successor_name=successor_name,
