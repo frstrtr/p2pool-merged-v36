@@ -243,18 +243,58 @@ pypy get-pip.py
 #### Install Required Packages
 ```bash
 # Core dependencies (includes scrypt hashing)
-pypy -m pip install twisted==19.10.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22'
+pypy -m pip install twisted==20.3.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22'
 
 # ECDSA library (required for share messaging signature verification)
 pypy -m pip install ecdsa
 
 # Optional: For web interface SSL
 pypy -m pip install pyasn1 pyasn1-modules service_identity
+
+# Recommended: coincurve for constant-time ECDSA signing (security hardening)
+# See "Security: coincurve Installation" section below
 ```
 
 **Note on scrypt package version**: Versions above 0.8.22 use Python 3 f-strings and are incompatible with Python 2.7/PyPy.
 
-### 3. Handle OpenSSL Import Warnings
+### 3. Security: coincurve Installation (Recommended)
+
+The `ecdsa` Python library has a known timing side-channel vulnerability (CVE-2024-23342, Minerva attack) in its `sign_digest()` function. P2Pool uses ECDSA signing for share messages. The upstream `ecdsa` project considers side-channel attacks out of scope and will **never** fix this.
+
+**coincurve** wraps Bitcoin Core's `libsecp256k1` — arguably the most audited secp256k1 implementation in existence — which uses constant-time signing. When coincurve is installed, P2Pool **automatically** prefers it over `ecdsa` for all signing operations.
+
+**Snap PyPy installation** (requires building from source due to snap glibc constraints):
+
+```bash
+# Install build dependencies
+sudo apt-get install -y automake libtool pkg-config
+
+# Download coincurve 13.0.0 (last Python 2 compatible version)
+cd /tmp
+pypy -m pip download "coincurve==13.0.0" --no-binary :all: -d coincurve-build
+cd coincurve-build && tar xzf coincurve-13.0.0.tar.gz && cd coincurve-13.0.0
+
+# Patch: build libsecp256k1 without libgmp to avoid glibc mismatch with snap
+# In setup.py, find the line with './configure' flags and add '--with-bignum=no'
+sed -i "s|'--disable-dependency-tracking',|'--disable-dependency-tracking', '--with-bignum=no',|" setup.py
+
+# Build and install (use snap's cffi, don't install deps)
+pypy -m pip install . --no-build-isolation --no-deps
+```
+
+**Non-snap PyPy / system Python 2.7** (simpler):
+```bash
+pypy -m pip install "coincurve==13.0.0"
+```
+
+**Verify installation**:
+```bash
+pypy -c "import coincurve; pk = coincurve.PrivateKey(); print('coincurve OK')"
+```
+
+If coincurve is not installed, P2Pool silently falls back to `ecdsa` for signing. Mining works normally, but the signing code path is vulnerable to timing attacks.
+
+### 4. Handle OpenSSL Import Warnings
 
 **Problem**: You may see `ImportError: No module named OpenSSL` warnings in logs.
 
