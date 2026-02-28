@@ -479,21 +479,15 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             return []
 
     def _get_address_warnings(is_transitioning, ratchet_confirmed, effective_target):
-        """Generate address format warnings relevant during V35->V36 transition.
+        """Generate address format warnings for V36 merged mining.
 
         These are node-generated (not authority-signed) informational
-        messages shown alongside the transition widget.  Hidden once the
-        transition is confirmed and complete.
+        messages.  Always shown so miners can prepare their address
+        configuration BEFORE V36 activates — the multi-address stratum
+        format only takes effect after the transition switch.
         """
-        if ratchet_confirmed:
-            return []
-        # Only show during V36 transition
-        if effective_target is not None and effective_target < 36:
-            return []
-
         warnings = []
 
-        # Core address format warning — always relevant during transition
         parent_symbol = getattr(node.net.PARENT, 'SYMBOL', 'LTC') if hasattr(node.net, 'PARENT') else 'LTC'
         warnings.append(dict(
             id='multiaddr_format',
