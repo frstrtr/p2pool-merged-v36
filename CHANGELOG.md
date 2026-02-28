@@ -2,6 +2,24 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.06-alpha] - 2026-02-28
+
+### Features & Improvements
+- **feat: Always show address format warnings** — Dashboard and API now always display address format warnings, not just during V36 transition. Added explicit warning for V35 phase: only auto-converted DOGE addresses are used for merged mining rewards until V36 activates; explicit stratum multi-address format is ignored pre-V36.
+- **feat: Address warning section UI** — Dashboard "Address Format Guide" is always visible and expanded by default, with clear urgency and phase-specific warnings.
+- **feat: API address_warnings** — `version_signaling` API now returns all relevant address warnings for the current phase, including V35 limitation, multi-address format, auto-conversion, and invalid address redistribution.
+
+### Bug Fixes
+- **fix: Signaling percentage bug** — Transition banner and stats now always show the correct V36 signaling percentage. Fixed bug where V35's dominant vote % was shown as V36's when successor override was active. Now uses `sampling_signaling` for both API and UI.
+- **fix: Remove redundant signaling % in banner** — Status banner no longer repeats the sampling percentage (already shown in progress bar and stats).
+- **fix: Remove embedded transition blob** — Transition message is now loaded only from the signed .hex file; embedded copy removed from code.
+- **fix: ecdsa verification required** — Transition message signature verification now always uses ecdsa 0.19.1 (CVE-safe); coincurve is optional and not present on nodes.
+
+### Deployment
+- Both node 29 and node 31 updated to commit a0b5652, running with ecdsa 0.19.1, no coincurve. Verified API and dashboard on both nodes.
+
+---
+
 ## [v36-0.05-alpha] - 2026-02-27
 
 ### Critical Fixes
