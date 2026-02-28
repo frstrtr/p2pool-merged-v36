@@ -127,7 +127,7 @@
                                 ' shares voting V' + vs.target_version + ' (need 95%)';
                         }
                     } else {
-                        samplingStr = d3.format('.1f')(vs.target_percentage) + '% overall (activates at ' +
+                        samplingStr = d3.format('.1f')(vs.overall_v36_vote_pct || vs.target_percentage) + '% overall (activates at ' +
                             vs.chain_length_required + ' shares)';
                     }
                     d3.select('#index-sampling-text').text(samplingStr);
