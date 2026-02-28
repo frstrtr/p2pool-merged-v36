@@ -713,7 +713,7 @@ def run():
         help='call getauxblock on this url to get work for merged mining (example: http://ncuser:ncpass@127.0.0.1:10332/)',
         type=str, action='append', default=[], dest='merged_urls')
     parser.add_argument('--merged_addr',
-        help='call createauxblock/submitauxblock on this url to get work for merged mining and use payout address (example: payout%http://ncuser:ncpass@127.0.0.1:10332/)',
+        help='call createauxblock/submitauxblock on this url to get work for merged mining and use payout address (example: payout%%http://ncuser:ncpass@127.0.0.1:10332/)',
         type=str, action='append', default=[], dest='merged_urls_addr')
     parser.add_argument('--merged-operator-address',
         help='node operator payout address for merged chain (e.g., Dogecoin address). If not provided, parent chain address will be converted to merged chain format',

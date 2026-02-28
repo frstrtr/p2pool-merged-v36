@@ -448,7 +448,7 @@ Store blockchain data **inside the WSL2 filesystem** (e.g., `~/.litecoin/`), not
 ## Option 2: Docker on WSL2
 
 The project ships a root `Dockerfile`, `docker-compose.yml`, and `.env.example` for
-one-command deployment. Tested: image builds in ~60s, image size ~180MB compressed.
+one-command deployment. Tested: first build ~3 min (cached builds instant), P2Pool image ~757MB, MM-Adapter ~226MB.
 
 ### Prerequisites
 - [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) with WSL2 backend enabled

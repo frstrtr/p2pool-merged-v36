@@ -21,6 +21,11 @@ ltc_scrypt.so
 .github/
 enable_opnsense_ssh.sh
 # Sensitive configuration files with passwords/credentials
+.env
+.env.*
+!.env.example
+mm-adapter/config.docker.yaml
+mm-adapter/config_mainnet.yaml
 monitor_sync.sh
 claude.md
 .ai-memory.md

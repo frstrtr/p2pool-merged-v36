@@ -59,4 +59,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD pypy -c "import urllib2; urllib2.urlopen('http://localhost:9327/local_stats').read()" || exit 1
 
 ENTRYPOINT ["pypy", "run_p2pool.py"]
-CMD ["--help"]
+CMD ["--net", "litecoin", "--help"]

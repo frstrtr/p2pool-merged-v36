@@ -2,6 +2,19 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.08-alpha] - 2026-02-28
+
+### Features
+- **Docker deployment** — Added root `Dockerfile` (multi-stage: Ubuntu 22.04 + PyPy 2.7 + all deps), `docker-compose.yml` (P2Pool + MM-Adapter with healthchecks), `.env.example`, `.dockerignore`, and `mm-adapter/config.docker.example.yaml`. Full merged mining stack starts with `docker compose up -d`.
+- **README Docker quick start** — Added Docker quick start section with build time estimates and share sync notes.
+- **Windows deployment guide update** — `docs/WINDOWS_DEPLOYMENT.md` Option 2 (Docker) now references the shipped Docker files instead of inline Dockerfile/compose.
+
+### Bug Fixes
+- **fix: `--help` crash** — `--merged_addr` argparse help string had a bare `%` in `payout%http://...` that caused `ValueError: unsupported format character` during `--help` rendering. Escaped as `%%`.
+- **fix: mm-adapter Dockerfile port** — Changed `EXPOSE 44555` to `EXPOSE 44556` to match the actual default server port.
+
+---
+
 ## [v36-0.07-alpha] - 2026-02-28
 
 ### Features & Improvements

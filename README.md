@@ -96,6 +96,9 @@ The installation guide covers:
 
 ### Docker (fastest)
 
+Requires [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/).
+First build takes ~3 minutes; subsequent starts are instant. Share chain sync takes ~2 minutes after first start.
+
 ```bash
 git clone https://github.com/frstrtr/p2pool-merged-v36.git
 cd p2pool-merged-v36
@@ -104,14 +107,19 @@ cd p2pool-merged-v36
 cp .env.example .env                                    # edit: set passwords and LTC payout address
 cp mm-adapter/config.docker.example.yaml mm-adapter/config.docker.yaml  # edit: set DOGE credentials
 
-# Start everything
+# Start everything (builds on first run)
 docker compose up -d
 
-# Dashboard
-open http://localhost:9327/static/dashboard.html
+# Check status
+docker compose ps          # both containers should show "healthy"
+docker compose logs -f     # watch startup logs
+
+# Dashboard — available once share chain syncs
+# http://localhost:9327/static/dashboard.html
 ```
 
-See [docker-compose.yml](docker-compose.yml) and [.env.example](.env.example) for all options.
+See [docker-compose.yml](docker-compose.yml) and [.env.example](.env.example) for all settings.
+For standalone LTC-only mode (no Dogecoin), see [WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md#option-2-docker-on-wsl2).
 
 ### Manual Install (Linux/WSL2)
 
