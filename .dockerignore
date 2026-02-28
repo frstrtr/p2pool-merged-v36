@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+docs/
+*.md
+!README.md
+CHANGELOG.md
+INSTALL.md
+COPYING
+
+# Development
+dev/
+tests/
+patches/
+*.pyc
+__pycache__
+.pytest_cache
+.coverage
+
+# Build artifacts
+*.egg-info
+build/
+dist/
+litecoin_scrypt/*.o
+litecoin_scrypt/*.so
+litecoin_scrypt/*.egg-info
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.env
+.env.*
+!.env.example
+docker-compose*.yml
+Dockerfile
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MM-Adapter (separate build context)
+mm-adapter/venv/
+mm-adapter/__pycache__/
+mm-adapter/config.yaml
+mm-adapter/config.docker.yaml
+mm-adapter/config_mainnet.yaml

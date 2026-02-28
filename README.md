@@ -94,7 +94,28 @@ The installation guide covers:
 
 ## 🚀 Quick Start: Litecoin + Dogecoin Merged Mining
 
-### Prerequisites
+### Docker (fastest)
+
+```bash
+git clone https://github.com/frstrtr/p2pool-merged-v36.git
+cd p2pool-merged-v36
+
+# Configure
+cp .env.example .env                                    # edit: set passwords and LTC payout address
+cp mm-adapter/config.docker.example.yaml mm-adapter/config.docker.yaml  # edit: set DOGE credentials
+
+# Start everything
+docker compose up -d
+
+# Dashboard
+open http://localhost:9327/static/dashboard.html
+```
+
+See [docker-compose.yml](docker-compose.yml) and [.env.example](.env.example) for all options.
+
+### Manual Install (Linux/WSL2)
+
+#### Prerequisites
 
 1. **Litecoin Core** (v0.21+) - Fully synced on mainnet
 2. **Dogecoin Core** (v1.14.7+) - Fully synced on mainnet

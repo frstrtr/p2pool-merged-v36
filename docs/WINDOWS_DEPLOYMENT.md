@@ -447,62 +447,50 @@ Store blockchain data **inside the WSL2 filesystem** (e.g., `~/.litecoin/`), not
 
 ## Option 2: Docker on WSL2
 
-For users who prefer full-stack containerization. This requires building a Docker image since the project doesn't ship a root Dockerfile yet.
+The project ships a root `Dockerfile`, `docker-compose.yml`, and `.env.example` for
+one-command deployment. Tested: image builds in ~60s, image size ~180MB compressed.
 
 ### Prerequisites
 - [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) with WSL2 backend enabled
+  (or Docker Engine installed directly in WSL2: `curl -fsSL https://get.docker.com | sudo sh`)
 - 8GB+ RAM, 120GB+ free disk
 
-### Step 1 — Create Dockerfile
+### Step 1 — Configure
 
-Save this as `Dockerfile` in the project root:
+```bash
+cd ~/p2pool-merged-v36
 
-```dockerfile
-# p2pool node with PyPy 2.7
-FROM ubuntu:22.04
+# Create .env with your credentials and payout address
+cp .env.example .env
+# Edit .env: set LTC_RPC_PASSWORD, DOGE_RPC_PASSWORD, LTC_PAYOUT_ADDRESS, daemon IPs
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# System deps
-RUN apt-get update && apt-get install -y \
-    wget build-essential libssl-dev libffi-dev curl && \
-    rm -rf /var/lib/apt/lists/*
-
-# PyPy 2.7 (tarball — snap doesn't work in Docker)
-RUN cd /opt && \
-    wget -q https://downloads.python.org/pypy/pypy2.7-v7.3.17-linux64.tar.bz2 && \
-    tar xjf pypy2.7-v7.3.17-linux64.tar.bz2 && \
-    ln -s /opt/pypy2.7-v7.3.17-linux64/bin/pypy /usr/local/bin/pypy && \
-    rm pypy2.7-v7.3.17-linux64.tar.bz2
-
-# pip for PyPy
-RUN cd /tmp && \
-    wget -q https://bootstrap.pypa.io/pip/2.7/get-pip.py && \
-    pypy get-pip.py && \
-    rm get-pip.py
-
-# Python deps (pin incremental first — see Step 6 note)
-RUN pypy -m pip install --no-cache-dir 'incremental<22' && \
-    pypy -m pip install --no-cache-dir \
-    twisted==20.3.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22' ecdsa
-
-# Copy p2pool source
-WORKDIR /app
-COPY . /app
-
-# Stratum + P2P + Web
-EXPOSE 9327 9326
-
-ENTRYPOINT ["pypy", "run_p2pool.py"]
+# Create MM-Adapter config
+cp mm-adapter/config.docker.example.yaml mm-adapter/config.docker.yaml
+# Edit config.docker.yaml: set upstream DOGE credentials and host
 ```
 
 ### Step 2 — Build and Run
 
+```bash
+# Build and start both P2Pool + MM-Adapter
+docker compose up -d
+
+# Check status
+docker compose ps
+docker compose logs -f p2pool    # watch P2Pool logs
+docker compose logs -f mm-adapter # watch adapter logs
+
+# Dashboard
+# Open http://localhost:9327/static/dashboard.html
+```
+
+### Step 3 — Standalone mode (manual docker run, no compose)
+
 ```powershell
-# From the project directory in PowerShell or WSL terminal
+# Build image
 docker build -t p2pool-ltc .
 
-# Run with merged mining (daemons on LAN)
+# Run LTC-only (no merged mining)
 docker run -d --name p2pool `
     -p 9327:9327 -p 9326:9326 `
     -v p2pool-data:/app/data `
@@ -511,12 +499,6 @@ docker run -d --name p2pool `
     --coind-address <LTC_DAEMON_IP> `
     --coind-rpc-port 9332 `
     --coind-p2p-port 9333 `
-    --merged-coind-address host.docker.internal `
-    --merged-coind-rpc-port 44556 `
-    --merged-coind-p2p-port 22556 `
-    --merged-coind-p2p-address <DOGE_DAEMON_IP> `
-    --merged-coind-rpc-user dogecoinrpc `
-    --merged-coind-rpc-password <DOGE_RPC_PASSWORD> `
     -a <YOUR_LTC_ADDRESS> `
     --disable-upnp `
     litecoinrpc <LTC_RPC_PASSWORD>
@@ -526,48 +508,15 @@ docker run -d --name p2pool `
 > Windows host or in another WSL2 distro. For LAN daemons, use their actual
 > LAN IPs directly (Docker with bridge networking can route to LAN).
 
-### Docker Compose (Full Stack)
+### Docker file reference
 
-Create `docker-compose.yml`:
-```yaml
-version: "3.9"
-
-services:
-  p2pool:
-    build: .
-    ports:
-      - "9327:9327"
-      - "9326:9326"
-    volumes:
-      - p2pool-data:/app/data
-    command: >
-      --net litecoin
-      --coind-address <LTC_DAEMON_IP>
-      --coind-rpc-port 9332
-      --coind-p2p-port 9333
-      --merged-coind-address mm-adapter
-      --merged-coind-rpc-port 44556
-      --merged-coind-p2p-port 22556
-      --merged-coind-p2p-address <DOGE_DAEMON_IP>
-      --merged-coind-rpc-user dogecoinrpc
-      --merged-coind-rpc-password <DOGE_RPC_PASSWORD>
-      -a <YOUR_LTC_ADDRESS>
-      --disable-upnp
-      --redistribute boost
-      litecoinrpc <LTC_RPC_PASSWORD>
-    depends_on:
-      - mm-adapter
-
-  mm-adapter:
-    build: ./mm-adapter
-    ports:
-      - "44556:44556"
-    volumes:
-      - ./mm-adapter/config_mainnet.yaml:/app/config.yaml
-
-volumes:
-  p2pool-data:
-```
+| File | Purpose |
+|------|---------|
+| [`Dockerfile`](../Dockerfile) | Multi-stage build: Ubuntu 22.04 + PyPy 2.7 + all deps |
+| [`docker-compose.yml`](../docker-compose.yml) | Full stack: P2Pool + MM-Adapter with health checks |
+| [`.env.example`](../.env.example) | All configurable settings (passwords, IPs, ports, fees) |
+| [`mm-adapter/config.docker.example.yaml`](../mm-adapter/config.docker.example.yaml) | Docker-specific adapter config template |
+| [`.dockerignore`](../.dockerignore) | Keeps image small (~180MB) by excluding docs, tests, git |
 
 ---
 
