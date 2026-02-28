@@ -2,7 +2,7 @@
 
 **Date:** December 20, 2025  
 **Dogecoin Version Tested:** 1.14.9 (latest release)  
-**Test Environment:** Dogecoin Core testnet on 192.168.80.182
+**Test Environment:** Dogecoin Core testnet on YOUR_SERVER_IP
 
 ## Summary
 
@@ -265,7 +265,7 @@ Both produce valid auxpow blocks.
 
 1. **Deploy patched Dogecoin Core to testnet**
    ```bash
-   # On 192.168.80.182
+   # On YOUR_SERVER_IP
    cd ~/dogecoin-auxpow-gbt
    git checkout feature/getblocktemplate-auxpow
    make -j$(nproc)
@@ -303,7 +303,7 @@ Both produce valid auxpow blocks.
 ## Test Environment Details
 
 ```
-Server: 192.168.80.182
+Server: YOUR_SERVER_IP
 Dogecoin Version: 1.14.9 (latest)
 Network: testnet
 RPC Port: 44556

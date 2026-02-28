@@ -312,7 +312,7 @@ Compact JSON payload:
 UTF-8 encoded text, max 220 bytes.
 
 ```
-Hello from LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc! First PoW-authenticated message.
+Hello from YOUR_LTC_ADDRESS! First PoW-authenticated message.
 ```
 
 ### POOL_ANNOUNCE (0x03)

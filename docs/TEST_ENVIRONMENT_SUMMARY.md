@@ -80,7 +80,7 @@ This test infrastructure package contains everything needed to set up and run me
 
 ### Option A: Guided Setup (Recommended)
 ```bash
-cd /home/user0/Github/p2pool-dash
+cd /home/YOUR_USER/Github/p2pool-dash
 bash setup_test_infrastructure.sh
 # Follow interactive menu
 ```
@@ -143,7 +143,7 @@ bash setup_test_infrastructure.sh
 ### VM Specifications
 | VM | IP | CPU | RAM | Disk | Purpose |
 |----|----|----|----|----|---------|
-| doge-testnet-auxpow | DOGE_DAEMON_IP / YOUR_PUBLIC_IP_1 | 4 | 8GB | 500GB | ✅ Dogecoin testnet + auxpow + systemd (DEPLOYED) |
+| YOUR_DOGE_HOSTNAME | DOGE_DAEMON_IP / YOUR_PUBLIC_IP_1 | 4 | 8GB | 500GB | ✅ Dogecoin testnet + auxpow + systemd (DEPLOYED) |
 | ltc-testnet | LTC_DAEMON_IP / YOUR_PUBLIC_IP_2 | 4 | 8GB | 420GB | ✅ Litecoin testnet + systemd (DEPLOYED) |
 - **Network**: INTERNAL_SUBNET
 - **Gateway**: GATEWAY_IP

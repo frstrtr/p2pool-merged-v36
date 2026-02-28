@@ -16,7 +16,7 @@ This test environment uses **Scrypt coins (Dogecoin + Litecoin)** which feature:
 Dogecoin Testnet (auxpow)  → DOGE_DAEMON_IP / YOUR_PUBLIC_IP_1 (RPC: 44555)
 Litecoin Testnet           → LTC_DAEMON_IP / YOUR_PUBLIC_IP_2 (RPC: 18332)
 P2Pool Aggregator          → DOGE_VM_IP (Stratum: 7903)
-External IP                → 102.115.4.171
+External IP                → YOUR_PUBLIC_IP
 ASIC Miner 1               → MINER_IP_1
 ASIC Miner 2               → MINER_IP_2
 ASIC Miner 3               → MINER_IP_3
@@ -28,14 +28,14 @@ ASIC Miner 3               → MINER_IP_3
 
 ### SSH into VMs
 ```bash
-# Dogecoin testnet (doge-testnet-auxpow)
-ssh user0@DOGE_DAEMON_IP
+# Dogecoin testnet (YOUR_DOGE_HOSTNAME)
+ssh YOUR_USER@DOGE_DAEMON_IP
 
-# Litecoin testnet (ltc-testnet)
-ssh user0@LTC_DAEMON_IP
+# Litecoin testnet (YOUR_LTC_HOSTNAME)
+ssh YOUR_USER@LTC_DAEMON_IP
 
 # P2Pool node
-ssh user0@DOGE_VM_IP
+ssh YOUR_USER@DOGE_VM_IP
 ```
 
 ---
@@ -43,25 +43,25 @@ ssh user0@DOGE_VM_IP
 ## Node Configuration
 
 ### Dogecoin Testnet (DOGE_DAEMON_IP)
-- **Hostname**: doge-testnet-auxpow
+- **Hostname**: YOUR_DOGE_HOSTNAME
 - **RPC Port**: 44555 (testnet)
 - **P2P Port**: 44556
 - **RPC User**: dogeuser
-- **RPC Password**: dogepass123secure
-- **External IP**: 102.115.4.171:44556
+- **RPC Password**: YOUR_DOGE_RPC_PASSWORD
+- **External IP**: YOUR_PUBLIC_IP:44556
 - **Service**: systemd (dogecoind.service) - enabled
-- **Binary**: /home/user0/dogecoin-1.14.8/bin/dogecoind
+- **Binary**: /home/YOUR_USER/dogecoin-1.14.8/bin/dogecoind
 - **Config**: ~/.dogecoin/dogecoin.conf
 
 ### Litecoin Testnet (LTC_DAEMON_IP)
-- **Hostname**: ltc-testnet
+- **Hostname**: YOUR_LTC_HOSTNAME
 - **RPC Port**: 18332 (testnet)
 - **P2P Port**: 18333
 - **RPC User**: litecoinrpc
-- **RPC Password**: litecoinrpc_testnet_1767955680
-- **External IP**: 102.115.4.171:18333
+- **RPC Password**: YOUR_LTC_RPC_PASSWORD
+- **External IP**: YOUR_PUBLIC_IP:18333
 - **Service**: systemd (litecoind.service) - enabled
-- **Binary**: /home/user0/.local/bin/litecoind
+- **Binary**: /home/YOUR_USER/.local/bin/litecoind
 - **Config**: ~/.litecoin/litecoin.conf
 
 ---
@@ -71,52 +71,52 @@ ssh user0@DOGE_VM_IP
 ### Node Status & Monitoring
 ```bash
 # Get blockchain info
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getblockchaininfo
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getblockchaininfo
 
 # Get network info
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getnetworkinfo
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getnetworkinfo
 
 # Count connected peers
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getpeerinfo | jq length
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getpeerinfo | jq length
 
 # Get block count
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getblockcount
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getblockcount
 
 # Monitor sync progress (real-time)
-watch "dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getblockchaininfo | jq '{blocks, headers, progress: .verificationprogress}'"
+watch "dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getblockchaininfo | jq '{blocks, headers, progress: .verificationprogress}'"
 
 # Check auxpow support
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure help getauxblock | head -10
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD help getauxblock | head -10
 
 # Test AuxPoW API
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getauxblock
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getauxblock
 ```
 
 ### Wallet Operations
 ```bash
 # Get new address
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getnewaddress
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getnewaddress
 
 # Get address balance
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getbalance
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getbalance
 
 # Validate address
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure validateaddress YOUR_ADDRESS
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD validateaddress YOUR_ADDRESS
 
 # Get received by address
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getreceivedbyaddress YOUR_ADDRESS
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getreceivedbyaddress YOUR_ADDRESS
 ```
 
 ### Mining Related
 ```bash
 # Get mining info
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getmininginfo
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getmininginfo
 
 # Get block template
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getblocktemplate
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getblocktemplate
 
 # Get auxblock (for merged mining)
-dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=dogepass123secure getauxblock
+dogecoin-cli -testnet -rpcuser=dogeuser -rpcpassword=YOUR_DOGE_RPC_PASSWORD getauxblock
 ```
 
 ### Service Management

@@ -18,7 +18,7 @@ QcVudrUyKGwqjk4KWadnXfbHgnMVHB1Lif
 
 ### Bech32 (Native Segwit) - **RECOMMENDED**
 ```
-tltc1qpkcpgwl24flh35mknlsf374x8ypqv7de6esjh4
+YOUR_TLTC_ADDRESS
 ```
 - Native segwit format (starts with tltc1)
 - Lowest transaction fees
@@ -61,8 +61,8 @@ litecoin-cli -testnet listreceivedbyaddress 0 true
 
 ### Check Dogecoin Balance
 ```bash
-/home/user0/bin/dogecoin-cli -testnet getbalance
-/home/user0/bin/dogecoin-cli -testnet listreceivedbyaddress 0 true
+/home/YOUR_USER/bin/dogecoin-cli -testnet getbalance
+/home/YOUR_USER/bin/dogecoin-cli -testnet listreceivedbyaddress 0 true
 ```
 
 ### Generate New Addresses
@@ -73,7 +73,7 @@ litecoin-cli -testnet getnewaddress 'p2pool-mining' 'p2sh-segwit'
 litecoin-cli -testnet getnewaddress 'p2pool-mining' 'bech32'
 
 # Dogecoin
-/home/user0/bin/dogecoin-cli -testnet getnewaddress 'p2pool-mining'
+/home/YOUR_USER/bin/dogecoin-cli -testnet getnewaddress 'p2pool-mining'
 ```
 
 ## Mining Configuration
@@ -81,14 +81,14 @@ litecoin-cli -testnet getnewaddress 'p2pool-mining' 'bech32'
 The P2Pool instance is configured to use:
 - **Primary chain**: Litecoin testnet (port 19332)
 - **Merged mining**: Dogecoin testnet (port 44555)
-- **Payout address**: tltc1qpkcpgwl24flh35mknlsf374x8ypqv7de6esjh4 (native segwit)
+- **Payout address**: YOUR_TLTC_ADDRESS (native segwit)
 - **Worker port**: 9327
 - **P2Pool port**: 9338
 
 ### Connect Miners
 Point your Scrypt miner to:
 ```
-stratum+tcp://192.168.80.182:9327
+stratum+tcp://YOUR_SERVER_IP:9327
 ```
 
 Username: Your Litecoin testnet address (for custom payouts)  
@@ -96,7 +96,7 @@ Password: x (or anything)
 
 Example with cpuminer:
 ```bash
-cpuminer -a scrypt -o stratum+tcp://192.168.80.182:9327 -u tltc1qpkcpgwl24flh35mknlsf374x8ypqv7de6esjh4 -p x
+cpuminer -a scrypt -o stratum+tcp://YOUR_SERVER_IP:9327 -u YOUR_TLTC_ADDRESS -p x
 ```
 
 ## Notes

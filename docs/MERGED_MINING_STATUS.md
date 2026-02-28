@@ -172,20 +172,20 @@ merged_proxy.rpc_submitblock(dogecoin_block.encode('hex'))
 ### File Locations
 
 #### Local Development
-- **P2Pool**: /home/user0/Documents/GitHub/p2pool-dash
-- **Reference Repo**: /home/user0/Documents/GitHub/jtoomim-p2pool
-- **Modified Dogecoin Repo**: /home/user0/dogecoin-auxpow-gbt
+- **P2Pool**: /home/YOUR_USER/Documents/GitHub/p2pool-dash
+- **Reference Repo**: /home/YOUR_USER/Documents/GitHub/jtoomim-p2pool
+- **Modified Dogecoin Repo**: /home/YOUR_USER/dogecoin-auxpow-gbt
 
-#### Remote Server (192.168.80.182)
-- **P2Pool**: /home/user0/p2pool-dash
-- **Dogecoin Binaries**: /home/user0/bin-auxpow/
-- **Dogecoin Libraries**: /home/user0/lib/
-- **Startup Script**: /home/user0/start-dogecoin-auxpow.sh
-- **Dogecoin Source**: /home/user0/dogecoin-auxpow-gbt (not built on server)
-- **Litecoin Binaries**: /home/user0/bin/
+#### Remote Server (YOUR_SERVER_IP)
+- **P2Pool**: /home/YOUR_USER/p2pool-dash
+- **Dogecoin Binaries**: /home/YOUR_USER/bin-auxpow/
+- **Dogecoin Libraries**: /home/YOUR_USER/lib/
+- **Startup Script**: /home/YOUR_USER/start-dogecoin-auxpow.sh
+- **Dogecoin Source**: /home/YOUR_USER/dogecoin-auxpow-gbt (not built on server)
+- **Litecoin Binaries**: /home/YOUR_USER/bin/
 - **Blockchain Data**:
-  - Litecoin: /home/user0/.litecoin/testnet4/
-  - Dogecoin: /home/user0/.dogecoin/testnet3/
+  - Litecoin: /home/YOUR_USER/.litecoin/testnet4/
+  - Dogecoin: /home/YOUR_USER/.dogecoin/testnet3/
 
 ### Key Code Files
 
@@ -302,15 +302,15 @@ merged_proxy.rpc_submitblock(dogecoin_block.encode('hex'))
 ### Resources
 
 #### Documentation
-- **Modified Dogecoin Impl**: /home/user0/dogecoin-auxpow-gbt/IMPLEMENTATION_SUMMARY.md
-- **Refactor Plan**: /home/user0/Documents/GitHub/p2pool-dash/MERGED_MINING_REFACTOR_PLAN.md
-- **Address Guide**: /home/user0/Documents/GitHub/p2pool-dash/TESTNET_ADDRESSES.md
-- **Test Report**: /home/user0/dogecoin-auxpow-gbt/TEST_REPORT.md
+- **Modified Dogecoin Impl**: /home/YOUR_USER/dogecoin-auxpow-gbt/IMPLEMENTATION_SUMMARY.md
+- **Refactor Plan**: /home/YOUR_USER/Documents/GitHub/p2pool-dash/MERGED_MINING_REFACTOR_PLAN.md
+- **Address Guide**: /home/YOUR_USER/Documents/GitHub/p2pool-dash/TESTNET_ADDRESSES.md
+- **Test Report**: /home/YOUR_USER/dogecoin-auxpow-gbt/TEST_REPORT.md
 
 #### Reference Code
-- **jtoomim P2Pool**: /home/user0/Documents/GitHub/jtoomim-p2pool
-- **Modified Dogecoin**: /home/user0/dogecoin-auxpow-gbt/src/rpc/mining.cpp (lines 370-781)
-- **P2Pool Work Module**: /home/user0/Documents/GitHub/p2pool-dash/p2pool/work.py
+- **jtoomim P2Pool**: /home/YOUR_USER/Documents/GitHub/jtoomim-p2pool
+- **Modified Dogecoin**: /home/YOUR_USER/dogecoin-auxpow-gbt/src/rpc/mining.cpp (lines 370-781)
+- **P2Pool Work Module**: /home/YOUR_USER/Documents/GitHub/p2pool-dash/p2pool/work.py
 
 #### Key Git Commits
 - **Segwit/MWEB Support**: Local changes in feature/scrypt-litecoin-dogecoin
@@ -343,7 +343,7 @@ merged_proxy.rpc_submitblock(dogecoin_block.encode('hex'))
 
 ### Contact Information
 
-- **User**: user0@192.168.80.182
+- **User**: YOUR_USER@YOUR_SERVER_IP
 - **Modified Dogecoin Repo**: frstrtr/dogecoin-auxpow-gbt
 - **P2Pool Repo**: Local fork with feature/scrypt-litecoin-dogecoin branch
 

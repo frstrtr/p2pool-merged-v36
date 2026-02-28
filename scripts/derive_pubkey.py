@@ -28,7 +28,7 @@ def main():
     print("=" * 60)
     print("Derive compressed pubkey from BIP39 mnemonic")
     print("Target pubkey hash: %s" % TARGET_PKH)
-    print("Target Dash address: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u")
+    print("Target Dash address: YOUR_DASH_ADDRESS")
     print("Target LTC address:  LU66WRMeuxt45vwGh9bWopRsBaZ8owBAb6")
     print("=" * 60)
     print()

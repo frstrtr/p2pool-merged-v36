@@ -582,10 +582,10 @@ A retro BBS-style page at `http://node:9327/static/bbs.html`:
 ├─────────────────────────────────────────────────────────┤
 │  [Chat] [Announcements] [Alerts] [Node Status] [Keys]  │
 ├─────────────────────────────────────────────────────────┤
-│  #42  LVzy9...azc  ✅verified  2m ago                   │
+│  #42  LtcAd...azc  ✅verified  2m ago                   │
 │  > hello from miner A!                                  │
 │                                                         │
-│  #41  LRF2Z...DDp  ✅verified  5m ago                   │
+│  #41  LtcBd...xyz  ✅verified  5m ago                   │
 │  > merged mining DOGE working great                     │
 │                                                         │
 │  #40  LiF7n...3s3  ⚠️unverified  8m ago                 │
@@ -652,7 +652,7 @@ The master_WIF should NEVER leave this machine.
 
 Output:
 ```
-Master address:  LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc
+Master address:  YOUR_LTC_ADDRESS
 Key index:       0
 Signing key WIF: <derived_key_WIF>
 Signing ID:      a1b2c3d4e5f6...
@@ -815,7 +815,7 @@ class BanList(object):
 
 ```
 POST   /msg/ban    {"signing_id": "a1b2c3..."}    Ban a sender
-POST   /msg/ban    {"address": "LVzy9..."}         Ban an address
+POST   /msg/ban    {"address": "LtcAd..."}         Ban an address
 POST   /msg/ban    {"word": "spam"}                Ban a keyword
 DELETE /msg/ban    {"signing_id": "a1b2c3..."}     Unban a sender
 GET    /msg/bans                                    List all bans

@@ -13,7 +13,7 @@ P2Pool now supports **TWO** extranonce subscription methods for maximum ASIC com
 
 Both methods work simultaneously and provide the same functionality.
 
-## Changes Made to `/home/user0/Github/p2pool-dash/p2pool/dash/stratum.py`
+## Changes Made to `/home/YOUR_USER/Github/p2pool-dash/p2pool/dash/stratum.py`
 
 ### 1. Added State Tracking (Lines 27-30)
 ```python
@@ -63,7 +63,7 @@ def _notify_extranonce_change(self, new_extranonce1=None):
 
 Run the test script:
 ```bash
-python3 /home/user0/Github/p2pool-dash/test_extranonce.py
+python3 /home/YOUR_USER/Github/p2pool-dash/test_extranonce.py
 ```
 
 Expected results:
@@ -75,24 +75,24 @@ Expected results:
 
 1. Stop P2Pool:
 ```bash
-ssh user0@DASH_VM_IP 'screen -S p2pool_dash -X quit'
+ssh YOUR_USER@DASH_VM_IP 'screen -S p2pool_dash -X quit'
 ```
 
 2. Copy updated files:
 ```bash
 rsync -avz --exclude='.git' --exclude='*.pyc' --exclude='__pycache__' \
-  /home/user0/Github/p2pool-dash/ \
-  user0@DASH_VM_IP:/home/user0/p2pool-dash/
+  /home/YOUR_USER/Github/p2pool-dash/ \
+  YOUR_USER@DASH_VM_IP:/home/YOUR_USER/p2pool-dash/
 ```
 
 3. Restart P2Pool:
 ```bash
-ssh user0@DASH_VM_IP 'cd /home/user0/p2pool-dash && screen -S p2pool_dash -d -m python2 run_p2pool.py --net dash XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u'
+ssh YOUR_USER@DASH_VM_IP 'cd /home/YOUR_USER/p2pool-dash && screen -S p2pool_dash -d -m python2 run_p2pool.py --net dash YOUR_DASH_ADDRESS'
 ```
 
 4. Verify:
 ```bash
-python3 /home/user0/Github/p2pool-dash/test_extranonce.py DASH_VM_IP 7903
+python3 /home/YOUR_USER/Github/p2pool-dash/test_extranonce.py DASH_VM_IP 7903
 ```
 
 ## Benefits

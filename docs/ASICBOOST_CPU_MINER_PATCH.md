@@ -452,4 +452,4 @@ For CPU miners, version-rolling has **zero performance benefit** - it's purely f
 
 - BIP320: https://github.com/bitcoin/bips/blob/master/bip-0320.mediawiki
 - BIP310: https://github.com/bitcoin/bips/blob/master/bip-0310.mediawiki
-- P2Pool Stratum: `/home/user0/Github/p2pool-dash/p2pool/dash/stratum.py`
+- P2Pool Stratum: `/home/YOUR_USER/Github/p2pool-dash/p2pool/dash/stratum.py`

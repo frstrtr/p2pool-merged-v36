@@ -49,7 +49,7 @@ def test_asicboost(host, port):
     
     # 3. Test mining.authorize
     print("\n3. Testing mining.authorize...")
-    resp = send_stratum(sock, "mining.authorize", ["XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u", "x"], msg_id=3)
+    resp = send_stratum(sock, "mining.authorize", ["YOUR_DASH_ADDRESS", "x"], msg_id=3)
     
     sock.close()
     print("\n=== Test Complete ===\n")

@@ -3,7 +3,7 @@
 ## Current Status
 
 **Date:** December 20, 2025  
-**Server:** 192.168.80.182  
+**Server:** YOUR_SERVER_IP  
 **Version:** v1.14.99.0-436b09bb8 (with auxpow support)
 
 ### Sync Progress

@@ -73,8 +73,11 @@ The installation guide covers:
 - ✅ Standalone vs Multi-node configuration
 - ✅ Common issues and solutions (OpenSSL, missing modules, etc.)
 - ✅ Performance tuning and security
+- ✅ **macOS (Intel)** setup via Homebrew (PyPy 2.7 + MM-Adapter)
 
 > **Windows users**: See **[WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md)** for WSL2, Docker, and native Windows setup instructions.
+>
+> **macOS (Intel) users**: See the **[macOS section in INSTALL.md](INSTALL.md#macos-intel-installation)** for Homebrew-based setup — tested on macOS 26.x (x86_64).
 
 ### Other Documentation
 
@@ -260,7 +263,7 @@ stratum+tcp://YOUR_IP:9327
 
 **Example:**
 ```
-Username: LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc,DFv7Rp94R9sQvo4PV5STp2qJPsBCprauFe.rig1
+Username: YOUR_LTC_ADDRESS,YOUR_DOGE_ADDRESS.rig1
 Password: x
 ```
 

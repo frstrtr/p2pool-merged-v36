@@ -23,7 +23,7 @@ Set up isolated private testnet for end-to-end V36 block finding:
 - Was running p2pool as bare process (PID 53861), not in screen
 - Had a systemd `p2pool.service` but it was **disabled/inactive** (leftover Bitcoin Cash config)
 - Also killed stuck debug script (PID 54268)
-- Command was: `pypy run_p2pool.py --net litecoin --bitcoind-address LTC_DAEMON_IP --bitcoind-rpc-port 9332 --bitcoind-p2p-port 9333 --address LbxJe7Nf59gv2vK7Mw8kEa6aWFDHjwsf2E --give-author 2 -f 0 --disable-upnp --max-conns 20 --debug litecoinrpc YOUR_LTC_RPC_PASSWORD`
+- Command was: `pypy run_p2pool.py --net litecoin --bitcoind-address LTC_DAEMON_IP --bitcoind-rpc-port 9332 --bitcoind-p2p-port 9333 --address YOUR_LTC_ADDRESS_C --give-author 2 -f 0 --disable-upnp --max-conns 20 --debug litecoinrpc YOUR_LTC_RPC_PASSWORD`
 - No merged mining configured on node 30
 
 ### Phase 2: Sharechain Backups ✅
@@ -54,35 +54,35 @@ Set up isolated private testnet for end-to-end V36 block finding:
 
 ### Phase 4: Blockchain Backup to Storage ✅ (rsync running)
 
-**Storage server:** MINER_IP_4 (10G interface: 10.10.10.40)
+**Storage server:** MINER_IP_4 (10G interface: STORAGE_SERVER)
 **Storage path:** `/media/nvme2tb/` (331G available, 81% used)
 
 **10G interfaces activated:**
-- LTC node: `10.10.10.26/24` on `ens224` ✅
-- DOGE node: `10.10.10.27/24` on `ens224` ✅
-- Storage: `10.10.10.40` on `eno49` (already up) ✅
+- LTC node: `STORAGE_NET_LTC/24` on `ens224` ✅
+- DOGE node: `STORAGE_NET_DOGE/24` on `ens224` ✅
+- Storage: `STORAGE_SERVER` on `eno49` (already up) ✅
 
 **Backups (rsync delta update from Jan 29 backups):**
 ```bash
 # Litecoin (228G total, delta from Jan 29)
-ssh user0@LTC_DAEMON_IP "rsync -av --progress --delete \
-    /litecoin-blockchain/mainnet/ user0@10.10.10.40:/media/nvme2tb/.litecoin-mainnet/ \
+ssh YOUR_USER@LTC_DAEMON_IP "rsync -av --progress --delete \
+    /litecoin-blockchain/mainnet/ YOUR_USER@STORAGE_SERVER:/media/nvme2tb/.litecoin-mainnet/ \
     --exclude='.lock' --exclude='*.pid' --exclude='debug.log'"
 
 # Dogecoin (132G total, delta from Jan 29)
-ssh user0@DOGE_DAEMON_IP "rsync -av --progress --delete \
-    /dogecoin-blockchain/mainnet/ user0@10.10.10.40:/media/nvme2tb/.dogecoin-mainnet/ \
+ssh YOUR_USER@DOGE_DAEMON_IP "rsync -av --progress --delete \
+    /dogecoin-blockchain/mainnet/ YOUR_USER@STORAGE_SERVER:/media/nvme2tb/.dogecoin-mainnet/ \
     --exclude='.lock' --exclude='*.pid' --exclude='debug.log'"
 
 # DOGE wallet+config (small files)
-ssh user0@DOGE_DAEMON_IP "rsync -av ~/.dogecoin/{wallet.dat,dogecoin.conf,peers.dat} \
-    user0@10.10.10.40:/media/nvme2tb/.dogecoin-mainnet/"
+ssh YOUR_USER@DOGE_DAEMON_IP "rsync -av ~/.dogecoin/{wallet.dat,dogecoin.conf,peers.dat} \
+    YOUR_USER@STORAGE_SERVER:/media/nvme2tb/.dogecoin-mainnet/"
 ```
 
 **To re-enable mainnet services after testing:**
 ```bash
-ssh -t user0@LTC_DAEMON_IP "sudo systemctl enable litecoind-mainnet.service && sudo systemctl start litecoind-mainnet.service"
-ssh -t user0@DOGE_DAEMON_IP "sudo systemctl enable dogecoind-mainnet.service && sudo systemctl start dogecoind-mainnet.service"
+ssh -t YOUR_USER@LTC_DAEMON_IP "sudo systemctl enable litecoind-mainnet.service && sudo systemctl start litecoind-mainnet.service"
+ssh -t YOUR_USER@DOGE_DAEMON_IP "sudo systemctl enable dogecoind-mainnet.service && sudo systemctl start dogecoind-mainnet.service"
 ```
 
 ### Phase 5: Dogecoin Testnet4alpha Node ✅ (Running)
@@ -127,8 +127,8 @@ litecoind -testnet -daemon
 
 | Coin | Network | Address | Validated |
 |------|---------|---------|-----------|
-| LTC  | testnet | `tltc1q98qmmw559wlpeecgxuzfjge98dljjxnsamltav` | ✅ bech32 |
-| DOGE | testnet4alpha | `nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T` | ✅ isvalid=true |
+| LTC  | testnet | `YOUR_TLTC_ADDRESS` | ✅ bech32 |
+| DOGE | testnet4alpha | `YOUR_TDOGE_ADDRESS` | ✅ isvalid=true |
 
 ### Phase 7: P2Pool Testnet Configuration ✅
 
@@ -145,8 +145,8 @@ cd ~/Github/p2pool && screen -dmS p2poolC ~/pypy2.7-v7.3.20-linux64/bin/pypy run
     --bitcoind-address LTC_DAEMON_IP --bitcoind-rpcport 19332 \
     --bitcoind-rpcuser litecoinrpc --bitcoind-rpcpassword YOUR_LTC_RPC_PASSWORD \
     --bitcoind-p2p-port 19335 \
-    -a tltc1q98qmmw559wlpeecgxuzfjge98dljjxnsamltav \
-    --merged_addr nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T%http://dogecoinrpc:testpass@DOGE_DAEMON_IP:44555/
+    -a YOUR_TLTC_ADDRESS \
+    --merged_addr YOUR_TDOGE_ADDRESS%http://dogecoinrpc:YOUR_DOGE_RPC_PASSWORD@DOGE_DAEMON_IP:44555/
 ```
 
 **RPC connectivity verified:**
@@ -169,8 +169,8 @@ cd ~/Github/p2pool && screen -dmS p2poolC ~/pypy2.7-v7.3.20-linux64/bin/pypy run
         ┌────────┴──────────────────────────────────┴───┐
         │      P2Pool jtoomim canonical (rawtx branch)   │
         │      NodeC (NODE_C_IP)                   │
-        │      LTC addr: tltc1q98qmmw559wlpeecgxuz...   │
-        │      DOGE addr: nXzx4WHrERckqvvCsZkb41Up...   │
+        │      LTC addr: YOUR_TLTC_ADDRESS_TRUNC...   │
+        │      DOGE addr: YOUR_TDOGE_ADDR_TRUNC...   │
         │      Stratum: 19327                            │
         │      P2P: 19338                                │
         └────────────────────┬──────────────────────────┘
@@ -185,27 +185,27 @@ cd ~/Github/p2pool && screen -dmS p2poolC ~/pypy2.7-v7.3.20-linux64/bin/pypy run
 
 ### P2Pool NodeA
 ```bash
-screen -dmS p2poolA bash -c 'export PATH=$HOME/pypy2.7-v7.3.20-linux64/bin:$PATH && cd ~/p2pool-merged && pypy run_p2pool.py --net litecoin --coind-address LTC_DAEMON_IP --coind-rpc-port 9332 --coind-p2p-port 9333 --merged-coind-address 127.0.0.1 --merged-coind-rpc-port 44556 --merged-coind-p2p-port 22556 --merged-coind-p2p-address DOGE_DAEMON_IP --merged-coind-rpc-user dogecoinrpc --merged-coind-rpc-password YOUR_DOGE_RPC_PASSWORD --address LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc --give-author 2 -f 0 --disable-upnp --max-conns 20 --external-ip YOUR_PUBLIC_IP --no-console litecoinrpc YOUR_LTC_RPC_PASSWORD 2>&1 | tee -a ~/p2pool-merged/data/litecoin/log'
+screen -dmS p2poolA bash -c 'export PATH=$HOME/pypy2.7-v7.3.20-linux64/bin:$PATH && cd ~/p2pool-merged && pypy run_p2pool.py --net litecoin --coind-address LTC_DAEMON_IP --coind-rpc-port 9332 --coind-p2p-port 9333 --merged-coind-address 127.0.0.1 --merged-coind-rpc-port 44556 --merged-coind-p2p-port 22556 --merged-coind-p2p-address DOGE_DAEMON_IP --merged-coind-rpc-user dogecoinrpc --merged-coind-rpc-password YOUR_DOGE_RPC_PASSWORD --address YOUR_LTC_ADDRESS --give-author 2 -f 0 --disable-upnp --max-conns 20 --external-ip YOUR_PUBLIC_IP --no-console litecoinrpc YOUR_LTC_RPC_PASSWORD 2>&1 | tee -a ~/p2pool-merged/data/litecoin/log'
 ```
 
 ### P2Pool NodeC
 ```bash
 # NodeC ran LTC-only (no merged mining), bare process:
-cd ~/p2pool-merged && pypy run_p2pool.py --net litecoin --bitcoind-address LTC_DAEMON_IP --bitcoind-rpc-port 9332 --bitcoind-p2p-port 9333 --address LbxJe7Nf59gv2vK7Mw8kEa6aWFDHjwsf2E --give-author 2 -f 0 --disable-upnp --max-conns 20 --debug litecoinrpc YOUR_LTC_RPC_PASSWORD
+cd ~/p2pool-merged && pypy run_p2pool.py --net litecoin --bitcoind-address LTC_DAEMON_IP --bitcoind-rpc-port 9332 --bitcoind-p2p-port 9333 --address YOUR_LTC_ADDRESS_C --give-author 2 -f 0 --disable-upnp --max-conns 20 --debug litecoinrpc YOUR_LTC_RPC_PASSWORD
 ```
 
 ### P2Pool NodeB
 ```bash
-screen -dmS p2poolB bash -c 'export PATH=$HOME/pypy2.7-v7.3.20-linux64/bin:$PATH && cd ~/p2pool-merged && pypy run_p2pool.py --net litecoin --coind-address LTC_DAEMON_IP --coind-rpc-port 9332 --coind-p2p-port 9333 --merged-coind-address 127.0.0.1 --merged-coind-rpc-port 44556 --merged-coind-p2p-port 22556 --merged-coind-p2p-address DOGE_DAEMON_IP --merged-coind-rpc-user dogecoinrpc --merged-coind-rpc-password YOUR_DOGE_RPC_PASSWORD --address LRF2Z9pmn1Mv4AxBkteNpzTn2gQj9G9DDp --give-author 2 -f 0 --disable-upnp --max-conns 20 --external-ip YOUR_PUBLIC_IP --no-console litecoinrpc YOUR_LTC_RPC_PASSWORD 2>&1 | tee -a ~/p2pool-merged/data/litecoin/log'
+screen -dmS p2poolB bash -c 'export PATH=$HOME/pypy2.7-v7.3.20-linux64/bin:$PATH && cd ~/p2pool-merged && pypy run_p2pool.py --net litecoin --coind-address LTC_DAEMON_IP --coind-rpc-port 9332 --coind-p2p-port 9333 --merged-coind-address 127.0.0.1 --merged-coind-rpc-port 44556 --merged-coind-p2p-port 22556 --merged-coind-p2p-address DOGE_DAEMON_IP --merged-coind-rpc-user dogecoinrpc --merged-coind-rpc-password YOUR_DOGE_RPC_PASSWORD --address YOUR_LTC_ADDRESS_B --give-author 2 -f 0 --disable-upnp --max-conns 20 --external-ip YOUR_PUBLIC_IP --no-console litecoinrpc YOUR_LTC_RPC_PASSWORD 2>&1 | tee -a ~/p2pool-merged/data/litecoin/log'
 ```
 
 ### Daemon Restart
 ```bash
 # Litecoin
-ssh user0@LTC_DAEMON_IP "sudo systemctl start litecoind-mainnet.service"
+ssh YOUR_USER@LTC_DAEMON_IP "sudo systemctl start litecoind-mainnet.service"
 
 # Dogecoin
-ssh user0@DOGE_DAEMON_IP "sudo systemctl start dogecoind-mainnet.service"
+ssh YOUR_USER@DOGE_DAEMON_IP "sudo systemctl start dogecoind-mainnet.service"
 ```
 
 ## Versioning Context

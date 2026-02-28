@@ -86,10 +86,10 @@ listen=1
 # RPC
 server=1
 rpcuser=litecoinrpc
-rpcpassword=YourSecurePassword123
+rpcpassword=YOUR_LTC_RPC_PASSWORD
 rpcport=19332
 rpcbind=0.0.0.0
-rpcallowip=192.168.80.0/24
+rpcallowip=YOUR_LAN_SUBNET
 
 # P2P
 port=19335
@@ -117,7 +117,7 @@ litecoin-cli -testnet getblockchaininfo | grep -E "chain|blocks|headers"
 
 ### 2. Dogecoin Testnet Node (Already Running!)
 
-**You already have this running at 192.168.80.182 (oplex32)**
+**You already have this running at YOUR_SERVER_IP (YOUR_DOGE_SERVER)**
 
 **Current Configuration:**
 - RPC: localhost:44555 (needs network binding)
@@ -125,9 +125,9 @@ litecoin-cli -testnet getblockchaininfo | grep -E "chain|blocks|headers"
 - Synced: ✓ 21.3M blocks
 - Auxpow: ✓ Enabled (chainid 98)
 
-**Update Configuration** (on 192.168.80.182):
+**Update Configuration** (on YOUR_SERVER_IP):
 ```bash
-ssh oplex32
+ssh YOUR_DOGE_SERVER
 nano ~/.dogecoin/dogecoin.conf
 ```
 
@@ -135,7 +135,7 @@ Add network RPC binding:
 ```ini
 # Allow RPC from p2pool server
 rpcbind=0.0.0.0
-rpcallowip=192.168.80.0/24
+rpcallowip=YOUR_LAN_SUBNET
 ```
 
 Restart:
@@ -158,12 +158,12 @@ sys.argv = [
     '--net', 'litecoin_testnet',
     
     # Litecoin RPC (parent chain)
-    '--bitcoind-address', '192.168.80.YOUR_LTC_NODE:19332',
+    '--bitcoind-address', 'YOUR_LTC_NODE:19332',
     '--bitcoind-rpc-username', 'litecoinrpc',
-    '--bitcoind-rpc-password', 'YourSecurePassword123',
+    '--bitcoind-rpc-password', 'YOUR_LTC_RPC_PASSWORD',
     
     # Dogecoin RPC (child chain for merge mining)
-    '--merged-mining', 'http://dogeuser:dogepass123@192.168.80.182:44555/',
+    '--merged-mining', 'http://dogeuser:YOUR_DOGE_RPC_PASSWORD@YOUR_SERVER_IP:44555/',
     
     # P2Pool ports
     '--p2pool-port', '19338',      # Share chain P2P
@@ -185,8 +185,8 @@ main.main()
 |---------|------|------|----------|---------|
 | Litecoin RPC | LTC node | 19332 | HTTP | getblocktemplate |
 | Litecoin P2P | LTC node | 19335 | Bitcoin P2P | Block propagation |
-| Dogecoin RPC | 192.168.80.182 | 44555 | HTTP | auxpow template |
-| Dogecoin P2P | 192.168.80.182 | 44556 | Bitcoin P2P | Block propagation |
+| Dogecoin RPC | YOUR_SERVER_IP | 44555 | HTTP | auxpow template |
+| Dogecoin P2P | YOUR_SERVER_IP | 44556 | Bitcoin P2P | Block propagation |
 | P2Pool P2P | P2Pool server | 19338 | P2Pool | Share chain |
 | P2Pool Stratum | P2Pool server | 19327 | Stratum | Miners connect |
 
@@ -201,7 +201,7 @@ python3 test_scrypt.py  # or: pypy test_scrypt.py
 
 ### 2. Test Litecoin RPC
 ```bash
-curl --user litecoinrpc:YourSecurePassword123 \
+curl --user litecoinrpc:YOUR_LTC_RPC_PASSWORD \
   --data-binary '{"jsonrpc":"1.0","id":"test","method":"getblockchaininfo","params":[]}' \
   -H 'content-type: text/plain;' \
   http://localhost:19332/
@@ -209,8 +209,8 @@ curl --user litecoinrpc:YourSecurePassword123 \
 
 ### 3. Test Dogecoin Auxpow
 ```bash
-ssh oplex32
-curl --user dogeuser:dogepass123 \
+ssh YOUR_DOGE_SERVER
+curl --user dogeuser:YOUR_DOGE_RPC_PASSWORD \
   --data-binary '{"jsonrpc":"1.0","id":"test","method":"getblocktemplate","params":[{"capabilities":["auxpow"]}]}' \
   -H 'content-type: text/plain;' \
   http://localhost:44555/
@@ -259,14 +259,14 @@ make
 
 ### Dogecoin RPC Connection Refused
 ```bash
-# On oplex32, verify RPC is listening on network
+# On YOUR_DOGE_SERVER, verify RPC is listening on network
 ss -tlnp | grep 44555
 
 # Should show: 0.0.0.0:44555 (not 127.0.0.1:44555)
 ```
 
 ### P2Pool Can't Connect to Nodes
-- Test connectivity: `telnet 192.168.80.182 44555`
+- Test connectivity: `telnet YOUR_SERVER_IP 44555`
 - Check firewall: `sudo ufw status`
 - Verify credentials in p2pool config
 

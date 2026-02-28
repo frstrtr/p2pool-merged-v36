@@ -2,6 +2,18 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.09-alpha] - 2026-03-01
+
+### Features
+- **macOS (Intel) installation guide** — New comprehensive section in `INSTALL.md` covering end-to-end setup on macOS with Intel hardware. Includes Homebrew-based PyPy 2.7 installation, dependency compilation (scrypt, coincurve/libsecp256k1), MM-Adapter venv setup, LTC+DOGE merged mining launch, `launchd` background service configuration, and firewall notes. Tested and verified on macOS 26.3 (x86_64) with full merged mining operational.
+- **README macOS callout** — Added macOS (Intel) to the platform support checklist and a direct link to the INSTALL.md macOS section.
+
+### Documentation
+- **Docs cleanup** — Replaced example-only placeholder values across all documentation, scripts, and test fixtures for consistency and clarity. Updated 38 files spanning `docs/`, `scripts/`, `tests/`, `mm-adapter/`, `README.md`, and `.gitignore`.
+- **`.gitignore` update** — Added `mm-adapter/config.yaml` to prevent accidental commits of local configuration files.
+
+---
+
 ## [v36-0.08-alpha] - 2026-02-28
 
 ### Features

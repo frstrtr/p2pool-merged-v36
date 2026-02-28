@@ -87,13 +87,13 @@ new key by incrementing `key_index` and re-running the offline derivation.
 # Run on miner's secure machine — NOT on the p2pool node
 $ python derive_signing_key.py <master_WIF> [key_index]
 
-Master address: LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc
+Master address: YOUR_LTC_ADDRESS
 Key index: 0
-Signing key WIF: KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
+Signing key WIF: YOUR_SIGNING_KEY_WIF
 Signing ID: a1b2c3d4e5f6...
 
 Put this in your p2pool config:
-  --signing-key KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
+  --signing-key YOUR_SIGNING_KEY_WIF
   --signing-key-index 0
 
 To rotate (if compromised):
@@ -275,7 +275,7 @@ Ban by content:        Regex/keyword filter on message payload
 Or via API:
 ```
 POST /msg/ban {"signing_id": "a1b2c3..."}
-POST /msg/ban {"address": "LVzy9..."}
+POST /msg/ban {"address": "LtcAd..."}
 DELETE /msg/ban {"signing_id": "a1b2c3..."}
 ```
 
@@ -328,10 +328,10 @@ The node serves a BBS-style web page at `http://node:9327/static/bbs.html`:
 ├─────────────────────────────────────────────────────────┤
 │  [Chat] [Announcements] [Alerts] [Node Status] [Keys]  │
 ├─────────────────────────────────────────────────────────┤
-│  #42  LVzy9...azc  ✅verified  2m ago                   │
+│  #42  LtcAd...azc  ✅verified  2m ago                   │
 │  > hello from miner A!                                  │
 │                                                         │
-│  #41  LRF2Z...DDp  ✅verified  5m ago                   │
+│  #41  LtcBd...xyz  ✅verified  5m ago                   │
 │  > merged mining DOGE working great                     │
 │                                                         │
 │  #40  LiF7n...3s3  ⚠️unverified  8m ago                 │

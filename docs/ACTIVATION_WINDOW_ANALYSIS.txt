@@ -127,9 +127,9 @@ Total v36 shares: 15579 / 20354 (76.5%)
 
 --- V36 shares by miner ---
   LU66WRMeuxt45vwGh9bWopRsBaZ8owBAb6    10888 shares  pos 4384-20295  weight 6.47e+11
-  LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc     1853 shares  pos 39-20353  weight 9.12e+10
+  YOUR_LTC_ADDRESS     1853 shares  pos 39-20353  weight 9.12e+10
   LiF7nPgLqX5wutrNxsXXNj6aLnXvXH13s3     1667 shares  pos 37-4378  weight 8.15e+10
-  LRF2Z9pmn1Mv4AxBkteNpzTn2gQj9G9DDp     1096 shares  pos 36-20349  weight 5.91e+10
+  YOUR_LTC_ADDRESS_B     1096 shares  pos 36-20349  weight 5.91e+10
   LNDMW3bAQ8Sz3Tzm6y3chYeuJTb8VHSHGM       75 shares  pos 60-4383  weight 3.41e+09
 
 ================================================================================

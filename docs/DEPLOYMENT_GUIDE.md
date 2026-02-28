@@ -2,7 +2,7 @@
 
 ## Build Environment Required
 
-The testnet server (192.168.80.182) does not have build tools installed. To deploy the patched Dogecoin Core, you need:
+The testnet server (YOUR_SERVER_IP) does not have build tools installed. To deploy the patched Dogecoin Core, you need:
 
 ### Option 1: Build on Local Machine
 
@@ -38,10 +38,10 @@ tar czf dogecoin-1.14.9-auxpow-linux64.tar.gz \
   src/dogecoind src/dogecoin-cli
 
 # 6. Copy to testnet server
-scp dogecoin-1.14.9-auxpow-linux64.tar.gz user0@192.168.80.182:/tmp/
+scp dogecoin-1.14.9-auxpow-linux64.tar.gz YOUR_USER@YOUR_SERVER_IP:/tmp/
 
 # 7. Deploy on server
-ssh user0@192.168.80.182 'bash -s' << 'DEPLOY'
+ssh YOUR_USER@YOUR_SERVER_IP 'bash -s' << 'DEPLOY'
 cd /tmp
 tar xzf dogecoin-1.14.9-auxpow-linux64.tar.gz
 mkdir -p ~/bin-auxpow
@@ -132,7 +132,7 @@ docker cp temp:/build/src/dogecoin-cli .
 docker rm temp
 
 # Copy to server
-scp dogecoind dogecoin-cli user0@192.168.80.182:~/bin-auxpow/
+scp dogecoind dogecoin-cli YOUR_USER@YOUR_SERVER_IP:~/bin-auxpow/
 ```
 
 ## Testing Plan

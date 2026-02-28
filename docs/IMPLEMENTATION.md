@@ -16,7 +16,7 @@
 - **Status**: Fully synced (2,385,162 blocks)
 - **RPC**: Port 9998 (localhost)
 - **P2P**: Port 9999
-- **Wallet Address**: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u
+- **Wallet Address**: YOUR_DASH_ADDRESS
 
 ### Python Environment
 - **Runtime**: PyPy 7.3.20 (Python 2.7.18) via snap package
@@ -30,7 +30,7 @@
 - **Mode**: Standalone (PERSIST=False)
 - **Stratum Port**: 7903 (with ASICBOOST support)
 - **P2P Port**: 8999
-- **Payout Address**: XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u
+- **Payout Address**: YOUR_DASH_ADDRESS
 - **ASICBOOST**: Enabled (version-rolling mask: 0x1fffe000)
 
 ## Bugs Fixed & Enhancements
@@ -155,24 +155,24 @@ p2pool.util.jsonrpc.NarrowError: -12345 p2pool is not connected to any peers
 
 ### Start P2Pool
 ```bash
-ssh user0@DASH_VM_IP
+ssh YOUR_USER@DASH_VM_IP
 cd ~/p2pool-dash
-pypy run_p2pool.py --net dash --dashd-address 127.0.0.1 --dashd-rpc-port 9998 -a XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u
+pypy run_p2pool.py --net dash --dashd-address 127.0.0.1 --dashd-rpc-port 9998 -a YOUR_DASH_ADDRESS
 ```
 
 ### Monitor P2Pool
 ```bash
-ssh user0@DASH_VM_IP 'tail -f ~/p2pool-dash/p2pool.log'
+ssh YOUR_USER@DASH_VM_IP 'tail -f ~/p2pool-dash/p2pool.log'
 ```
 
 ### Test CPU Mining
 ```bash
-cd /home/user0/Github/cpuminer-multi
+cd /home/YOUR_USER/Github/cpuminer-multi
 # Limited to 4 threads to reduce CPU heat
-./cpuminer -t 4 -a x11 -o stratum+tcp://DASH_VM_IP:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
+./cpuminer -t 4 -a x11 -o stratum+tcp://DASH_VM_IP:7903 -u YOUR_DASH_ADDRESS -p x
 
 # For full speed (28 threads, may overheat):
-# ./cpuminer -a x11 -o stratum+tcp://DASH_VM_IP:7903 -u XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u -p x
+# ./cpuminer -a x11 -o stratum+tcp://DASH_VM_IP:7903 -u YOUR_DASH_ADDRESS -p x
 ```
 
 ## Code References

@@ -25,23 +25,23 @@ echo "=== Starting P2Pool ==="
 cd ~/p2pool-merged-v36
 pypy run_p2pool.py \
     --net litecoin \
-    --coind-address 192.168.86.26 \
+    --coind-address LTC_DAEMON_IP \
     --coind-rpc-port 9332 \
     --coind-p2p-port 9333 \
     --merged-coind-address 127.0.0.1 \
     --merged-coind-rpc-port 44556 \
     --merged-coind-p2p-port 22556 \
-    --merged-coind-p2p-address 192.168.86.27 \
+    --merged-coind-p2p-address DOGE_DAEMON_IP \
     --merged-coind-rpc-user dogecoinrpc \
-    --merged-coind-rpc-password dogecoinrpc_mainnet_2026 \
-    --address LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc \
+    --merged-coind-rpc-password YOUR_DOGE_RPC_PASSWORD \
+    --address YOUR_LTC_ADDRESS \
     --give-author 2 \
     -f 0 \
     --disable-upnp \
     --max-conns 20 \
     -w 9327 \
     --redistribute boost \
-    litecoinrpc litecoinrpc_mainnet_2026 \
+    litecoinrpc YOUR_LTC_RPC_PASSWORD \
     > /tmp/p2pool.log 2>&1 &
 P2POOL_PID=$!
 echo "P2Pool started (PID=$P2POOL_PID)"

@@ -8,7 +8,7 @@
 | **DOGE Testnet** | RPC at `DOGE_DAEMON_IP:44555`, height 10152 |
 | **NodeA** | `NODE_A_IP:19327` — `-f 90 --give-author 0 -a mwQq...` |
 | **NodeB** | `NODE_B_IP:19327` — `-f 0 --give-author 5 -a mxpt...` |
-| **Both nodes** | `--merged-operator-address nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T` |
+| **Both nodes** | `--merged-operator-address YOUR_TDOGE_ADDRESS` |
 
 ### Address Mapping (LTC → DOGE, auto-converted from pubkey_hash)
 

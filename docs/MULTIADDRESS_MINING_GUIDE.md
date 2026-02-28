@@ -45,19 +45,19 @@ Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB_
 
 **Standard (Litecoin only):**
 ```bash
-minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
+minerd -a scrypt -o stratum+tcp://YOUR_SERVER_IP:9327 \
   -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h -p x
 ```
 
 **Multiaddress (Litecoin + Dogecoin):**
 ```bash
-minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
+minerd -a scrypt -o stratum+tcp://YOUR_SERVER_IP:9327 \
   -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB -p x
 ```
 
 **With worker name:**
 ```bash
-minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
+minerd -a scrypt -o stratum+tcp://YOUR_SERVER_IP:9327 \
   -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.rig1 -p x
 ```
 
@@ -68,7 +68,7 @@ minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
 {
   "pools": [
     {
-      "url": "stratum+tcp://192.168.80.182:9327",
+      "url": "stratum+tcp://YOUR_SERVER_IP:9327",
       "user": "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB",
       "pass": "x"
     }
@@ -79,7 +79,7 @@ minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
 
 **Command line:**
 ```bash
-cgminer --scrypt -o stratum+tcp://192.168.80.182:9327 \
+cgminer --scrypt -o stratum+tcp://YOUR_SERVER_IP:9327 \
   -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB -p x
 ```
 
@@ -104,7 +104,7 @@ litecoin_addr,dogecoin_addr+0.001/32
 
 Example:
 ```bash
-minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
+minerd -a scrypt -o stratum+tcp://YOUR_SERVER_IP:9327 \
   -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB+0.001 -p x
 ```
 
@@ -118,7 +118,7 @@ minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
 Example addresses:
 - Legacy: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h`
 - P2SH: `QcVudrUyKGwqjk4KWadnXfbHgnMVHB1Lif`
-- Bech32: `tltc1qpkcpgwl24flh35mknlsf374x8ypqv7de6esjh4` (not currently supported)
+- Bech32: `YOUR_TLTC_ADDRESS` (not currently supported)
 
 ### Dogecoin Testnet
 - **P2PKH**: Starts with `n`
@@ -141,7 +141,7 @@ Example address:
 ### Check Your Mining Status
 Visit the P2Pool web interface:
 ```
-http://192.168.80.182:9327/
+http://YOUR_SERVER_IP:9327/
 ```
 
 ### Check Console Output
@@ -186,7 +186,7 @@ Using miner dogecoin address: nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB
 ### Quick Test Command
 ```bash
 # Test with cpuminer (single thread, low intensity)
-minerd -a scrypt -o stratum+tcp://192.168.80.182:9327 \
+minerd -a scrypt -o stratum+tcp://YOUR_SERVER_IP:9327 \
   -u mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB.test \
   -p x -t 1
 ```

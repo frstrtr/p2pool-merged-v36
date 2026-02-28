@@ -88,7 +88,7 @@ MINER_IP_3   (AntRouter L1 - Scrypt)
 ### VM 1: Dogecoin Testnet Node (Modified Auxpow)
 
 **Specifications**:
-- **Name**: doge-testnet-auxpow
+- **Name**: YOUR_DOGE_HOSTNAME
 - **IP**: `P2POOL_NODE_IP` (DEPLOYED - originally planned as P2POOL_VM_IP)- **Public IP**: `YOUR_PUBLIC_IP_1` (ens192 - for inbound peer connections)- **OS**: Ubuntu 24.04 LTS
 - **CPU**: 2 cores
 - **RAM**: 4 GB
@@ -325,7 +325,7 @@ EOF
 
 **Status Tracking**:
 ```bash
-# SSH to doge-testnet-auxpow (P2POOL_NODE_IP)
+# SSH to YOUR_DOGE_HOSTNAME (P2POOL_NODE_IP)
 ssh user@P2POOL_NODE_IP
 
 # Monitor progress
@@ -527,7 +527,7 @@ watch /opt/monitor_merged_mining.sh
 
 | VM | IP | Role | Ports | Status |
 |----|----|----|----|----|
-| doge-testnet-auxpow | P2POOL_NODE_IP | Dogecoin testnet + auxpow | 18332 (RPC), 19334 (P2P) | ✅ Deployed |
+| YOUR_DOGE_HOSTNAME | P2POOL_NODE_IP | Dogecoin testnet + auxpow | 18332 (RPC), 19334 (P2P) | ✅ Deployed |
 | ltc-testnet | LTC_VM_IP | Litecoin testnet | 18332 (RPC), 18333 (P2P) | Ready for setup |
 | p2pool-merged-test | DOGE_VM_IP | P2Pool merged mining | 7903 (Stratum), 8000 (Web), 8999 (P2P) | Ready for setup |
 | asic-1 | MINER_IP_1 | AntRouter L1 Scrypt | 4028 (API), 8081 (Web) | Already available |

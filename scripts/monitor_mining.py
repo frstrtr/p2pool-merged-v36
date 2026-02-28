@@ -14,7 +14,7 @@ import hashlib
 
 # Configuration
 DOGE_RPC_USER = "dogeuser"
-DOGE_RPC_PASS = "dogepass123"
+DOGE_RPC_PASS = "YOUR_DOGE_RPC_PASSWORD"
 DOGE_RPC_URL = "http://127.0.0.1:44555/"
 P2POOL_LOG = "/tmp/p2pool_final_working.log"
 
@@ -34,14 +34,14 @@ OLD_DOGE_MINING_ADDRESS = "mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h"  # Historical pay
 MINING_ADDRESS = DOGE_MINING_ADDRESS  # Use new correct address for blockchain scanning
 
 EXPLORER_URL = "https://blockexplorer.one/dogecoin/testnet"
-SSH_HOST = "user0@192.168.80.182"
+SSH_HOST = "YOUR_USER@YOUR_SERVER_IP"
 
 # P2Pool donation script (P2PKH format - updated Dec 2024)
 # Original P2PK (67 bytes): 4104ffd03...664bac (Forrest era)
 # New P2PKH (25 bytes): 76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac
 # Pubkey hash: 20cb5c22b1e4d5947e5c112c7696b51ad9af3c61
 # Addresses derived from this pubkey_hash:
-#   Dash mainnet:     XdgF55wEHBRWwbuBniNYH4GvvaoYMgL84u
+#   Dash mainnet:     YOUR_DASH_ADDRESS
 #   Dogecoin mainnet: D88Vn6Dyct7DKfVCfR3syHkjyNx9gEyyiv
 #   Dogecoin testnet: nXBZW6xtYrZwCe4PhEhLDhM3DFLSd1pa1R
 DONATION_SCRIPT = "76a91420cb5c22b1e4d5947e5c112c7696b51ad9af3c6188ac"

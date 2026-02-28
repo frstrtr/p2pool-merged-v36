@@ -94,7 +94,7 @@ for ((i=0; i<NUM; i++)); do
 import json, sys
 
 KNOWN_DOGE = {
-    'nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T': 'merged-operator',
+    'YOUR_TDOGE_ADDRESS': 'merged-operator',
     'nUYUjP3X8PuHULZz3jZ5HvVVkc2aT3Tr8t': 'nodeA-doge-addr',
     'neu16vaJrZtDvpWy8EfE4KPYMRUXFsCh9t': 'nodeB-doge-addr',
 }

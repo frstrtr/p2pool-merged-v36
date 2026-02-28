@@ -1,13 +1,16 @@
 # P2Pool Installation Guide (Litecoin + Dogecoin Merged Mining)
 
-Complete installation guide for P2Pool on Ubuntu/Debian systems with Litecoin (scrypt) mining and Dogecoin merged mining.
+Complete installation guide for P2Pool on Ubuntu/Debian and **macOS (Intel)** systems with Litecoin (scrypt) mining and Dogecoin merged mining.
 
 > **Windows 10/11 users**: See [WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md) for WSL2, Docker, and native Windows deployment instructions.
+>
+> **macOS (Intel) users**: See [macOS (Intel) Installation](#macos-intel-installation) below for Homebrew-based setup — tested on macOS 26.x (x86_64).
 
 ## Table of Contents
 - [System Requirements](#system-requirements)
 - [Litecoin Core Installation](#litecoin-core-installation)
 - [Dogecoin Core Installation](#dogecoin-core-installation)
+- [macOS (Intel) Installation](#macos-intel-installation)
 - [Python Environment Setup](#python-environment-setup)
 - [P2Pool Installation](#p2pool-installation)
 - [Configuration](#configuration)
@@ -20,7 +23,7 @@ Complete installation guide for P2Pool on Ubuntu/Debian systems with Litecoin (s
 ## System Requirements
 
 ### Minimum Requirements
-- **OS**: Ubuntu 20.04+ or Debian 11+
+- **OS**: Ubuntu 20.04+ or Debian 11+ (or macOS 12+ Intel — see [macOS section](#macos-intel-installation))
 - **CPU**: 2+ cores
 - **RAM**: 4GB minimum, 8GB recommended
 - **Disk**: 20GB+ (for Litecoin blockchain) + 80GB+ (for Dogecoin blockchain)
@@ -601,6 +604,293 @@ tail -f ~/p2pool-merged-v36/p2pool.log
 # "P2Pool: X shares in chain (Y verified/Z total) Peers: N"
 # "Local: XXX kH/s in last N seconds"
 ```
+
+---
+
+## macOS (Intel) Installation
+
+> **Tested**: macOS 26.3, x86_64 (Intel Mac Pro), PyPy 7.3.20, Homebrew 4.x. Fully operational with merged mining against LAN daemons.
+> **Apple Silicon (M1/M2/M3/M4)**: PyPy 2.7 has no native ARM64 builds. Install the x86_64 version and run under Rosetta 2 (`arch -x86_64 brew install pypy`).
+
+### Prerequisites
+
+- [Homebrew](https://brew.sh) package manager
+- Git (included with Xcode Command Line Tools: `xcode-select --install`)
+- A Litecoin Core daemon accessible on LAN or localhost (P2Pool does **not** require a local blockchain)
+- For merged mining: a Dogecoin Core daemon accessible on LAN
+
+Install Homebrew if not already present:
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+### 1. Clone Repository and Install PyPy
+
+```bash
+# Clone (skip if you already have the repo)
+git clone https://github.com/frstrtr/p2pool-merged-v36.git
+cd p2pool-merged-v36
+```
+
+```bash
+brew install pypy
+
+# Verify
+pypy --version
+# Python 2.7.18 [PyPy 7.3.x ...]
+```
+
+### 2. Install Python Dependencies
+
+```bash
+# Pin incremental first (required for Twisted on Python 2.7)
+pypy -m pip install 'incremental<22'
+
+# Core dependencies
+pypy -m pip install twisted==20.3.0 pycryptodome 'scrypt>=0.8.0,<=0.8.22' ecdsa
+```
+
+> **Note**: You will see `DEPRECATION: pip 21.0 will drop support for Python 2.7` warnings.
+> This is expected and harmless — pip 20.3.4 is the last version supporting PyPy 2.7 and works correctly.
+
+### 3. Verify scrypt hashing
+
+```bash
+cd ~/p2pool-merged-v36   # or wherever you cloned the repo
+pypy -c "import ltc_scrypt; print('scrypt OK')"
+```
+
+### 4. Install coincurve (recommended, constant-time ECDSA)
+
+coincurve wraps libsecp256k1 for constant-time signing. On macOS with PyPy, pip will download the source tarball and compile it automatically (there are no pre-built wheels for pypy27):
+
+```bash
+pypy -m pip install "coincurve==13.0.0"
+pypy -c "import coincurve; print('coincurve OK')"
+```
+
+If compilation fails (e.g., missing autotools), install build tools first:
+```bash
+brew install automake libtool
+pypy -m pip install "coincurve==13.0.0"
+```
+
+### 5. MM-Adapter Setup (for Dogecoin merged mining)
+
+The MM-Adapter requires Python 3 (separate from P2Pool's PyPy 2.7):
+
+```bash
+cd ~/p2pool-merged-v36/mm-adapter
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Create or edit `config_mainnet.yaml` — key fields:
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 44556
+  rpc_user: "dogecoinrpc"
+  rpc_password: "YOUR_DOGE_RPC_PASSWORD"
+
+upstream:
+  host: "DOGE_DAEMON_IP"       # e.g. 192.0.2.100
+  port: 22555
+  rpc_user: "dogecoinrpc"
+  rpc_password: "YOUR_DOGE_RPC_PASSWORD"
+  timeout: 30
+
+chain:
+  name: "dogecoin_mainnet"
+  chain_id: 98
+```
+
+Start the adapter:
+```bash
+cd ~/p2pool-merged-v36/mm-adapter
+source venv/bin/activate
+python3 adapter.py --config config_mainnet.yaml
+```
+
+> **Important**: Always `cd` into the `mm-adapter/` directory before activating the venv.
+> The `source venv/bin/activate` command uses a relative path.
+
+Verify the adapter is responding:
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"1.0","id":"test","method":"getbestblockhash","params":[]}' \
+  http://dogecoinrpc:YOUR_DOGE_RPC_PASSWORD@127.0.0.1:44556/
+# Should return a JSON response with a block hash
+```
+
+### 6. Running P2Pool on macOS
+
+P2Pool needs access to a Litecoin Core daemon (local or on LAN). It does **not** need a local blockchain — you can point to a remote daemon.
+
+#### LTC-only mode (no merged mining)
+```bash
+cd ~/p2pool-merged-v36
+pypy run_p2pool.py \
+    --net litecoin \
+    --coind-address LTC_DAEMON_IP \
+    --coind-rpc-port 9332 \
+    --coind-p2p-port 9333 \
+    --address YOUR_LTC_ADDRESS \
+    --disable-upnp \
+    litecoinrpc YOUR_LTC_RPC_PASSWORD
+```
+
+#### LTC + DOGE merged mining (with MM-Adapter running locally)
+```bash
+cd ~/p2pool-merged-v36
+pypy run_p2pool.py \
+    --net litecoin \
+    --coind-address LTC_DAEMON_IP \
+    --coind-rpc-port 9332 \
+    --coind-p2p-port 9333 \
+    --merged-coind-address 127.0.0.1 \
+    --merged-coind-rpc-port 44556 \
+    --merged-coind-p2p-port 22556 \
+    --merged-coind-p2p-address DOGE_DAEMON_IP \
+    --merged-coind-rpc-user dogecoinrpc \
+    --merged-coind-rpc-password YOUR_DOGE_RPC_PASSWORD \
+    --address YOUR_LTC_ADDRESS \
+    --give-author 2 \
+    -f 0 \
+    --disable-upnp \
+    --max-conns 20 \
+    -n EXISTING_P2POOL_NODE:9326 \
+    litecoinrpc YOUR_LTC_RPC_PASSWORD
+```
+
+Replace `LTC_DAEMON_IP`, `DOGE_DAEMON_IP`, addresses, and passwords with your actual values.
+
+> **Tip**: Add `--redistribute boost` (or `donate`, `pplns`, `fee`) to control
+> how shares from unnamed/broken miners are handled. See `--help` for details.
+
+#### Seed from existing nodes
+
+Use `-n HOST:PORT` to connect to known P2Pool peers for faster share chain sync:
+```bash
+-n PEER_IP_1:9326 -n PEER_IP_2:9326
+```
+
+#### Verify the node is operational
+
+After ~30 seconds, check the local API:
+```bash
+curl -s http://127.0.0.1:9327/local_stats | python3 -m json.tool
+```
+
+Key fields to check:
+- `"peers"` — should show outgoing connections (e.g., `{"incoming": 0, "outgoing": 8}`)
+- `"version"` — should show your p2pool version (e.g., `v36-0.08-alpha`)
+- `"protocol_version"` — should be `3503`
+- `"block_value"` — current LTC block reward
+
+The web dashboard is also available at `http://127.0.0.1:9327/`.
+
+Share chain sync typically completes within 1–2 minutes when seeded from existing peers. You'll see `Received good share` messages in the log during sync.
+
+### 7. Run as Background Service (launchd)
+
+Create `~/Library/LaunchAgents/com.p2pool.merged.plist`:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.p2pool.merged</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/pypy</string>
+        <string>run_p2pool.py</string>
+        <string>--net</string>
+        <string>litecoin</string>
+        <string>--coind-address</string>
+        <string>LTC_DAEMON_IP</string>
+        <string>--coind-rpc-port</string>
+        <string>9332</string>
+        <string>--disable-upnp</string>
+        <string>--address</string>
+        <string>YOUR_LTC_ADDRESS</string>
+        <string>litecoinrpc</string>
+        <string>YOUR_LTC_RPC_PASSWORD</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME/p2pool-merged-v36</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/p2pool-merged-v36/data/litecoin/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/p2pool-merged-v36/data/litecoin/launchd.log</string>
+</dict>
+</plist>
+```
+
+Load the service:
+```bash
+launchctl load ~/Library/LaunchAgents/com.p2pool.merged.plist
+launchctl start com.p2pool.merged
+
+# Check status
+launchctl list | grep p2pool
+
+# Stop
+launchctl stop com.p2pool.merged
+launchctl unload ~/Library/LaunchAgents/com.p2pool.merged.plist
+```
+
+### 8. macOS Firewall
+
+macOS firewall is off by default. If enabled, allow P2Pool ports:
+```bash
+# Check firewall status
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+
+# Allow incoming connections (if firewall is on)
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/pypy
+```
+
+Alternatively, allow specific ports via `pfctl` or System Settings > Network > Firewall.
+
+### Tested Deployment Example
+
+The following deployment was verified on macOS 26.3 (Intel Mac Pro, x86_64):
+
+```
+Network topology (example — replace IPs with your own):
+  LAN_HOST_A   — Litecoin Core (RPC 9332, P2P 9333)
+  LAN_HOST_B   — Dogecoin Core (RPC 22555, P2P 22556)
+  LAN_HOST_C   — P2Pool node #1 (Ubuntu, --redistribute boost)
+  LAN_HOST_D   — P2Pool node #2 (Ubuntu, --redistribute donate)
+  macOS Mac    — P2Pool node #3 (this machine)
+
+Result:
+  ✓ PyPy 7.3.20 (Python 2.7.18) via Homebrew
+  ✓ All dependencies installed (twisted 20.3.0, pycryptodome 3.23.0,
+    scrypt 0.8.20, ecdsa 0.19.1, coincurve 13.0.0)
+  ✓ MM-Adapter running on 127.0.0.1:44556 → DOGE daemon
+  ✓ P2Pool v36-0.08-alpha, protocol 3503
+  ✓ 8 outgoing peers, share chain synced in ~90 seconds
+  ✓ Merged mining active (DOGE block updates observed)
+  ✓ Web dashboard at http://127.0.0.1:9327/
+```
+
+### macOS-specific notes
+
+| Area | Notes |
+|------|-------|
+| **Reactor** | Twisted auto-selects `SelectReactor` on macOS (kqueue also available) |
+| **Memory reporting** | Reports peak RSS via `resource.getrusage()` — cosmetic difference from Linux |
+| **Conf file paths** | Reads from `~/Library/Application Support/Litecoin/litecoin.conf` (if using local daemon) |
+| **UPnP** | Use `--disable-upnp` (recommended on macOS; NAT traversal via router UI) |
+| **Apple Silicon** | No native PyPy 2.7 ARM64 — use Rosetta 2 (x86_64). Performance ~30% slower than native |
 
 ---
 

@@ -31,7 +31,7 @@ LITECOIN_CLI = "litecoin-cli"
 LITECOIN_ARGS = ["-testnet"]
 DOGECOIN_RPC_URL = "http://127.0.0.1:44555/"
 DOGECOIN_RPC_USER = "dogeuser"
-DOGECOIN_RPC_PASS = "dogepass123"
+DOGECOIN_RPC_PASS = "YOUR_DOGE_RPC_PASSWORD"
 
 # Merged mining marker in coinbase
 MM_MARKER = "fabe6d6d"

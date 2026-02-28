@@ -85,7 +85,7 @@ Returns the most recent messages across all types.
       "signing_id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
       "has_signature": true,
       "verified": true,
-      "sender_address": "LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc",
+      "sender_address": "YOUR_LTC_ADDRESS",
       "share_hash": "0000000012345678...",
       "age": 120.5,
       "message_hash": "abc123..."
@@ -224,7 +224,7 @@ view of the health and capabilities of other nodes.
       "msg_type": 1,
       "type_name": "NODE_STATUS",
       "payload": "{\"v\":\"13.4-604-g02a27df\",\"up\":86400,\"hr\":1500000,\"sc\":8640,\"p\":3,\"mc\":[\"DOGE\"],\"cap\":[\"v36\",\"mm\",\"msg\"]}",
-      "sender_address": "LVzy9...",
+      "sender_address": "LtcAd...",
       "age": 120.0
     }
   ]
@@ -259,7 +259,7 @@ announced via share messages.
       "signing_id": "a1b2c3d4e5f6...",
       "key_index": 0,
       "signing_pubkey": "02abcd1234...",
-      "miner_address": "LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc",
+      "miner_address": "YOUR_LTC_ADDRESS",
       "first_seen": 1707580800,
       "last_seen": 1707667200,
       "share_count": 42,
@@ -300,7 +300,7 @@ Returns this node's signing identity (public information only).
   "signing_id": "a1b2c3d4e5f6...",
   "signing_pubkey": "02abcd1234...",
   "key_index": 0,
-  "address": "LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc",
+  "address": "YOUR_LTC_ADDRESS",
   "messaging_enabled": true
 }
 ```
@@ -429,7 +429,7 @@ Or:
 
 ```json
 {
-  "address": "LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc"
+  "address": "YOUR_LTC_ADDRESS"
 }
 ```
 
@@ -489,7 +489,7 @@ List all active bans.
 {
   "bans": {
     "signing_ids": ["a1b2c3d4e5f6..."],
-    "addresses": ["LVzy9..."],
+    "addresses": ["LtcAd..."],
     "words": ["spam"]
   },
   "total_bans": 3

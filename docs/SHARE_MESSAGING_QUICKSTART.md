@@ -88,13 +88,13 @@ python derive_signing_key.py <your_payout_WIF> 0
 Output:
 
 ```
-Master address:  LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc
+Master address:  YOUR_LTC_ADDRESS
 Key index:       0
-Signing key WIF: KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
+Signing key WIF: YOUR_SIGNING_KEY_WIF
 Signing ID:      a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
 
 Copy this to your p2pool node:
-  --signing-key KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
+  --signing-key YOUR_SIGNING_KEY_WIF
   --signing-key-index 0
 
 WARNING: Do NOT copy your master WIF to the node!
@@ -110,7 +110,7 @@ Add to your P2Pool startup command:
 
 ```bash
 python run_p2pool.py --net litecoin \
-  --signing-key KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn \
+  --signing-key YOUR_SIGNING_KEY_WIF \
   --signing-key-index 0 \
   <your_other_flags>
 ```
@@ -128,7 +128,7 @@ curl http://localhost:9327/msg/identity
   "signing_id": "a1b2c3d4e5f6...",
   "signing_pubkey": "02abcd1234...",
   "key_index": 0,
-  "address": "LVzy9mWFCQDBebZwvdSChevDJTJTxVbazc",
+  "address": "YOUR_LTC_ADDRESS",
   "messaging_enabled": true
 }
 ```
@@ -159,7 +159,7 @@ curl -X POST http://localhost:9327/msg/ban \
 
 # Ban by payout address
 curl -X POST http://localhost:9327/msg/ban \
-  -d '{"address":"LVzy9..."}'
+  -d '{"address":"LtcAd..."}'
 
 # Ban by keyword
 curl -X POST http://localhost:9327/msg/ban \

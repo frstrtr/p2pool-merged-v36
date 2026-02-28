@@ -432,7 +432,7 @@ mv data/litecoin_testnet/shares.0 shares.0.backup-dash-fields
 # Start P2Pool with merged mining:
 pypy run_p2pool.py --net litecoin --testnet \
   --address mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h \
-  --merged http://dogeuser:dogepass@127.0.0.1:44555 \
+  --merged http://dogeuser:YOUR_DOGE_RPC_PASSWORD@127.0.0.1:44555 \
   --merged-operator-address nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB \
   --give-author 1 -f 1
 ```

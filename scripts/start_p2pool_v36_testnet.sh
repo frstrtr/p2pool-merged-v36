@@ -13,7 +13,7 @@ cd "$SCRIPT_DIR"
 
 # Node configuration
 NODE_NAME="${1:-p2pool-v36}"
-LTC_ADDRESS="${2:-tltc1q98qmmw559wlpeecgxuzfjge98dljjxnsamltav}"
+LTC_ADDRESS="${2:-YOUR_TLTC_ADDRESS}"
 
 # Litecoin Testnet RPC (shared daemon on .26)
 LTC_RPC_HOST="LTC_DAEMON_IP"
@@ -36,7 +36,7 @@ DOGE_P2P_HOST="DOGE_DAEMON_IP"
 DOGE_P2P_PORT="44557"
 
 # Dogecoin testnet payout address (operator fee)
-DOGE_OPERATOR_ADDRESS="nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T"
+DOGE_OPERATOR_ADDRESS="YOUR_TDOGE_ADDRESS"
 
 # P2Pool settings
 GIVE_AUTHOR="0"       # 0% author fee (testnet)

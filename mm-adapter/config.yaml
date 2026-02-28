@@ -8,14 +8,14 @@ server:
   port: 44556  # Different port so we don't conflict with direct connection
   # Credentials P2Pool uses to connect to this adapter
   rpc_user: "dogecoinrpc"
-  rpc_password: "testpass"
+  rpc_password: "YOUR_DOGE_RPC_PASSWORD"
 
 # Upstream daemon (Standard Dogecoin testnet4alpha)
 upstream:
-  host: "192.168.86.27"
+  host: "DOGE_DAEMON_IP"
   port: 44555  # Dogecoin testnet4alpha RPC port
   rpc_user: "dogecoinrpc"
-  rpc_password: "testpass"
+  rpc_password: "YOUR_DOGE_RPC_PASSWORD"
   # Timeout for RPC calls (seconds)
   timeout: 30
 

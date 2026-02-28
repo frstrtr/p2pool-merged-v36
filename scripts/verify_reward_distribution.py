@@ -12,11 +12,11 @@ Checks:
 Current testnet configuration:
   Node29: -f 90 (90% fee), --give-author 0 (0% donation)
           -a mwQqcRjWsCSvMfFrAvpcCujofQSFcV1AsW (node owner LTC)
-          --merged-operator-address nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T (DOGE operator)
+          --merged-operator-address YOUR_TDOGE_ADDRESS (DOGE operator)
   
   Node31: -f 0 (0% fee), --give-author 5 (5% donation)  
           -a mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g (node owner LTC)
-          --merged-operator-address nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T (DOGE operator)
+          --merged-operator-address YOUR_TDOGE_ADDRESS (DOGE operator)
 """
 
 import json
@@ -44,7 +44,7 @@ KNOWN_ADDRS = {
     "mxptR46XQBRk3EHstU83QRQcqT2PCVkW3g": "Node31 owner (LTC)",
     "mzisknENRPyyPS1M54qmwatfLhaMyFwRYQ": "Miner3 (LTC)",
     # DOGE testnet addresses  
-    "nXzx4WHrERckqvvCsZkb41UpCpWWhXQf5T": "Merged operator (DOGE)",
+    "YOUR_TDOGE_ADDRESS": "Merged operator (DOGE)",
 }
 
 # P2SH Combined Donation Script (hex) - the V36 donation output
@@ -63,7 +63,7 @@ def run_rpc(host, cli_path, rpc_args, method, *params):
     cmd_parts = [cli_path] + rpc_args + [method] + [str(p) for p in params]
     cmd_str = " ".join(cmd_parts)
     
-    full_cmd = ["ssh", f"user0@{host}", cmd_str]
+    full_cmd = ["ssh", f"YOUR_USER@{host}", cmd_str]
     try:
         result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
@@ -352,7 +352,7 @@ def analyze_twin_blocks():
     
     # Get twin block info from P2Pool log
     result = subprocess.run(
-        ["ssh", "user0@NODE_A_IP", 
+        ["ssh", "YOUR_USER@NODE_A_IP", 
          "grep -A5 'TWIN BLOCK FOUND' ~/p2pool-merged/data/litecoin_testnet/log | tail -30"],
         capture_output=True, text=True, timeout=15
     )
@@ -364,7 +364,7 @@ def analyze_twin_blocks():
     
     # Get merged block info
     result2 = subprocess.run(
-        ["ssh", "user0@NODE_A_IP",
+        ["ssh", "YOUR_USER@NODE_A_IP",
          "grep 'MERGED NETWORK BLOCK FOUND' ~/p2pool-merged/data/litecoin_testnet/log | tail -5"],
         capture_output=True, text=True, timeout=15
     )
