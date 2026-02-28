@@ -2246,10 +2246,10 @@
                         statusMsg = 'Waiting for enough shares to start version signaling.';
                         statusIcon = '\u23F3';
                     } else if (vs.status === 'signaling') {
-                        statusMsg = 'Network is signaling for V' + vs.target_version + ' upgrade. ' + d3.format('.1f')(vs.sampling_signaling || 0) + '% of sampling window signals V' + vs.target_version + '.';
+                        statusMsg = 'Network is signaling for V' + vs.target_version + ' upgrade.';
                         statusIcon = '\uD83D\uDCE1';
                     } else if (vs.status === 'signaling_strong') {
-                        statusMsg = 'Strong signaling! ' + d3.format('.1f')(vs.sampling_signaling || 0) + '% of sampling window signals V' + vs.target_version + ' \u2014 activation approaching.';
+                        statusMsg = 'Strong signaling for V' + vs.target_version + ' upgrade \u2014 activation approaching.';
                         statusIcon = '\uD83D\uDD25';
                     } else if (vs.status === 'activating') {
                         statusMsg = 'V' + vs.target_version + ' activation threshold reached! Confirming upgrade\u2026';

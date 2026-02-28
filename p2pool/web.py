@@ -332,13 +332,13 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             transition_progress = 100
         elif sampling_signaling >= 60:
             status = 'signaling_strong'
-            message = 'Strong V%d signaling: %.1f%% in sampling window (need 95%% to activate)' % (
-                effective_target, sampling_signaling)
+            message = 'Strong V%d signaling — activation approaching (need 95%%)' % (
+                effective_target,)
             transition_progress = sampling_signaling
         elif sampling_signaling > 0:
             status = 'signaling'
-            message = 'V%d signaling: %.1f%% in sampling window (%.1f%% overall in chain)' % (
-                effective_target, sampling_signaling, overall_v36_vote_pct)
+            message = 'Network is signaling for V%d upgrade' % (
+                effective_target,)
             transition_progress = sampling_signaling
         elif overall_v36_votes > 0 and deepest_v36_pos < propagation_target:
             # V36 votes exist in the chain but haven't reached the sampling window yet
@@ -489,6 +489,22 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         warnings = []
 
         parent_symbol = getattr(node.net.PARENT, 'SYMBOL', 'LTC') if hasattr(node.net, 'PARENT') else 'LTC'
+
+        # V35-phase limitation: shares can't carry explicit merged addresses
+        if not ratchet_confirmed and effective_target >= 36:
+            warnings.append(dict(
+                id='v35_addr_limitation',
+                urgency='recommended',
+                title='V35 Address Limitation (Current Phase)',
+                text=(
+                    'During V35 (current share format), shares cannot carry '
+                    'explicit merged mining addresses. Even if you configure '
+                    '%s,DOGE in stratum, PPLNS will use ONLY auto-converted '
+                    'DOGE addresses derived from your %s public key hash. '
+                    'Explicit address support activates after V36 transition.'
+                ) % (parent_symbol, parent_symbol),
+            ))
+
         warnings.append(dict(
             id='multiaddr_format',
             urgency='recommended',
