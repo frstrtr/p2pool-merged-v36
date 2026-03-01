@@ -14,7 +14,7 @@ Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), bu
 - **V36 share format** — extends the share chain with `pubkey_type` field (native P2SH and bech32 address support) and AuxPoW commitment fields; backward-compatible transition via built-in version signaling with 95% activation threshold
 - **Merged mining (AuxPoW)** — mine LTC and DOGE simultaneously on the same decentralized share chain; merged chain rewards are distributed through the same PPLNS consensus mechanism as parent chain rewards
 - **MM-Adapter bridge** — Python 3 adapter that translates between P2Pool's merged mining protocol and standard Dogecoin Core RPC (`createauxblock`/`submitauxblock`), enabling merged mining without custom daemon patches
-- **Multi-chain address handling** — automatic cross-chain address conversion (LTC P2SH → DOGE P2SH, bech32 → P2PKH for chains without SegWit); full validation pipeline for P2PKH, P2SH, P2WPKH
+- **Multi-chain address handling** — automatic cross-chain address conversion (LTC P2SH → DOGE P2SH, bech32 → P2PKH for chains without SegWit) and **reverse conversion** (DOGE → LTC when parent address is invalid); full validation pipeline for P2PKH, P2SH, P2WPKH
 
 ### Node Operation
 - **Share redistribution (`--redistribute`)** — configurable handling of shares from unnamed/broken miners: `pplns` (proportional), `fee` (operator), `boost` (help tiny miners get their first payout), `donate` (development fund)
@@ -48,14 +48,14 @@ Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), bu
 
 ```
 ┌─────────────┐    Stratum   ┌─────────────┐   JSON-RPC   ┌─────────────┐
-│   Miners    │◀───────────▶│   P2Pool    │◀───────────▶│  Litecoin   │
+│   Miners    │◀────────────▶│   P2Pool    │◀────────────▶│  Litecoin   │
 │  (scrypt)   │   Port 9327  │  (PyPy 2.7) │  Port 9332   │   Core      │
 └─────────────┘              └──────┬──────┘              └─────────────┘
                                     │
                                     │ JSON-RPC (Port 44556)
                                     ▼
                              ┌──────────────┐   JSON-RPC   ┌─────────────┐
-                             │  MM-Adapter  │◀───────────▶│  Dogecoin   │
+                             │  MM-Adapter  │◀────────────▶│  Dogecoin   │
                              │ (Python 3)   │  Port 22555  │   Core      │
                              └──────────────┘              └─────────────┘
 ```
@@ -266,6 +266,8 @@ stratum+tcp://YOUR_IP:9327
 - With worker name (dot): `LTC_ADDRESS,DOGE_ADDRESS.worker1`
 - With worker name (underscore): `LTC_ADDRESS,DOGE_ADDRESS_worker1`
 
+> **Order protection:** If you accidentally swap the order (`DOGE_ADDRESS,LTC_ADDRESS`), P2Pool auto-detects and corrects it with a log warning. Both chains still pay correctly.
+
 **Example:**
 ```
 Username: YOUR_LTC_ADDRESS,YOUR_DOGE_ADDRESS.rig1
@@ -310,6 +312,8 @@ When mining Litecoin + Dogecoin, miner payouts are distributed on **both chains*
 | `LTC_ADDR` only (Bech32) | Auto-converts 20-byte witness program → DOGE P2PKH | Bech32 → P2PKH on DOGE (no SegWit on DOGE) |
 | `LTC_ADDR` only (P2SH) | Auto-converts `HASH160(script)` → DOGE P2SH | See ⚠️ warning below |
 | `LTC_ADDR,INVALID_ADDR` | Logs warning, falls back to auto-conversion | Invalid addresses are rejected gracefully |
+| `INVALID_LTC,DOGE_ADDR` | Reverse-derives LTC from DOGE pubkey_hash | DOGE preserved; LTC derived from same key (Case 4). P2SH caveat applies — see below |
+| `DOGE_ADDR,LTC_ADDR` | **Auto-corrected** to `LTC_ADDR,DOGE_ADDR` | Swapped order detected and fixed automatically |
 
 > ### ⚠️ V35→V36 Transition: Merged Address Limitations
 >
@@ -340,21 +344,28 @@ PPLNS hashrate contribution. This uses the same consensus-safe mechanism as the 
 (`-f` flag): the share's `pubkey_hash` field is replaced at creation time with a randomly-selected
 valid miner's address, weighted by PPLNS work. No coinbase or consensus changes are required.
 
-**Policy:** If the parent (LTC) address is invalid, parent chain rewards are redistributed.
-However, a valid explicit merged (DOGE) address is **preserved** — the miner still receives
-their merged chain payouts. Only when no valid merged address is provided does the merged
-payout auto-convert from the redistributed miner's pubkey_hash.
+**Policy:** If the parent (LTC) address is invalid, the node attempts to **reverse-derive**
+a valid LTC address from the miner's DOGE address (same `pubkey_hash`, LTC version byte).
+If a valid explicit DOGE address exists (Case 4), both chains pay correctly — DOGE to the
+explicit address, LTC to the reverse-derived address. If no valid DOGE address exists
+(Case 3), both LTC and DOGE are redistributed to a random PPLNS miner.
 
 | # | Parent (LTC) | Merged (DOGE) | LTC Payout | DOGE Payout |
 |---|---|---|---|---|
 | 1 | Valid | Valid (explicit) | Miner (correct) | Miner (correct) |
 | 2 | Valid | Invalid / missing | Miner (correct) | Auto-converts from LTC pubkey_hash |
 | 3 | Invalid | Invalid / missing | Redistributed to random PPLNS miner | Auto-converts from redistributed pubkey_hash |
-| 4 | Invalid | **Valid (explicit)** | Redistributed to random PPLNS miner | **Miner keeps DOGE** (valid address preserved) |
+| 4 | Invalid | **Valid (explicit)** | **Reverse-derived from DOGE pubkey_hash** | **Miner keeps DOGE** (valid address preserved) |
+
+> **Note:** Case 4 reverse-derives LTC from the DOGE address hash. For P2PKH this is safe (same key controls both). For **P2SH**, the resulting LTC P2SH is only spendable if the redeem script is valid on both chains — see P2SH warning below.
 
 **Stratum separators:** `,` separates parent from merged address. `.` or `_` separates the worker
 name. `+` and `/` set pseudoshare and share difficulty. Any other characters in the address portion
 that prevent parsing will make the address invalid, triggering redistribution.
+
+**Swapped order protection:** If a miner accidentally connects as `DOGE_ADDR,LTC_ADDR` (reversed),
+P2Pool detects that the first address validates as DOGE and the second as LTC, swaps them
+automatically, and logs a one-time warning. No miner action required — both chains pay correctly.
 
 **Example:** A miner connecting as `XXX_rig1` has user=`XXX` (invalid LTC address), worker=`rig1`.
 Their share rewards go to a randomly-selected valid miner from the PPLNS window.
@@ -399,6 +410,8 @@ pypy run_p2pool.py ... --redistribute donate
 >    ```
 >
 > **What to avoid:** If the P2SH redeem script contains SegWit witness programs (P2SH-P2WPKH / P2SH-P2WSH), the converted DOGE P2SH address becomes **anyone-can-spend** — the redeemScript `OP_0 <20-byte-hash>` evaluates to `true` without any signature on a non-SegWit chain, and anyone who learns the redeemScript (revealed on the first LTC spend from that address) can steal the DOGE funds. Most modern Litecoin wallets default to P2SH-P2WPKH, so **if in doubt, use option 2**.
+>
+> **Reverse conversion (Case 4):** The same caveat applies in reverse. If a DOGE P2SH address is reverse-converted to LTC (invalid LTC + valid DOGE P2SH), the resulting LTC P2SH address references the **same redeem script hash**. The LTC P2SH is only spendable if the underlying redeem script is valid on Litecoin. For standard multisig or P2PKH-in-P2SH this works correctly. **Recommendation:** provide valid addresses for both chains to avoid any P2SH cross-chain issues.
 
 #### Example: Getting Addresses for Mining
 

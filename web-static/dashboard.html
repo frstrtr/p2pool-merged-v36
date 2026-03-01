@@ -1820,10 +1820,14 @@
                     
                     // If no explicit merged address in worker name, check API merged_addresses
                     var mergedAutoConverted = false;
+                    var mergedRedistributed = false;
+                    var mergedReverseConverted = false;
                     if (!mergedAddr && workerData.merged_addresses) {
                         mergedAddr = workerData.merged_addresses['dogecoin'] || null;
                         mergedAutoConverted = workerData.merged_auto_converted || false;
                     }
+                    mergedRedistributed = workerData.merged_redistributed || false;
+                    mergedReverseConverted = workerData.merged_reverse_converted || false;
                     
                     // Get difficulty from connection_difficulties array (use first/current difficulty)
                     var difficulty = 0;
@@ -1850,6 +1854,8 @@
                             address: baseAddress,
                             mergedAddress: null,
                             mergedAutoConverted: false,
+                            mergedRedistributed: false,
+                            mergedReverseConverted: false,
                             workers: [],
                             totalHashrate: 0,
                             totalEstimatedHashrate: 0,
@@ -1863,6 +1869,8 @@
                     if (mergedAddr && !minerGroups[baseAddress].mergedAddress) {
                         minerGroups[baseAddress].mergedAddress = mergedAddr;
                         minerGroups[baseAddress].mergedAutoConverted = mergedAutoConverted;
+                        minerGroups[baseAddress].mergedRedistributed = mergedRedistributed;
+                        minerGroups[baseAddress].mergedReverseConverted = mergedReverseConverted;
                     }
                     
                     minerGroups[baseAddress].workers.push({
@@ -1967,6 +1975,18 @@
                         .attr('href', 'miner.html?address=' + miner.address)
                         .attr('onclick', 'event.stopPropagation()')
                         .text(miner.address);
+                    // LTC address status indicators
+                    if (miner.mergedReverseConverted) {
+                        addressCell.append('span')
+                            .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                            .attr('title', 'LTC address reverse-derived from DOGE key (original LTC address was invalid)')
+                            .text('⚠ from DOGE');
+                    } else if (miner.mergedRedistributed) {
+                        addressCell.append('span')
+                            .attr('style', 'color: #e04040; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                            .attr('title', 'LTC address invalid — rewards redistributed to PPLNS miners')
+                            .text('❗ invalid');
+                    }
                     if (miner.mergedAddress) {
                         var mergedDiv = addressCell.append('div')
                             .attr('style', 'font-size: 0.7rem; color: #c3a634; margin-top: 2px; margin-left: 20px;');
@@ -1977,12 +1997,32 @@
                             .attr('onclick', 'event.stopPropagation()')
                             .attr('style', 'color: #c3a634; text-decoration: none;')
                             .text(miner.mergedAddress);
-                        if (miner.mergedAutoConverted) {
+                        if (miner.mergedReverseConverted) {
+                            // Case 4: Invalid LTC but valid DOGE — DOGE preserved, LTC reverse-derived
                             mergedDiv.append('span')
-                                .attr('style', 'color: #888; font-size: 0.6rem; margin-left: 4px;')
-                                .attr('title', 'Auto-converted from LTC address (same pubkey hash)')
-                                .text('(auto)');
+                                .attr('style', 'color: #e8a900; font-size: 0.7rem; margin-left: 4px; font-weight: bold;')
+                                .attr('title', 'Case 4: Invalid LTC address — DOGE preserved, LTC reverse-derived from DOGE key')
+                                .text('⚠ reverse');
+                        } else if (miner.mergedRedistributed) {
+                            // Case 3: Both invalid — both redistributed
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #e04040; font-size: 0.7rem; margin-left: 4px; font-weight: bold;')
+                                .attr('title', 'Both LTC and DOGE addresses invalid — rewards redistributed to PPLNS miners')
+                                .text('❗ redistributed');
+                        } else if (miner.mergedAutoConverted) {
+                            // Case 2: Valid LTC, no explicit DOGE — auto-derived from LTC key
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
+                                .attr('title', 'Auto-converted from LTC address (same pubkey hash) — set explicit DOGE address for safety')
+                                .text('⚠ auto');
                         }
+                    } else if (miner.mergedRedistributed) {
+                        // No DOGE address at all and redistributed — show warning
+                        var mergedDiv = addressCell.append('div')
+                            .attr('style', 'font-size: 0.7rem; color: #e04040; margin-top: 2px; margin-left: 20px;');
+                        mergedDiv.append('span')
+                            .attr('title', 'No valid DOGE address — merged rewards redistributed to PPLNS miners')
+                            .text('🐕 ❗ No DOGE — redistributed');
                     }
                     if (miner.workers.length > 1) {
                         addressCell.append('span')

@@ -25,6 +25,8 @@ litecoin_address,dogecoin_address
 ```
 **Note**: We use `,` (comma) as the separator. This avoids conflicts with HTTP Basic Auth (`:`) and difficulty syntax (`+`).
 
+**Order protection**: The expected order is always `LTC,DOGE`. If you accidentally swap them (`DOGE,LTC`), P2Pool auto-detects and corrects it with a log warning.
+
 Example: `mm3suEPoj1WnhYuRTdoM6dfEXQvZEyuu9h,nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB`
 
 ### With Worker Name
@@ -160,6 +162,7 @@ Using miner dogecoin address: nmkmeRtJu3wzg8THQYpnaUpTUtqKP15zRB
 - Ensure addresses are for the correct network (testnet vs mainnet)
 - Check address format (no extra spaces or characters)
 - Verify comma separator between addresses
+- If you see `Detected swapped address order` in logs, the addresses were in wrong order (`DOGE,LTC` instead of `LTC,DOGE`) — this is auto-corrected but you should fix your miner config
 
 ### Dogecoin Rewards Not Received
 - Check if pool detected auxpow: Look for "Detected auxpow-capable merged mining daemon" in logs
@@ -249,7 +252,43 @@ A: No, Litecoin earnings work exactly the same as standard P2Pool mining.
 A: Yes, just update the username in your miner configuration.
 
 **Q: What happens if my Dogecoin address is invalid?**
-A: The merged block submission will fail. Use valid addresses only.
+A: If your LTC address is valid, DOGE will be auto-derived from your LTC public key hash. If your LTC is also invalid, rewards are redistributed to PPLNS miners. See the Address Redistribution Policy below.
+
+**Q: What if I accidentally put the DOGE address first?**
+A: P2Pool detects the swapped order (`DOGE,LTC` instead of `LTC,DOGE`) and auto-corrects it. Both chains pay correctly. You'll see a one-time warning in the node logs. Fix your miner config to avoid the warning.
+
+## Address Redistribution Policy
+
+When miners connect with invalid or missing addresses, P2Pool handles each combination according to a 4-case policy:
+
+| Case | LTC Address | DOGE Address | LTC Payout | DOGE Payout |
+|------|------------|-------------|------------|-------------|
+| 1 | Valid | Valid (explicit) | Correct | Correct |
+| 2 | Valid | Missing/invalid | Correct | Auto-derived from LTC key |
+| 3 | Invalid | Missing/invalid | Redistributed (PPLNS) | Redistributed (PPLNS) |
+| 4 | Invalid | Valid (explicit) | Reverse-derived from DOGE key | Correct (preserved) |
+
+### Case Details
+
+**Case 1 — Both Valid**: Best practice. Both addresses are used as-is. No conversion needed.
+
+**Case 2 — Valid LTC, no/bad DOGE**: The 20-byte pubkey hash from the LTC address is re-encoded with Dogecoin's address version to derive a DOGE P2PKH address. This works correctly for P2PKH and P2WPKH (bech32) LTC addresses. Dashboard shows `⚠ auto` indicator.
+
+**Case 3 — Both Invalid**: Both LTC and DOGE rewards are redistributed probabilistically to other PPLNS miners per the `--redistribute` mode (pplns/fee/boost/donate). Dashboard shows `❗ redistributed` on both chains.
+
+**Case 4 — Invalid LTC, Valid DOGE**: The explicit DOGE address is preserved. The DOGE pubkey hash is reverse-converted to an LTC address (same hash, LTC version byte). This ensures the miner gets both payouts from the same key. Dashboard shows `⚠ from DOGE` on LTC and `⚠ reverse` on DOGE.
+
+> ⚠️ **P2SH caveat:** If the DOGE address is P2SH (`9...`/`A...`), the reverse-derived LTC P2SH (`M...`) references the **same redeem script hash**. This is only spendable on Litecoin if the underlying redeem script uses opcodes valid on both chains. For standard multisig or P2PKH-in-P2SH this works correctly. For non-standard scripts, provide a valid LTC address explicitly.
+
+### Dashboard Indicators
+
+| Indicator | Color | Meaning |
+|-----------|-------|---------|
+| *(none)* | — | All addresses valid and explicit (Case 1) |
+| `⚠ auto` | Yellow | DOGE auto-derived from LTC key (Case 2) |
+| `❗ redistributed` | Red | Rewards being given to other miners (Case 3) |
+| `⚠ from DOGE` | Orange | LTC reverse-derived from DOGE key (Case 4) |
+| `⚠ reverse` | Orange | DOGE preserved, LTC was reverse-derived (Case 4) |
 
 ## Support
 

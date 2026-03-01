@@ -1405,6 +1405,35 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             print >>sys.stderr, '[MERGED] Validated explicit DOGE address: %s (chain: %s, script: %s)' % (merged_addr, chain_name, script.encode('hex'))
                     except (ValueError, Exception) as e:
                         pass  # falls through to !validated branch below
+
+                if not validated and chain_net is not None:
+                    # Guardrail: detect likely swapped order "DOGE,LTC" and auto-correct to "LTC,DOGE".
+                    # Expected format is always "LTC,DOGE".
+                    try:
+                        swapped_doge_pubkey_hash, swapped_doge_version, swapped_doge_witver = bitcoin_data.address_to_pubkey_hash(user, chain_net)
+                        bitcoin_data.address_to_pubkey_hash(merged_addr, self.node.net.PARENT)
+
+                        # Swap in-memory interpretation so payout logic uses correct chains.
+                        original_first = user
+                        original_second = merged_addr
+                        user = original_second
+                        merged_addr = original_first
+
+                        script = bitcoin_data.pubkey_hash_to_script2(
+                            swapped_doge_pubkey_hash, swapped_doge_version, swapped_doge_witver, chain_net)
+                        merged_addresses['dogecoin'] = merged_addr
+                        merged_addresses['_validated'] = [{'chain_id': 98, 'script': script}]
+                        validated = True
+
+                        if not hasattr(self, '_merged_swapped_addrs'):
+                            self._merged_swapped_addrs = set()
+                        swap_key = (original_first, original_second)
+                        if swap_key not in self._merged_swapped_addrs:
+                            self._merged_swapped_addrs.add(swap_key)
+                            print >>sys.stderr, '[MERGED] WARNING: Detected swapped address order "%s,%s" (expected LTC,DOGE). Auto-corrected to "%s,%s".' % (
+                                original_first, original_second, user, merged_addr)
+                    except (ValueError, Exception):
+                        pass
                 
                 if not validated:
                     # Address failed validation on the current DOGE network.
@@ -1464,6 +1493,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 if not user or not user.strip():
                     # Empty address: redistribute per --redistribute mode
                     pubkey_hash, pubkey_type = self._redistribute_share()
+                    merged_addresses['_redistributed'] = True
+                    merged_addresses['_reverse_converted'] = False
                     print >>sys.stderr, '[POOL] Empty miner address from %s - redistributed (%s mode)' % (peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
                 else:
                     # Cache miner address resolution — same address produces same result every time
@@ -1546,11 +1577,100 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         pubkey_hash, _v2, _wv2 = bitcoin_data.address_to_pubkey_hash(user, self.node.net.PARENT)
                         pubkey_type = p2pool_data.get_pubkey_type(_v2, _wv2, self.node.net.PARENT)
             except: # Invalid/unparseable address - probabilistic redistribution
-                # Parent chain: redistribute per --redistribute mode
-                # Merged chain: preserve valid explicit address if provided
-                pubkey_hash, pubkey_type = self._redistribute_share()
-                print >>sys.stderr, '[POOL] Invalid miner address %s from %s - redistributed (%s mode)' % (
-                    user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
+                # ================================================================
+                # CASE 4 CHECK: Invalid LTC + Valid explicit DOGE
+                # ================================================================
+                # If the miner supplied a valid DOGE address but their LTC address
+                # is invalid/unparseable, we can REVERSE-CONVERT the DOGE address
+                # back to an LTC address (same pubkey_hash, different version byte).
+                # This preserves the miner's explicit DOGE payout AND gives them
+                # an LTC payout derived from the same key — fair for both chains.
+                #
+                # Policy matrix:
+                #   Case 1: Valid LTC + Valid DOGE   → both correct (handled above)
+                #   Case 2: Valid LTC + no/bad DOGE  → auto-convert LTC→DOGE (handled above)
+                #   Case 3: Invalid LTC + no/bad DOGE → both redistributed (below)
+                #   Case 4: Invalid LTC + Valid DOGE  → reverse-convert DOGE→LTC (HERE)
+                # ================================================================
+                valid_merged = merged_addresses.get('_validated')
+                if valid_merged:
+                    # Case 4: We have a valid explicit DOGE address — reverse-convert to LTC
+                    try:
+                        # Extract the validated DOGE entry (chain_id 98).
+                        # Be resilient to future multi-chain ordering changes.
+                        doge_entry = None
+                        for entry in valid_merged:
+                            if entry.get('chain_id') == 98:
+                                doge_entry = entry
+                                break
+                        if doge_entry is None and valid_merged:
+                            doge_entry = valid_merged[0]
+
+                        doge_script = doge_entry['script']
+                        chain_id = doge_entry['chain_id']
+                        doge_net = self._get_merged_address_net(chain_id)
+                        doge_addr = merged_addresses.get('dogecoin', '(unknown)')
+
+                        # Parse DOGE address to get the pubkey_hash.
+                        # Fallback to validated script parsing if address string is unavailable.
+                        doge_pubkey_hash = None
+                        doge_version = None
+                        if doge_addr and doge_addr != '(unknown)' and doge_net is not None:
+                            doge_pubkey_hash, doge_version, doge_witver = bitcoin_data.address_to_pubkey_hash(
+                                doge_addr, doge_net)
+                        else:
+                            # P2PKH: OP_DUP OP_HASH160 <20-byte-hash> OP_EQUALVERIFY OP_CHECKSIG
+                            if len(doge_script) == 25 and doge_script[:3] == '\x76\xa9\x14' and doge_script[-2:] == '\x88\xac':
+                                doge_pubkey_hash = bitcoin_data.pack.IntType(160).unpack(doge_script[3:23])
+                                doge_version = getattr(doge_net, 'ADDRESS_VERSION', None) if doge_net is not None else None
+                            # P2SH: OP_HASH160 <20-byte-hash> OP_EQUAL
+                            elif len(doge_script) == 23 and doge_script[:2] == '\xa9\x14' and doge_script[-1:] == '\x87':
+                                doge_pubkey_hash = bitcoin_data.pack.IntType(160).unpack(doge_script[2:22])
+                                doge_version = getattr(doge_net, 'ADDRESS_P2SH_VERSION', None) if doge_net is not None else None
+                            else:
+                                raise ValueError('unsupported DOGE script format for reverse conversion')
+                            if doge_version is None:
+                                raise ValueError('missing DOGE network version for reverse conversion')
+                        
+                        # Determine address type from DOGE version
+                        parent_net = self.node.net.PARENT
+                        if doge_version == doge_net.ADDRESS_P2SH_VERSION:
+                            # DOGE P2SH → LTC P2SH
+                            pubkey_hash = doge_pubkey_hash
+                            pubkey_type = p2pool_data.PUBKEY_TYPE_P2SH
+                            ltc_addr = bitcoin_data.pubkey_hash_to_address(
+                                doge_pubkey_hash, parent_net.ADDRESS_P2SH_VERSION, -1, parent_net)
+                        else:
+                            # DOGE P2PKH → LTC P2PKH
+                            pubkey_hash = doge_pubkey_hash
+                            pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
+                            ltc_addr = bitcoin_data.pubkey_hash_to_address(
+                                doge_pubkey_hash, parent_net.ADDRESS_VERSION, -1, parent_net)
+                        
+                        merged_addresses['_reverse_converted'] = True
+                        merged_addresses['_redistributed'] = False
+                        # Log only once per address to avoid spam
+                        if not hasattr(self, '_reverse_converted_addrs'):
+                            self._reverse_converted_addrs = set()
+                        if doge_addr not in self._reverse_converted_addrs:
+                            self._reverse_converted_addrs.add(doge_addr)
+                            print >>sys.stderr, '[POOL] CASE 4: Invalid LTC but valid DOGE %s — reverse-converted to LTC %s (pubkey_hash preserved)' % (
+                                doge_addr, ltc_addr)
+                    except Exception as e:
+                        # Reverse conversion failed — fall back to full redistribution
+                        pubkey_hash, pubkey_type = self._redistribute_share()
+                        merged_addresses['_redistributed'] = True
+                        merged_addresses['_reverse_converted'] = False
+                        print >>sys.stderr, '[POOL] CASE 4 reverse-convert failed for %s: %s — full redistribution (%s mode)' % (
+                            user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)',
+                            e, getattr(self.args, 'redistribute_mode', 'pplns'))
+                else:
+                    # Case 3: No valid merged address either — full redistribution
+                    pubkey_hash, pubkey_type = self._redistribute_share()
+                    merged_addresses['_redistributed'] = True
+                    merged_addresses['_reverse_converted'] = False
+                    print >>sys.stderr, '[POOL] Invalid miner address %s from %s - redistributed (%s mode)' % (
+                        user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
         
         # Append worker name to user for identification
         if worker:

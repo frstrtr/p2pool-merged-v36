@@ -537,11 +537,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             urgency='info',
             title='Invalid Address Redistribution',
             text=(
-                'Miners with invalid or unparseable DOGE addresses will NOT '
-                'receive merged mining rewards. Their share of merged rewards '
-                'is redistributed probabilistically to other PPLNS miners '
-                'with valid addresses.'
-            ),
+                'Miners with invalid or unparseable addresses are handled '
+                'per case: (1) Invalid %s + no DOGE = both redistributed. '
+                '(2) Invalid %s + valid DOGE = DOGE preserved, %s '
+                'reverse-derived from DOGE key (Case 4). '
+                'Redistributed shares go probabilistically to PPLNS miners.'
+            ) % (parent_symbol, parent_symbol, parent_symbol),
         ))
 
         return warnings
@@ -1124,6 +1125,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     'connection_difficulties': conn_aggregate.get('difficulties', []) if conn_aggregate else [],
                     'merged_addresses': cw_info.get('merged_addresses', {}),
                     'merged_auto_converted': cw_info.get('merged_auto_converted', False),
+                    'merged_redistributed': cw_info.get('merged_redistributed', False),
+                    'merged_reverse_converted': cw_info.get('merged_reverse_converted', False),
                 }
             
             # Also include currently connected workers (even if no shares yet)
@@ -1142,6 +1145,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         'connection_difficulties': winfo.get('difficulties', []),
                         'merged_addresses': winfo.get('merged_addresses', {}),
                         'merged_auto_converted': winfo.get('merged_auto_converted', False),
+                        'merged_redistributed': winfo.get('merged_redistributed', False),
+                        'merged_reverse_converted': winfo.get('merged_reverse_converted', False),
                     }
                 else:
                     # Update connection info for existing workers
@@ -1151,6 +1156,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     if 'merged_addresses' not in formatted_workers[worker_name]:
                         formatted_workers[worker_name]['merged_addresses'] = winfo.get('merged_addresses', {})
                         formatted_workers[worker_name]['merged_auto_converted'] = winfo.get('merged_auto_converted', False)
+                        formatted_workers[worker_name]['merged_redistributed'] = winfo.get('merged_redistributed', False)
+                        formatted_workers[worker_name]['merged_reverse_converted'] = winfo.get('merged_reverse_converted', False)
             
             return {
                 'pool': stats,

@@ -2,6 +2,38 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.10-alpha] - 2026-03-01
+
+### Features
+- **Swapped address order detection** — If a miner connects as `DOGE_ADDR,LTC_ADDR` (reversed order), P2Pool detects the swap, auto-corrects to `LTC_ADDR,DOGE_ADDR`, and logs a warning. Both chains pay correctly without miner intervention.
+- **Case 4 address redistribution** — When a miner provides an invalid LTC address but a valid explicit DOGE address, the DOGE address is now preserved and the LTC address is reverse-derived from the DOGE pubkey hash. Previously, both were redistributed. This implements a fair 4-case address handling policy:
+  - Case 1: Valid LTC + Valid DOGE → both correct
+  - Case 2: Valid LTC + no/bad DOGE → auto-convert LTC→DOGE
+  - Case 3: Invalid LTC + no/bad DOGE → both redistributed
+  - Case 4: Invalid LTC + Valid DOGE → **NEW** reverse-convert DOGE→LTC, preserve DOGE (P2SH caveat: reverse-derived LTC P2SH is only spendable if the redeem script is valid on both chains)
+- **Dashboard address indicators** — Color-coded visual indicators on the Active Miners table:
+  - `⚠ auto` (yellow) for auto-converted DOGE addresses (Case 2)
+  - `❗ redistributed` (red) for fully redistributed addresses (Case 3)
+  - `⚠ from DOGE` / `⚠ reverse` (orange) for reverse-derived addresses (Case 4)
+  - `❗ invalid` (red) next to LTC addresses when invalid
+  - `🐕 ❗ No DOGE — redistributed` for miners with no DOGE address and redistribution active
+
+### API
+- **New flags in stratum_stats API** — Added `merged_redistributed` and `merged_reverse_converted` boolean fields to worker data, alongside existing `merged_auto_converted`.
+
+### Documentation
+- **Address Redistribution Policy** — Added comprehensive 4-case policy table and dashboard indicator guide to `MULTIADDRESS_MINING_GUIDE.md`.
+- **Updated address warnings** — `_get_address_warnings()` API now describes the Case 4 reverse-conversion policy.
+
+### Hardening
+- **Explicit DOGE chain selection** — Case 4 reverse conversion now explicitly searches for `chain_id == 98` (Dogecoin) instead of assuming the first merged entry. Prevents misidentification if multiple merged chains are configured.
+- **Script fallback parsing** — When a display address string is unavailable during reverse conversion, the code falls back to direct P2PKH/P2SH script pattern matching (`OP_DUP OP_HASH160 <20> ... OP_EQUALVERIFY OP_CHECKSIG` and `OP_HASH160 <20> ... OP_EQUAL`).
+
+### Testing
+- **Case 4 test suite** — New `tests/test_case4_p2sh_reverse.py` with 6 tests: version byte sanity, swapped-comma detection predicate, P2PKH reverse baseline, P2SH reverse conversion, P2SH multi-hash edge cases (zero/max), and cross-chain parse rejection. All pass on PyPy 2.7.
+
+---
+
 ## [v36-0.09-alpha] - 2026-03-01
 
 ### Features

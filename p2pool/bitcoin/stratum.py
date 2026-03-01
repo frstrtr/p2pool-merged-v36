@@ -208,6 +208,8 @@ class PoolStatistics(object):
                         'ips': set(),
                         'merged_addresses': merged_display,
                         'merged_auto_converted': bool(conn_merged.get('_auto_converted')),
+                        'merged_redistributed': bool(conn_merged.get('_redistributed')),
+                        'merged_reverse_converted': bool(conn_merged.get('_reverse_converted')),
                     }
                 workers[worker_name]['connections'] += 1
                 if hasattr(conn, 'target') and conn.target:
