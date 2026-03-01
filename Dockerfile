@@ -1,8 +1,9 @@
 # P2Pool Merged Mining (V36) — Litecoin + Dogecoin
 # https://github.com/frstrtr/p2pool-merged-v36
 #
-# Build:  docker build -t p2pool-ltc .
-# Run:    docker run -p 9327:9327 -p 9326:9326 p2pool-ltc --help
+# Pre-built: docker pull ghcr.io/frstrtr/p2pool-merged-v36:latest
+# Build:     docker build -t p2pool-ltc .
+# Run:       docker run -p 9327:9327 -p 9326:9326 p2pool-ltc --help
 #
 # For full merged mining with MM-Adapter, use docker-compose.yml instead.
 

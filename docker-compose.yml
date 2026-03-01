@@ -12,6 +12,7 @@
 services:
   # ── P2Pool Node ────────────────────────────────────────────────────────
   p2pool:
+    image: ghcr.io/frstrtr/p2pool-merged-v36:latest
     build: .
     container_name: p2pool
     restart: unless-stopped

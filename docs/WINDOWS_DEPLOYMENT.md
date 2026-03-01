@@ -448,7 +448,13 @@ Store blockchain data **inside the WSL2 filesystem** (e.g., `~/.litecoin/`), not
 ## Option 2: Docker on WSL2
 
 The project ships a root `Dockerfile`, `docker-compose.yml`, and `.env.example` for
-one-command deployment. Tested: first build ~3 min (cached builds instant), P2Pool image ~757MB, MM-Adapter ~226MB.
+one-command deployment. A pre-built image is also available on GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/frstrtr/p2pool-merged-v36:latest
+```
+
+Tested: first build ~3 min (cached builds instant), P2Pool image ~757MB, MM-Adapter ~226MB.
 
 ### Prerequisites
 - [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) with WSL2 backend enabled
@@ -487,8 +493,9 @@ docker compose logs -f mm-adapter # watch adapter logs
 ### Step 3 — Standalone mode (manual docker run, no compose)
 
 ```powershell
-# Build image
-docker build -t p2pool-ltc .
+# Use pre-built image or build locally
+docker pull ghcr.io/frstrtr/p2pool-merged-v36:latest
+# Or: docker build -t p2pool-ltc .
 
 # Run LTC-only (no merged mining)
 docker run -d --name p2pool `
@@ -513,6 +520,7 @@ docker run -d --name p2pool `
 | File | Purpose |
 |------|---------|
 | [`Dockerfile`](../Dockerfile) | Multi-stage build: Ubuntu 22.04 + PyPy 2.7 + all deps |
+| `ghcr.io/frstrtr/p2pool-merged-v36` | Pre-built Docker image on [GitHub Container Registry](https://ghcr.io/frstrtr/p2pool-merged-v36) |
 | [`docker-compose.yml`](../docker-compose.yml) | Full stack: P2Pool + MM-Adapter with health checks |
 | [`.env.example`](../.env.example) | All configurable settings (passwords, IPs, ports, fees) |
 | [`mm-adapter/config.docker.example.yaml`](../mm-adapter/config.docker.example.yaml) | Docker-specific adapter config template |

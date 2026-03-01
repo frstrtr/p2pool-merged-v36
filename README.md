@@ -3,6 +3,7 @@
 > **Lineage:** [`p2pool/p2pool`](https://github.com/p2pool/p2pool) (forrestv) → [`jtoomim/p2pool`](https://github.com/jtoomim/p2pool) (V35) → **`frstrtr/p2pool-merged-v36`** (V36 + merged mining)
 
 [![Latest Release](https://img.shields.io/github/v/release/frstrtr/p2pool-merged-v36)](https://github.com/frstrtr/p2pool-merged-v36/releases/latest)
+[![Docker Image](https://img.shields.io/badge/ghcr.io-p2pool--merged--v36-blue?logo=docker)](https://ghcr.io/frstrtr/p2pool-merged-v36)
 [![License](https://img.shields.io/github/license/frstrtr/p2pool-merged-v36)](LICENSE)
 
 Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), building on the p2pool protocol with V36 share format.
@@ -100,9 +101,13 @@ The installation guide covers:
 ### Docker (fastest)
 
 Requires [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/).
-First build takes ~3 minutes; subsequent starts are instant. Share chain sync takes ~2 minutes after first start.
+Pre-built image available on GitHub Container Registry — no build step needed.
+Share chain sync takes ~2 minutes after first start.
 
 ```bash
+# Pull pre-built image (or build locally with: docker build -t p2pool-ltc .)
+docker pull ghcr.io/frstrtr/p2pool-merged-v36:latest
+
 git clone https://github.com/frstrtr/p2pool-merged-v36.git
 cd p2pool-merged-v36
 
@@ -110,7 +115,7 @@ cd p2pool-merged-v36
 cp .env.example .env                                    # edit: set passwords and LTC payout address
 cp mm-adapter/config.docker.example.yaml mm-adapter/config.docker.yaml  # edit: set DOGE credentials
 
-# Start everything (builds on first run)
+# Start everything (uses pre-built image or builds on first run)
 docker compose up -d
 
 # Check status

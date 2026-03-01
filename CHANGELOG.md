@@ -12,6 +12,9 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 - **Docs cleanup** — Replaced example-only placeholder values across all documentation, scripts, and test fixtures for consistency and clarity. Updated 38 files spanning `docs/`, `scripts/`, `tests/`, `mm-adapter/`, `README.md`, and `.gitignore`.
 - **`.gitignore` update** — Added `mm-adapter/config.yaml` to prevent accidental commits of local configuration files.
 
+### Infrastructure
+- **Docker image on ghcr.io** — Pre-built Docker image published to GitHub Container Registry (`ghcr.io/frstrtr/p2pool-merged-v36`). Available as `:latest` and `:v36-0.09-alpha` tags. Eliminates the ~3 min local build step for Docker users.
+
 ---
 
 ## [v36-0.08-alpha] - 2026-02-28

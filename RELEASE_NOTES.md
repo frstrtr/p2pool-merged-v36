@@ -23,6 +23,16 @@ Tested and verified on macOS 26.3 (x86_64, Intel Mac Pro) with full merged minin
 - Updated `.gitignore` to cover local MM-Adapter configuration files
 - 38 files updated across `docs/`, `scripts/`, `tests/`, `mm-adapter/`, `README.md`
 
+### Docker Image on ghcr.io
+
+Pre-built Docker image published to GitHub Container Registry — no local build needed:
+
+```bash
+docker pull ghcr.io/frstrtr/p2pool-merged-v36:latest
+```
+
+Available tags: `latest`, `v36-0.09-alpha`
+
 ## Platform Support
 
 | Platform | Status |
