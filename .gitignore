@@ -18,7 +18,6 @@ ltc_scrypt.so
 *.so
 
 .DS_Store
-.github/
 enable_opnsense_ssh.sh
 # Sensitive configuration files with passwords/credentials
 .env

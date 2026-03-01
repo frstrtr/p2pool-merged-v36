@@ -9,6 +9,10 @@
 
 FROM ubuntu:22.04 AS base
 
+LABEL org.opencontainers.image.source="https://github.com/frstrtr/p2pool-merged-v36"
+LABEL org.opencontainers.image.description="P2Pool Merged Mining (V36) — Litecoin + Dogecoin"
+LABEL org.opencontainers.image.licenses="GPL-3.0"
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYPY_VERSION=7.3.17
 ENV PYPY_DIR=/opt/pypy2.7-v${PYPY_VERSION}-linux64
