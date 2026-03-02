@@ -444,6 +444,32 @@ dogecoin-cli getnewaddress "" legacy         # P2PKH:  D...
 * **pycryptodome**: >=3.9.0
 * **ltc_scrypt**: Scrypt hashing — `pip install 'scrypt>=0.8.0,<=0.8.22'` (v0.8.23+ uses f-strings, breaks Python 2.7/PyPy). Falls back to legacy C extension in `litecoin_scrypt/` if py-scrypt is unavailable.
 
+#### System Requirements (Hardware)
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| **CPU** | 2 cores | 4+ cores |
+| **RAM** | 4 GB | 8–16 GB (see note on adaptive PPLNS windows) |
+| **Disk** | 100 GB (LTC + DOGE blockchains) | 200+ GB (with pruning headroom) |
+| **Network** | Stable broadband | Low-latency for share propagation |
+
+> **Adaptive PPLNS Windows (V37+):** Future anti-hopping defenses scale the
+> PPLNS window with expected time-to-block. Memory usage for the share
+> tracker scales accordingly (verified against live node, March 2026):
+>
+> | Pool Hashrate | TTB | Window | Tracker RAM |
+> |---------------|------|--------|-------------|
+> | 295 GH/s (peak seen) | 18 days | 9 days | ~62 MB |
+> | 49.5 GH/s (current) | 107 days | 53.5 days | ~370 MB |
+> | 10 GH/s | 1.5 years | 264 days | ~1.8 GB |
+> | 1 GH/s | 14.5 years | 7.2 years | ~18 GB |
+>
+> At the current pool size (~50 GH/s), overhead is ~370 MB. At peak hashrate
+> (~295 GH/s), only ~62 MB. Operators should provision **8–16 GB RAM** total
+> (including Litecoin + Dogecoin full nodes). See
+> [POOL_HOPPING_ATTACKS.md §7.3.10](docs/POOL_HOPPING_ATTACKS.md) for the
+> full adaptive design and live data analysis.
+
 ### Features
 
 * ✅ **Scrypt PoW**: Litecoin/Dogecoin Scrypt (N=1024, r=1, p=1) mining

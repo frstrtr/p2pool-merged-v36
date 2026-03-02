@@ -817,10 +817,18 @@ class BaseShare(object):
                 raise ValueError('base_subsidy is None in subsidy calculation')
             share_data = dict(share_data, subsidy=base_subsidy + definite_fees)
         
-        weights, total_weight, donation_weight = tracker.get_cumulative_weights(previous_share.share_data['previous_share_hash'] if previous_share is not None else None,
-            max(0, min(height, net.REAL_CHAIN_LENGTH) - 1),
-            65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target),
-        )
+        # Phase 2a: Use exponentially-decayed PPLNS weights when V36 is active
+        _pplns_start = previous_share.share_data['previous_share_hash'] if previous_share is not None else None
+        _pplns_max_shares = max(0, min(height, net.REAL_CHAIN_LENGTH) - 1)
+        _pplns_desired_weight = 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target)
+        
+        if v36_active:
+            weights, total_weight, donation_weight = get_decayed_cumulative_weights(
+                tracker, _pplns_start, _pplns_max_shares, _pplns_desired_weight, net)
+        else:
+            weights, total_weight, donation_weight = tracker.get_cumulative_weights(
+                _pplns_start, _pplns_max_shares, _pplns_desired_weight)
+        
         if total_weight != sum(weights.itervalues()) + donation_weight:
             raise ValueError('PPLNS weight mismatch: total_weight=%d, sum+donation=%d' % (total_weight, sum(weights.itervalues()) + donation_weight))
         
@@ -1746,6 +1754,97 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
         assert sc == max_shares or tw == desired_weight
         return math.add_dicts(*math.flatten_linked_list(wl)), tw, dw
 
+# =========================================================================
+# Phase 2a: Exponential PPLNS Decay (V36 consensus)
+# =========================================================================
+#
+# Apply exponential decay to PPLNS share weights: recent shares are worth
+# more than older ones.  This makes hopping unprofitable because a hopper's
+# high-weight shares earned during a burst will have largely decayed by the
+# time the next block is found after they leave.
+#
+# Decay formula:  weight_i = attempts_i × decay^depth_i
+#   where  decay = 2^(-1/HALF_LIFE) ≈ 1 - ln(2)/HALF_LIFE
+#          HALF_LIFE = CHAIN_LENGTH // 4
+#
+# After HALF_LIFE shares, a share's weight is 50% of its original value.
+# After CHAIN_LENGTH shares, a share's weight is 6.25% of original.
+#
+# Uses 40-bit fixed-point integer arithmetic for consensus determinism.
+# =========================================================================
+
+_DECAY_PRECISION = 40
+_DECAY_SCALE = 1 << _DECAY_PRECISION
+# ln(2) × 10^6, truncated for integer arithmetic
+_LN2_MICRO = 693147
+
+def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weight, net):
+    """Compute PPLNS weights with exponential depth-decay (Phase 2a).
+    
+    Iterates the share chain directly (O(n), n=REAL_CHAIN_LENGTH).
+    Cannot use the SkipList cache because decay depends on share position.
+    
+    Args:
+        tracker: OkayTracker instance
+        start_hash: hash of the share to start walking from (most recent)
+        max_shares: maximum number of shares to include
+        desired_weight: maximum total weight (existing PPLNS cap)
+        net: network parameters (CHAIN_LENGTH used for half-life)
+    
+    Returns:
+        (weights, total_weight, donation_weight) — same shape as
+        WeightsSkipList, for drop-in replacement.
+    """
+    half_life = max(net.CHAIN_LENGTH // 4, 1)
+    
+    # Per-share decay multiplier in fixed-point:
+    #   2^(-1/H) ≈ 1 - ln(2)/H
+    #   In fixed-point: SCALE - SCALE × 693147 / (10^6 × H)
+    decay_per = _DECAY_SCALE - (_DECAY_SCALE * _LN2_MICRO) // (1000000 * half_life)
+    
+    weights = {}
+    total_weight = 0
+    donation_weight = 0
+    share_count = 0
+    decay_fp = _DECAY_SCALE  # starts at 1.0 (depth 0)
+    
+    current_hash = start_hash
+    while current_hash is not None and share_count < max_shares:
+        share = tracker.items[current_hash]
+        att = bitcoin_data.target_to_average_attempts(share.target)
+        
+        # Apply exponential decay in fixed-point
+        decayed_att = (att * decay_fp) >> _DECAY_PRECISION
+        
+        donation = share.share_data['donation']
+        addr_w = decayed_att * (65535 - donation)
+        don_w  = decayed_att * donation
+        this_total = addr_w + don_w  # = decayed_att * 65535
+        
+        # Cap at desired_weight (partial last share, matches SkipList behavior)
+        if total_weight + this_total > desired_weight:
+            remaining = desired_weight - total_weight
+            if this_total > 0:
+                addr_w = addr_w * remaining // this_total
+                don_w  = don_w * remaining // this_total
+            this_total = remaining
+        
+        weights[share.address] = weights.get(share.address, 0) + addr_w
+        total_weight += this_total
+        donation_weight += don_w
+        share_count += 1
+        
+        if total_weight >= desired_weight:
+            break
+        
+        # Walk to previous share
+        current_hash = share.previous_hash
+        
+        # Decay for next (older) share
+        decay_fp = (decay_fp * decay_per) >> _DECAY_PRECISION
+    
+    return weights, total_weight, donation_weight
+
 class OkayTracker(forest.Tracker):
     def __init__(self, net):
         forest.Tracker.__init__(self, delta_type=forest.get_attributedelta_type(dict(forest.AttributeDelta.attrs,
@@ -2175,12 +2274,22 @@ def get_user_stale_props(tracker, share_hash, lookbehind, net):
     return dict((pubkey_hash, stale/total) for pubkey_hash, (stale, total) in res.iteritems())
 
 def get_expected_payouts(tracker, best_share_hash, block_target, subsidy, net):
-    weights, total_weight, donation_weight = tracker.get_cumulative_weights(best_share_hash, min(tracker.get_height(best_share_hash), net.REAL_CHAIN_LENGTH), 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target))
+    best_share = tracker.items[best_share_hash]
+    _max_shares = min(tracker.get_height(best_share_hash), net.REAL_CHAIN_LENGTH)
+    _desired_weight = 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target)
+    
+    # Phase 2a: Use decayed PPLNS weights when V36 is active
+    if best_share.VERSION >= 36:
+        weights, total_weight, donation_weight = get_decayed_cumulative_weights(
+            tracker, best_share_hash, _max_shares, _desired_weight, net)
+    else:
+        weights, total_weight, donation_weight = tracker.get_cumulative_weights(
+            best_share_hash, _max_shares, _desired_weight)
+    
     res = dict((script, subsidy*weight//total_weight) for script, weight in weights.iteritems())
     # Use correct donation address based on whether V36 is active:
     # V36+: COMBINED_DONATION_SCRIPT (P2SH) → combined_donation_script_to_address()
     # Pre-V36: DONATION_SCRIPT (P2PK) → donation_script_to_address()
-    best_share = tracker.items[best_share_hash]
     if best_share.VERSION >= 36:
         donation_addr = combined_donation_script_to_address(net)
     else:

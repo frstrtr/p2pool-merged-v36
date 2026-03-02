@@ -25,9 +25,34 @@ Complete installation guide for P2Pool on Ubuntu/Debian and **macOS (Intel)** sy
 ### Minimum Requirements
 - **OS**: Ubuntu 20.04+ or Debian 11+ (or macOS 12+ Intel — see [macOS section](#macos-intel-installation))
 - **CPU**: 2+ cores
-- **RAM**: 4GB minimum, 8GB recommended
+- **RAM**: 4GB minimum, 8GB recommended (see [Adaptive PPLNS note](#adaptive-pplns-memory) below)
 - **Disk**: 20GB+ (for Litecoin blockchain) + 80GB+ (for Dogecoin blockchain)
 - **Network**: Stable internet connection
+
+### Adaptive PPLNS Memory
+
+Future versions (V37+) include anti-pool-hopping defenses that scale the
+PPLNS window with expected time-to-block. The share tracker memory grows
+with pool conditions:
+
+| Pool Hashrate | Expected TTB | Adaptive Window | Tracker RAM |
+|---------------|-------------|-----------------|-------------|
+| 295 GH/s (peak seen) | ~18 days | 9 days | ~62 MB |
+| ★ 49.5 GH/s (current) | ~107 days | 53.5 days | ~370 MB |
+| 10 GH/s | ~1.5 years | 264 days | ~1.8 GB |
+| 1 GH/s | ~14.5 years | 7.2 years | ~18 GB |
+
+(★ = verified against live P2Pool node, March 2026)
+
+At the current pool hashrate (~50 GH/s), the adaptive tracker requires
+~370 MB of additional RAM. At peak observed hashrate (~295 GH/s), only
+~62 MB. Operators should provision **8–16 GB RAM** total (including
+Litecoin and Dogecoin full nodes). Machines already running both daemons
+(which themselves require 4+ GB RAM and 100+ GB disk) typically have
+sufficient headroom.
+
+See [POOL_HOPPING_ATTACKS.md §7.3.10](docs/POOL_HOPPING_ATTACKS.md) for the
+complete adaptive window design and resource analysis.
 
 ### Required Ports
 - **9333**: Litecoin P2P (incoming connections)
