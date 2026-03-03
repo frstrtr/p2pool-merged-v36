@@ -292,7 +292,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         @defer.inlineCallbacks
         def set_merged_work(merged_url, merged_userpass, merged_payout_address=None):
-            merged_proxy = jsonrpc.HTTPProxy(merged_url, dict(Authorization='Basic ' + base64.b64encode(merged_userpass)))
+            merged_proxy = jsonrpc.HTTPProxy(merged_url, dict(Authorization='Basic ' + base64.b64encode(merged_userpass)), timeout=15)
             
             # Initialize merged broadcaster for this chain (once per URL)
             # We'll determine the chainid from the first successful response

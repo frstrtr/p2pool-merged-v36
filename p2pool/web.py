@@ -1949,10 +1949,15 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             # RPC fallback verification for blocks still pending after tracker scan.
             # When p2pool restarts, shares may be evicted from the tracker but the
             # blocks they produced are still valid on the parent chain.
-            # Fire-and-forget async verification for any stale pending blocks.
+            # Fire-and-forget async verification — limit to 50 most recent pending
+            # to avoid flooding the RPC when history has thousands of blocks.
             now = time.time()
+            rpc_verify_count = 0
             for b in block_history:
                 if b.get('status') == 'pending' and (now - b.get('ts', 0)) > 30:
+                    rpc_verify_count += 1
+                    if rpc_verify_count > 50:
+                        break
                     def verify_via_rpc(block_rec):
                         def on_result(block_data):
                             if block_data and isinstance(block_data, dict):
@@ -1989,8 +1994,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     total_luck += b['luck']
                     luck_count += 1
             
-            # Return a copy with pool_avg_luck added
-            result = list(block_history)  # block_history is sorted newest-first
+            # Return only the most recent 200 blocks to keep the JSON
+            # response small.  Full history stays on disk.
+            MAX_RESPONSE = 200
+            result = block_history[:MAX_RESPONSE]  # block_history is sorted newest-first
             if result and luck_count > 0:
                 result[0] = dict(result[0])
                 result[0]['pool_avg_luck'] = total_luck / luck_count
