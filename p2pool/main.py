@@ -39,6 +39,7 @@ from bitcoin.broadcaster import NetworkBroadcaster
 from util import fixargparse, jsonrpc, variable, deferral, math, logging, switchprotocol
 from . import networks, web, work
 import p2pool, p2pool.data as p2pool_data, p2pool.node as p2pool_node
+from p2pool.monitor import PoolMonitor
 
 class keypool():
     keys = []
@@ -587,6 +588,8 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                 protocol = IRCClient
             reactor.connectTCP("irc.freenode.net", 6667, IRCClientFactory(), bindAddress=(worker_endpoint[0], 0))
         
+        pool_monitor = PoolMonitor(net)
+
         @defer.inlineCallbacks
         def status_thread():
             last_str = None
@@ -651,6 +654,17 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                         if gc.garbage:
                             print '%i pieces of uncollectable cyclic garbage! Types: %r' % (len(gc.garbage), map(type, gc.garbage))
                     
+                    # Phase 3L: Log-based monitoring (every cycle)
+                    if height > 10:
+                        try:
+                            pool_monitor.run_cycle(
+                                node.tracker,
+                                node.best_share_var.value,
+                                node.bitcoind_work.value,
+                            )
+                        except Exception as e:
+                            print >> sys.stderr, '[MONITOR] cycle error: %s' % e
+
                     if this_str != last_str or time.time() > last_time + 15:
                         print this_str
                         last_str = this_str

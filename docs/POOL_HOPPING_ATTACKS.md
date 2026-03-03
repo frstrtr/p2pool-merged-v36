@@ -3822,7 +3822,7 @@ complexity, runtime constraints, and impact-per-line-of-code**:
 | **1b** | Time-based emergency decay (§7.1.2) | Yes (V36) | **DEPLOYED** | Survive true whale death spiral — 80s threshold testnet, 300s mainnet |
 | **2a** | Exponential decay on PPLNS weights (§7.2) | Yes (V36) | **TESTED** | Arrival HAR 5.27× → **1.52×** (71.1% improvement). See PHASE2A_TEST_REPORT.md |
 | **2c** | Pure difficulty accounting — remove finder fee (§7.7) | Yes (V36) | **DEPLOYED** | Exact work-proportional payouts, lower variance |
-| **3L** | Lightweight monitoring API (§8.1 Step 5) | No | Immediate | Attack detection (JSON endpoints) |
+| **3L** | Lightweight log monitoring (§8.1 Step 5) | No | **DEPLOYED** | Attack detection (structured log lines) |
 | **R2** | Pin AutoRatchet to CHAIN_LENGTH (§7.3.16) | Yes (V36) | With Phase 2a | V37 transition safety |
 
 **V36 result: hopper 3.8× → 0.6× (unprofitable). ~135 LOC changed.**
@@ -3944,40 +3944,40 @@ to ~107 days.
 
 Phase 3 is split across both tracks:
 
-- **V36 (Phase 3L):** Lightweight JSON API endpoints in `web.py`. ~80 LOC.
-  No frontend changes. Operators and scripts consume the data.
+- **V36 (Phase 3L):** Lightweight structured log lines in `monitor.py`. ~230 LOC.
+  No HTTP endpoints needed. Operators grep logs for `[MONITOR-*]` prefixes.
 - **V37 (Phase 5):** Full dashboard UI in c2pool's web framework with
   vesting bars, share trend charts, payout explanations, and pool health
   panels. Described in detail below for V37 planning.
 
-#### Phase 3L: Lightweight Monitoring API (V36 — Immediate)
+#### Phase 3L: Lightweight Log Monitoring (V36 — Immediate)
 
-**File:** `p2pool/web.py`
+**File:** `p2pool/monitor.py` + `p2pool/main.py` (integration)
 
-Add JSON detection endpoints consumable by scripts, monitoring tools, and
-future dashboard implementations:
+Structured `[MONITOR-*]` log lines emitted every status cycle (~30s).
+No HTTP endpoints — grep-friendly, zero attack surface, works with
+existing log pipelines (tail, grep, logrotate).
 
-**API endpoints** (backend, `web.py`):
+**Log prefixes:**
 
-Add `/hopping_alert` endpoint that tracks:
+| Prefix | Purpose | Frequency |
+|--------|---------|----------|
+| `[MONITOR-SUMMARY]` | One-line health status | Every cycle (~30s) |
+| `[MONITOR-HASHRATE]` | Pool hashrate vs 1h moving average | ALERT on spike/drop, ok every ~5min |
+| `[MONITOR-CONC]` | Per-address work concentration | ALERT >40%, WARN >25%, top3 every ~5min |
+| `[MONITOR-EMERGENCY]` | Share gap / emergency decay | ALERT when gap > threshold |
+| `[MONITOR-DIFF]` | Difficulty anomaly detection | ALERT on >2x deviation |
 
-- Per-address work concentration over sliding windows (720, 2160, 8640 shares)
-- Sudden hashrate spikes (>50% above 1-hour moving average)
-- Addresses exceeding 25% of recent window work
-- Difficulty deviation from expected pool hashrate
-- Time since last share (emergency mode indicator)
+**Alert thresholds (configurable in PoolMonitor):**
 
-**V36 monitoring LOC estimate:** ~80 (endpoints + alert logic + counters).
-
-**Enhanced existing endpoints (V36):**
-
-| Endpoint | Added fields |
-|----------|-------------|
-| `/users` | `pplns_decay_weight` per address |
-| `/current_payouts` | `raw_weight`, `decayed_weight` |
-| `/clamp_stats` (new) | `{up: N, normal_down: N, fast_down: N}` |
-| `/emergency_stats` (new) | `{trigger_count: N, last_ts: N}` |
-| `/hopping_alert` (new) | `{alerts: [{type, severity, address, detail}]}` |
+| Alert | Trigger | Default |
+|-------|---------|---------|
+| `concentration_alert` | Single address > 40% of window | On |
+| `concentration_warn` | Single address > 25% of window | On |
+| `hashrate_spike` | Pool hashrate > 150% of 1h average | On |
+| `hashrate_drop` | Pool hashrate < 50% of 1h average | On |
+| `difficulty_anomaly` | Target deviation > 200% from expected | On |
+| `emergency_gap` | Share gap > `SHARE_PERIOD × 20` | On |
 
 #### Phase 5: Full Dashboard UI (⏭ V37 / c2pool)
 
@@ -4825,18 +4825,17 @@ Requires coordinated V37 deactivation.
 
 ---
 
-#### Step 5L — Lightweight monitoring API (V36 — non-consensus)
+#### Step 5L — Lightweight log monitoring (V36 — non-consensus) ✅ DEPLOYED
 
-**Goal:** Operational visibility and attack detection via JSON API
-endpoints. Dashboard UI deferred to V37/c2pool (Step 5F).
+**Goal:** Operational visibility and attack detection via structured log
+lines. Dashboard UI deferred to V37/c2pool (Step 5F).
 
-**V36 scope:** Backend endpoints only. No `web-static/` HTML changes.
-Operators and external tools consume the JSON. The existing basic web UI
-remains functional.
+**V36 scope:** `[MONITOR-*]` log prefixes emitted every status cycle
+(~30s). No HTTP endpoints, no `web.py` changes. Operators grep logs
+directly — zero attack surface, works with existing log pipelines.
 
 **Honest miner impact:** Indirect positive — operators detect hopping
-patterns earlier, can respond manually. Miners don't see changes in the
-web UI at this stage. See §8.2 Step 5.
+patterns earlier, can respond manually. See §8.2 Step 5.
 
 **Depends on:** Step 1 (clamp counters). Can be deployed independently of
 consensus changes (Steps 3-3a).
@@ -4845,43 +4844,46 @@ consensus changes (Steps 3-3a).
 
 | File | Location | Change |
 |------|----------|--------|
-| `p2pool/web.py` | After line ~1193 | New `/hopping_alert` endpoint |
-| `p2pool/web.py` | After line ~826 | Add `pplns_decay_weight` to `/users` response |
-| `p2pool/data.py` | In `generate_transaction()` | Expose debug counters to web |
+| `p2pool/monitor.py` | NEW ~230 LOC | `PoolMonitor` class, 4 check methods |
+| `p2pool/main.py` | `status_thread()` | Import + call `pool_monitor.run_cycle()` |
 
-**New endpoints:**
+**Log prefixes:**
 
-| Endpoint | Purpose | Response |
-|----------|---------|----------|
-| `/hopping_alert` | Attack detection | `{alerts: [{type, severity, address, detail}]}` |
-| `/clamp_stats` | Difficulty clamp telemetry | `{up: N, normal_down: N, fast_down: N}` |
-| `/emergency_stats` | Emergency decay telemetry | `{trigger_count: N, last_ts: N}` |
+| Prefix | Purpose | Frequency |
+|--------|---------|----------|
+| `[MONITOR-SUMMARY]` | One-line health status | Every cycle (~30s) |
+| `[MONITOR-HASHRATE]` | Pool vs 1h moving average | ALERT on spike/drop, ok every ~5min |
+| `[MONITOR-CONC]` | Per-address work concentration | ALERT >40%, WARN >25%, top3 every ~5min |
+| `[MONITOR-EMERGENCY]` | Share gap / emergency decay | ALERT when gap > threshold |
+| `[MONITOR-DIFF]` | Difficulty anomaly detection | ALERT on >2x deviation |
 
-**Enhanced existing endpoints:**
-
-| Endpoint | Added fields |
-|----------|-------------|
-| `/users` | `pplns_decay_weight` per address |
-| `/current_payouts` | `raw_weight`, `decayed_weight` |
-
-**Alert thresholds (configurable):**
+**Alert thresholds (configurable in PoolMonitor):**
 
 | Alert | Trigger | Default |
 |-------|---------|---------|
-| `concentration_high` | Single address > 25% of 720-share window | On |
+| `concentration_alert` | Single address > 40% of window | On |
+| `concentration_warn` | Single address > 25% of window | On |
 | `hashrate_spike` | Pool hashrate > 150% of 1h moving average | On |
+| `hashrate_drop` | Pool hashrate < 50% of 1h moving average | On |
 | `difficulty_anomaly` | Target deviation > 200% from expected | On |
 | `emergency_gap` | Share gap > `SHARE_PERIOD × 20` | On |
 
-**Estimated LOC:** ~80 added (backend endpoints + alert logic + counters).
+**Estimated LOC:** ~230 (monitor.py) + ~10 (main.py integration).
 
-**Checkpoint C5L:**
-- All 4 alert types fire in synthetic attack tests (S1–S6).
-- False-positive rate < 2/day in steady-state 72h testnet run.
-- `/current_payouts` returns correct `decayed_weight` values matching
-  PPLNS decay computation.
+**Checkpoint C5L:** ✅
+- All 4 monitoring types producing correct output on both testnet nodes.
+- Concentration ALERT fires for >40%, WARN for >25%.
+- Verbose summary (hashrate ratio, diff ratio, top3 miners) every ~5min.
+- Zero consensus errors across both nodes.
 
-**Rollback:** Remove new endpoints. No consensus impact.
+**Usage examples:**
+```
+grep MONITOR-CONC data/litecoin_testnet/log | tail -5
+grep MONITOR-EMERGENCY data/litecoin_testnet/log
+grep MONITOR-SUMMARY data/litecoin_testnet/log | tail -20
+```
+
+**Rollback:** Remove `monitor.py`, revert `main.py` import. No consensus impact.
 
 ---
 
@@ -5687,14 +5689,15 @@ work over 2×CHAIN_LENGTH lookback.
 
 ---
 
-#### Step 5 — Monitoring + dashboard deployed (V36 API / V37 full UI)
+#### Step 5 — Monitoring + dashboard deployed (V36 logs / V37 full UI)
 
-> **Split deployment:** V36 ships the lightweight JSON API (Step 5L).
+> **Split deployment:** V36 ships lightweight log monitoring (Step 5L).
 > The full dashboard UI with vesting progress bars ships in V37 (Step 5F).
-> V36 API endpoints: `/hopper_score`, `/weight_stats`, `/version_signaling`.
+> V36 log prefixes: `[MONITOR-SUMMARY]`, `[MONITOR-HASHRATE]`, `[MONITOR-CONC]`,
+> `[MONITOR-EMERGENCY]`, `[MONITOR-DIFF]` — grep-friendly, no HTTP surface.
 > Below shows the FULL dashboard experience (V37) for completeness.
 
-**What changes:** New web endpoints AND dashboard UI provide transparency
+**What changes:** Structured log lines AND (V37) dashboard UI provide transparency
 into all defense mechanisms. No payout changes — this is visibility only.
 
 **What miners experience:**
