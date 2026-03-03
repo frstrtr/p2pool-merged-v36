@@ -169,7 +169,7 @@ COMBINED_DONATION_DOGE_TESTNET = '2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f'
 
 CANONICAL_MERGED_COINBASE_TEXT = 'P2Pool merged mining'   # OP_RETURN text (fixed)
 CANONICAL_MERGED_COINBASE_EXTRA = '/P2Pool/'              # Coinbase input script extra
-CANONICAL_MERGED_FINDER_FEE_PER_MILLE = 5                 # 0.5% = 5 per mille (integer)
+CANONICAL_MERGED_FINDER_FEE_PER_MILLE = 0                  # V36: no finder fee (was 5 = 0.5%)
 
 def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
                                      coinbase_value, block_height,
@@ -838,8 +838,13 @@ class BaseShare(object):
             share_data = dict(share_data, subsidy=base_subsidy + definite_fees)
         
         # Phase 2a: Use exponentially-decayed PPLNS weights when V36 is active
-        _pplns_start = previous_share.share_data['previous_share_hash'] if previous_share is not None else None
-        _pplns_max_shares = max(0, min(height, net.REAL_CHAIN_LENGTH) - 1)
+        if v36_active:
+            # Phase 2c: Include parent share in PPLNS window (close 2-share gap)
+            _pplns_start = previous_share.hash if previous_share is not None else None
+            _pplns_max_shares = min(height, net.REAL_CHAIN_LENGTH)
+        else:
+            _pplns_start = previous_share.share_data['previous_share_hash'] if previous_share is not None else None
+            _pplns_max_shares = max(0, min(height, net.REAL_CHAIN_LENGTH) - 1)
         _pplns_desired_weight = 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target)
         
         if v36_active:
@@ -852,7 +857,11 @@ class BaseShare(object):
         if total_weight != sum(weights.itervalues()) + donation_weight:
             raise ValueError('PPLNS weight mismatch: total_weight=%d, sum+donation=%d' % (total_weight, sum(weights.itervalues()) + donation_weight))
         
-        amounts = dict((script, share_data['subsidy']*(199*weight)//(200*total_weight)) for script, weight in weights.iteritems()) # 99.5% goes according to weights prior to this share
+        # Phase 2c: V36 removes 199/200 haircut — full subsidy to PPLNS
+        if v36_active:
+            amounts = dict((script, share_data['subsidy']*weight//total_weight) for script, weight in weights.iteritems())
+        else:
+            amounts = dict((script, share_data['subsidy']*(199*weight)//(200*total_weight)) for script, weight in weights.iteritems()) # 99.5% goes according to weights prior to this share
         if 'address' not in share_data:
             # V36: Use pubkey_type to derive native address (bech32, P2SH, or P2PKH)
             _pt = share_data.get('pubkey_type', PUBKEY_TYPE_P2PKH)
@@ -876,9 +885,11 @@ class BaseShare(object):
         # Combined donation (V36+) goes to P2SH-wrapped combined script (COMBINED_DONATION_SCRIPT)
         combined_donation_addr = combined_donation_script_to_address(net)
         
-        # 0.5% goes to block finder
-        amounts[this_address] = amounts.get(this_address, 0) \
-                                + share_data['subsidy']//200
+        # Phase 2c: V36 removes finder fee — pure PPLNS accounting
+        if not v36_active:
+            # Pre-V36: 0.5% goes to block finder
+            amounts[this_address] = amounts.get(this_address, 0) \
+                                    + share_data['subsidy']//200
         # all that's left over is the donation weight and some extra
         # satoshis due to rounding
         total_donation = share_data['subsidy'] - sum(amounts.itervalues())

@@ -3821,7 +3821,7 @@ complexity, runtime constraints, and impact-per-line-of-code**:
 | ~~**1a**~~ | ~~Asymmetric difficulty clamp (§7.1.1)~~ | ~~No~~ | ~~Immediate~~ | **REVERTED** — tested 2026-03-03, clamp never triggers (see PHASE1A_TEST_REPORT.md) |
 | **1b** | Time-based emergency decay (§7.1.2) | Yes (V36) | **DEPLOYED** | Survive true whale death spiral — 80s threshold testnet, 300s mainnet |
 | **2a** | Exponential decay on PPLNS weights (§7.2) | Yes (V36) | **TESTED** | Arrival HAR 5.27× → **1.52×** (71.1% improvement). See PHASE2A_TEST_REPORT.md |
-| **2c** | Pure difficulty accounting — remove finder fee (§7.7) | Yes (V36) | Testnet → mainnet | Exact work-proportional payouts, lower variance |
+| **2c** | Pure difficulty accounting — remove finder fee (§7.7) | Yes (V36) | **DEPLOYED** | Exact work-proportional payouts, lower variance |
 | **3L** | Lightweight monitoring API (§8.1 Step 5) | No | Immediate | Attack detection (JSON endpoints) |
 | **R2** | Pin AutoRatchet to CHAIN_LENGTH (§7.3.16) | Yes (V36) | With Phase 2a | V37 transition safety |
 
@@ -4121,7 +4121,7 @@ centralized pools; transparency retains them.
 │   └─ Arrival HAR reduced 5.27× → 1.52×   │        │          │         │         │
 │   └─ 71.1% improvement over flat PPLNS    │        │          │         │         │
 │ ─── V36 RELEASE LINE ───────────────────  │        │          │         │         │
-│ Phase 2a+2c (V36 full stack)              │ ~2%    │ ~0.025   │ 0.6× ✓  │ V36 ★  │
+│ Phase 2a+2c (V36 full stack) [DEPLOYED]    │ ~2%    │ ~0.025   │ 0.6× ✓  │ V36 ★  │
 ├───────────────────────────────────────────┼────────┼──────────┼──────────┼─────────┤
 │ + Phase 2b (vesting, c2pool)              │ ~1%    │ ~0.013   │ 0.3× ✓✓ │ V37     │
 │ + Phase 4 (adaptive windows, c2pool)      │ ~0.3%  │ ~0.004   │ 0.1× ✓✓✓│ V37     │
@@ -4703,6 +4703,26 @@ cleaned up).
 bonus, revert PPLNS window to grandparent start, set
 `CANONICAL_MERGED_FINDER_FEE_PER_MILLE = 5`. Requires coordinated V36
 deactivation.
+
+> **Step 3a STATUS: IMPLEMENTED & DEPLOYED (2026-03-03)**
+>
+> Phase 2c (pure difficulty accounting) has been implemented and deployed
+> to testnet nodes 29+31. Five code changes, all V36-gated:
+>
+> 1. **PPLNS window start**: `previous_share.hash` (parent) instead of
+>    `previous_share.share_data['previous_share_hash']` (grandparent).
+>    `min(height, REAL_CHAIN_LENGTH)` (N) instead of N-1.
+> 2. **Amounts formula**: `subsidy*weight//total_weight` (100% PPLNS)
+>    instead of `subsidy*(199*weight)//(200*total_weight)` (99.5%).
+> 3. **Finder fee removed**: `amounts[this_address] += subsidy//200`
+>    is skipped when `v36_active`.
+> 4. **Canonical merged**: `CANONICAL_MERGED_FINDER_FEE_PER_MILLE = 0`
+>    (was 5). Finder script pipeline becomes dead code.
+> 5. **Legacy merged**: `finder_fee_percentage=0.0` in work.py (was 0.5).
+>
+> Fresh sharechain deployed. Initial consensus check: **zero errors** on
+> both nodes (121+ shares verified within 2 minutes of startup).
+> Overnight soak test pending.
 
 **Additional V36 prerequisite — Pin AutoRatchet to CHAIN_LENGTH (§7.3.16 R2):**
 

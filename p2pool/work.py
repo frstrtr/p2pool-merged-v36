@@ -732,7 +732,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 merged_net_symbol=merged_net_symbol,  # Store network symbol for block found message
                                 shareholders=shareholders,  # PPLNS distribution for miner payout calculation
                                     donation_percentage=merged_donation_percentage,
-                                finder_fee_percentage=0.5,
+                                finder_fee_percentage=0.0,  # V36: no finder fee
                                 daemon_warnings=merged_daemon_warnings,
                                 last_update=time.time(),
                             )
@@ -896,7 +896,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         use_submitauxblock=use_submitauxblock,
                         coinbasevalue=auxblock.get('coinbasevalue', 0),  # Block reward + fees
                         height=auxblock.get('height', 0),
-                        finder_fee_percentage=0.5,
+                        finder_fee_percentage=0.0,  # V36: no finder fee
                         daemon_warnings=merged_daemon_warnings,
                         last_update=time.time(),
                     )
@@ -2065,7 +2065,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     # Pre-V36 or no V36 shares in window yet — use old float-based builder.
                     finder_address = self._derive_merged_finder_address(
                         user, merged_addresses, chainid, merged_addr_net, parent_net)
-                    finder_fee_percentage = aux_work.get('finder_fee_percentage', 0.5)
+                    finder_fee_percentage = aux_work.get('finder_fee_percentage', 0.0)
                     coinbase_text = template.get('auxpow', {}).get('coinbase_text')
                     doge_coinbase_tx = merged_mining.build_merged_coinbase(
                         template,
