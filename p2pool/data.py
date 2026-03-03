@@ -729,7 +729,27 @@ class BaseShare(object):
         else:
             attempts_per_second = get_pool_attempts_per_second(tracker, share_data['previous_share_hash'], net.TARGET_LOOKBEHIND, min_work=True, integer=True)
             pre_target = 2**256//(net.SHARE_PERIOD*attempts_per_second) - 1 if attempts_per_second else 2**256-1
-            pre_target2 = math.clip(pre_target, (previous_share.max_target*9//10, previous_share.max_target*11//10))
+            
+            # Phase 1b: Emergency time-based decay (death spiral prevention)
+            # If no share arrives for SHARE_PERIOD * 20 seconds, exponentially
+            # ease difficulty to prevent permanent pool stall from whale
+            # departure. Doubles target every SHARE_PERIOD * 10 seconds past
+            # threshold. Does NOT affect hopper profit — purely a safety net.
+            clamp_ref_target = previous_share.max_target
+            if v36_active and previous_share is not None:
+                time_since_share = max(0, desired_timestamp - previous_share.timestamp)
+                emergency_threshold = net.SHARE_PERIOD * 20
+                if time_since_share > emergency_threshold:
+                    half_life = net.SHARE_PERIOD * 10
+                    excess = time_since_share - emergency_threshold
+                    halvings = excess // half_life
+                    remainder = excess % half_life
+                    # 2^halvings with linear interpolation for fractional part
+                    eased = previous_share.max_target << int(halvings)
+                    eased = (eased * (half_life + remainder)) // half_life
+                    clamp_ref_target = min(eased, net.MAX_TARGET)
+            
+            pre_target2 = math.clip(pre_target, (clamp_ref_target*9//10, clamp_ref_target*11//10))
             pre_target3 = math.clip(pre_target2, (net.MIN_TARGET, net.MAX_TARGET))
         max_bits = bitcoin_data.FloatingInteger.from_target_upper_bound(pre_target3)
         bits = bitcoin_data.FloatingInteger.from_target_upper_bound(math.clip(desired_target, (pre_target3//30, pre_target3)))

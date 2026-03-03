@@ -3819,7 +3819,7 @@ complexity, runtime constraints, and impact-per-line-of-code**:
 | Phase | Defense | Consensus | Timeline | Effect |
 |-------|---------|-----------|----------|--------|
 | ~~**1a**~~ | ~~Asymmetric difficulty clamp (§7.1.1)~~ | ~~No~~ | ~~Immediate~~ | **REVERTED** — tested 2026-03-03, clamp never triggers (see PHASE1A_TEST_REPORT.md) |
-| **1b** | Time-based emergency decay (§7.1.2) | No | Immediate | Survive true whale death spiral |
+| **1b** | Time-based emergency decay (§7.1.2) | Yes (V36) | **DEPLOYED** | Survive true whale death spiral — 80s threshold testnet, 300s mainnet |
 | **2a** | Exponential decay on PPLNS weights (§7.2) | Yes (V36) | **TESTED** | Arrival HAR 5.27× → **1.52×** (71.1% improvement). See PHASE2A_TEST_REPORT.md |
 | **2c** | Pure difficulty accounting — remove finder fee (§7.7) | Yes (V36) | Testnet → mainnet | Exact work-proportional payouts, lower variance |
 | **3L** | Lightweight monitoring API (§8.1 Step 5) | No | Immediate | Attack detection (JSON endpoints) |
@@ -4114,7 +4114,9 @@ centralized pools; transparency retains them.
 │ Phase 1a only (asym clamp) [TESTED]       │ 11.8%  │ 0.1481   │ 3.8× ✗  │ REVERTED│
 │   └─ Test showed clamp never triggers     │        │          │         │         │
 │   └─ Hopper arrival efficiency: 5.27× ✗   │        │          │         │         │
-│ Phase 1b only (emergency decay)           │ 11.8%  │ 0.1481   │ 3.8× ✗* │ V36     │
+│ Phase 1b only (emergency decay) [DEPLOYED] │ 11.8%  │ 0.1481   │ 3.8× ✗* │ V36     │
+│   └─ Death spiral safety net (no hopper    │        │          │         │         │
+│   │  profit impact — prevents pool death)  │        │          │         │         │
 │ Phase 2a only (exp decay) [TESTED]        │ ~3.3%  │ ~0.04    │ 1.52× ✗ │ V36     │
 │   └─ Arrival HAR reduced 5.27× → 1.52×   │        │          │         │         │
 │   └─ 71.1% improvement over flat PPLNS    │        │          │         │         │
@@ -4388,6 +4390,32 @@ Then update the clamp to use `previous_max_for_clamp` instead of
 - Timestamp monotonicity: `desired_timestamp` never goes backward.
 
 **Rollback:** Remove the emergency decay block. No state migration.
+
+> **Step 2 STATUS: IMPLEMENTED (2026-03-03)**
+>
+> Phase 1b emergency time-based decay has been implemented and deployed to
+> testnet nodes 29+31. Key implementation details:
+>
+> - **Consensus-gated on V36** (`v36_active` flag) — NOT a local-only change
+>   as originally planned; max_bits is in the share header and must match
+>   across all verifying nodes.
+> - `EMERGENCY_THRESHOLD = net.SHARE_PERIOD * 20` (80s testnet, 300s mainnet)
+> - `DECAY_HALF_LIFE = net.SHARE_PERIOD * 10` (40s testnet, 150s mainnet)
+> - Uses integer-only arithmetic: `previous_share.max_target << halvings`
+>   with linear interpolation for fractional half-life, clamped to MAX_TARGET.
+> - Replaces `previous_share.max_target` in the ±10% clamp reference with
+>   the emergency-eased target, allowing faster absolute difficulty drops.
+> - **Normal operation: never triggers.** With ~3.3 MH/s testnet hashrate
+>   and SHARE_PERIOD=4s, an 80s gap requires Poisson probability e^(-20)
+>   ≈ 2×10⁻⁹ — effectively impossible under normal mining.
+> - **Death spiral recovery:** After threshold, difficulty halves every 40s
+>   (testnet) / 150s (mainnet). A 100× whale departure recovers in ~15 min.
+> - Fresh sharechain deployed with Phase 2a — overnight test pending.
+>
+> Actual code differs from the planned pseudocode:
+> - Uses `v36_active` gating (consensus change, not local-only)
+> - Uses integer bit-shift `<< halvings` instead of float `0.5 ** x`
+> - Decay factor applied to clamp reference target, not raw pre_target
 
 ---
 
