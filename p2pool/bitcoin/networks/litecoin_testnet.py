@@ -27,8 +27,9 @@ BLOCK_EXPLORER_URL_PREFIX = 'https://blockexplorer.one/litecoin/testnet/blockHas
 ADDRESS_EXPLORER_URL_PREFIX = 'https://blockexplorer.one/litecoin/testnet/address/'
 TX_EXPLORER_URL_PREFIX = 'https://blockexplorer.one/litecoin/testnet/tx/'
 # SANE_TARGET_RANGE: (hardest/min_target, easiest/max_target)
-# Floor at 2**256//4000000 gives stratum diff ~61, L9 (16GH/s) gets ~16 sec/share
-SANE_TARGET_RANGE = (2**256//1000000000000000 - 1, 2**256//4000000 - 1)
+# Testnet: easiest target tuned for CPU mining (~120kH/s) @ SHARE_PERIOD=4s
+# 2^256//500000 gives diff~0.000116, ~4s/share at 120kH/s
+SANE_TARGET_RANGE = (2**256//1000000000000000 - 1, 2**256//500000 - 1)
 DUMB_SCRYPT_DIFF = 2**16
 DUST_THRESHOLD = 1e8
 SOFTFORKS_REQUIRED = set(['bip65', 'csv', 'segwit', 'mweb'])

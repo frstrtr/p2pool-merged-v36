@@ -1305,6 +1305,11 @@ class BaseShare(object):
                     # switch only valid if 60% of hashes in [self.net.CHAIN_LENGTH*9//10, self.net.CHAIN_LENGTH] for new version
                     if counts.get(self.VERSION, 0) < sum(counts.itervalues())*60//100:
                         raise p2p.PeerMisbehavingError('switch without enough hash power upgraded')
+                elif type(previous_share) is type(self).SUCCESSOR:
+                    # Downgrade transition (AutoRatchet deactivation: V35 can follow V36)
+                    # This allows the network to revert from MergedMiningShare back to
+                    # PaddingBugfixShare when AutoRatchet detects <50% V36 vote
+                    pass
                 else:
                     raise p2p.PeerMisbehavingError('''%s can't follow %s''' % (type(self).__name__, type(previous_share).__name__))
             elif type(self) is type(previous_share).SUCCESSOR:
@@ -2061,14 +2066,25 @@ class OkayTracker(forest.Tracker):
         return self.net.CHAIN_LENGTH, self.verified.get_delta(share_hash, end_point).work/((0 - block_height + 1)*self.net.PARENT.BLOCK_PERIOD)
 
 def update_min_protocol_version(counts, share):
-    """One-way ratchet: when >=95% of shares are a newer version, bump
+    """Guarded ratchet: when >=95% of shares are a newer version, bump
     the network's MINIMUM_PROTOCOL_VERSION so peers running older protocol
     versions are rejected.  Protocol.VERSION in p2p.py is auto-derived from
-    max(share.MINIMUM_PROTOCOL_VERSION) so it always satisfies this check."""
+    max(share.MINIMUM_PROTOCOL_VERSION) so it always satisfies this check.
+    
+    IMPORTANT: Only bumps to V36's protocol (3503) when AutoRatchet is in
+    CONFIRMED state.  During ACTIVATED state, we must still accept V35 peers
+    (protocol 3502) so that if V36 hash power drops below 50%, the
+    ACTIVATED -> VOTING fallback can occur."""
     minpver = getattr(share.net, 'MINIMUM_PROTOCOL_VERSION', 1400)
     newminpver = share.MINIMUM_PROTOCOL_VERSION
     if (counts is not None) and (minpver < newminpver):
             if counts.get(share.VERSION, 0) >= sum(counts.itervalues())*95//100:
+                # Guard: don't bump to V36 protocol level (3503) unless AutoRatchet
+                # is in CONFIRMED state.  This preserves fallback capability.
+                if newminpver >= 3503:
+                    ratchet = getattr(share.net, '_auto_ratchet', None)
+                    if ratchet is None or ratchet._state != 'confirmed':
+                        return  # Don't bump yet - AutoRatchet not confirmed
                 share.net.MINIMUM_PROTOCOL_VERSION = newminpver
                 print 'Setting MINIMUM_PROTOCOL_VERSION = %d' % (newminpver)
 
@@ -2120,8 +2136,10 @@ class AutoRatchet(object):
         self._state_file = os.path.join(datadir_path, 'v36_ratchet.json') if datadir_path else None
         self._state = self.STATE_VOTING
         self._activated_at = None       # timestamp
-        self._activated_height = None   # share chain height at activation
+        self._activated_height = None   # share chain height at activation (legacy)
         self._confirmed_at = None       # timestamp
+        self._confirm_count = 0         # monotonic confirmation counter (survives pruning)
+        self._last_seen_height = None   # track height changes for increment
         self._load()
     
     def _load(self):
@@ -2136,8 +2154,9 @@ class AutoRatchet(object):
                 self._activated_at = data.get('activated_at')
                 self._activated_height = data.get('activated_height')
                 self._confirmed_at = data.get('confirmed_at')
-                print '[AutoRatchet] Loaded state: %s (activated_at=%s, height=%s, confirmed_at=%s)' % (
-                    self._state, self._activated_at, self._activated_height, self._confirmed_at)
+                self._confirm_count = data.get('confirm_count', 0)
+                print '[AutoRatchet] Loaded state: %s (activated_at=%s, height=%s, confirmed_at=%s, confirm_count=%d)' % (
+                    self._state, self._activated_at, self._activated_height, self._confirmed_at, self._confirm_count)
         except (IOError, ValueError, KeyError) as e:
             print '[AutoRatchet] Warning: could not load state file: %s' % e
     
@@ -2151,6 +2170,7 @@ class AutoRatchet(object):
                 'activated_at': self._activated_at,
                 'activated_height': self._activated_height,
                 'confirmed_at': self._confirmed_at,
+                'confirm_count': self._confirm_count,
             }
             with open(self._state_file, 'w') as f:
                 json.dump(data, f)
@@ -2207,13 +2227,17 @@ class AutoRatchet(object):
         share_pct = (v36_shares * 100) // total
         full_window = (total >= net.CHAIN_LENGTH)
         
-        # Periodic vote progress logging (every ~30 calls)
+        # Periodic vote progress logging (every ~10 calls for test visibility)
         if not hasattr(self, '_log_counter'):
             self._log_counter = 0
         self._log_counter += 1
-        if self._log_counter % 30 == 0:
-            print '[AutoRatchet] %s: vote=%d%% (%d/%d) share=%d%% full=%s height=%d' % (
-                self._state.upper(), vote_pct, v36_votes, total, share_pct, full_window, height)
+        if self._log_counter % 10 == 0:
+            extra = ''
+            if self._state == self.STATE_ACTIVATED:
+                confirm_need = net.CHAIN_LENGTH * self.CONFIRMATION_MULTIPLIER
+                extra = ' confirm=%d/%d' % (self._confirm_count, confirm_need)
+            print '[AutoRatchet] %s: vote=%d%% (%d/%d) share=%d%% full=%s height=%d%s' % (
+                self._state.upper(), vote_pct, v36_votes, total, share_pct, full_window, height, extra)
         
         old_state = self._state
         
@@ -2224,6 +2248,8 @@ class AutoRatchet(object):
                 self._state = self.STATE_ACTIVATED
                 self._activated_at = int(time.time())
                 self._activated_height = height
+                self._confirm_count = 0
+                self._last_seen_height = height
                 print '[AutoRatchet] VOTING -> ACTIVATED (%d%% of %d shares vote V36, window=%d)' % (
                     vote_pct, total, net.CHAIN_LENGTH)
                 self._save()
@@ -2234,23 +2260,36 @@ class AutoRatchet(object):
                 self._state = self.STATE_VOTING
                 self._activated_at = None
                 self._activated_height = None
+                self._confirm_count = 0
+                self._last_seen_height = None
                 print '[AutoRatchet] ACTIVATED -> VOTING (%d%% votes < %d%% threshold)' % (
                     vote_pct, self.DEACTIVATION_THRESHOLD)
+                # Reset MINIMUM_PROTOCOL_VERSION so V35 peers can reconnect
+                base_min = getattr(net, '_base_minimum_protocol_version', None)
+                if base_min is None:
+                    from p2pool.networks import litecoin_testnet, litecoin
+                    # Use 3301 as the safe default that accepts both V35 (3502) and V36 (3503)
+                    base_min = 3301
+                cur_min = getattr(net, 'MINIMUM_PROTOCOL_VERSION', 1400)
+                if cur_min > base_min:
+                    net.MINIMUM_PROTOCOL_VERSION = base_min
+                    print '[AutoRatchet] Reset MINIMUM_PROTOCOL_VERSION %d -> %d (allow V35 peers)' % (
+                        cur_min, base_min)
                 self._save()
             elif self._activated_height is not None:
-                if self._activated_height > height:
-                    # activated_height is stale (from a previous session with a taller chain).
-                    # Reset to current height so confirmation countdown restarts from now.
-                    print '[AutoRatchet] Adjusting stale activated_height %d -> %d (chain rebuilt after restart)' % (
-                        self._activated_height, height)
-                    self._activated_height = height
-                    self._save()
-                shares_since = height - self._activated_height
-                if shares_since >= confirmation_window and share_pct >= self.ACTIVATION_THRESHOLD:
+                # Use monotonic counter that survives tracker pruning.
+                # The tracker prunes chains to ~2*CHAIN_LENGTH+10, so height-based
+                # confirmation fails when confirmation_window >= pruning threshold.
+                # Instead, track cumulative height increases.
+                if self._last_seen_height is not None and height > self._last_seen_height:
+                    delta = height - self._last_seen_height
+                    self._confirm_count += delta
+                self._last_seen_height = height
+                if self._confirm_count >= confirmation_window and share_pct >= self.ACTIVATION_THRESHOLD:
                     self._state = self.STATE_CONFIRMED
                     self._confirmed_at = int(time.time())
-                    print '[AutoRatchet] ACTIVATED -> CONFIRMED (%d shares since activation, %d%% V36, window=%d)' % (
-                        shares_since, share_pct, confirmation_window)
+                    print '[AutoRatchet] ACTIVATED -> CONFIRMED (%d cumulative shares since activation, %d%% V36, window=%d)' % (
+                        self._confirm_count, share_pct, confirmation_window)
                     self._save()
         
         elif self._state == self.STATE_CONFIRMED:
@@ -2261,6 +2300,13 @@ class AutoRatchet(object):
         
         # --- Output ---
         if self._state in (self.STATE_ACTIVATED, self.STATE_CONFIRMED):
+            # TEST MODE: force V35 non-voting shares to test deactivation path
+            # Create file 'force_v35_test' in datadir to trigger
+            import os
+            if self._state_file and self._state in (self.STATE_ACTIVATED, self.STATE_CONFIRMED):
+                force_file = os.path.join(os.path.dirname(self._state_file), 'force_v35_test')
+                if os.path.exists(force_file):
+                    return (PaddingBugfixShare, 35)  # V35 non-voting share
             return (MergedMiningShare, 36)
         else:
             return (PaddingBugfixShare, 36)

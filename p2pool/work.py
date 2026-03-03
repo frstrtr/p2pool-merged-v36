@@ -192,6 +192,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         else:
             ratchet_datadir = os.path.join(os.path.dirname(sys.argv[0]), 'data', net_name)
         self.auto_ratchet = p2pool_data.AutoRatchet(ratchet_datadir)
+        self.node.net._auto_ratchet = self.auto_ratchet  # expose for update_min_protocol_version guard
         print '[WorkerBridge] AutoRatchet initialized: %s' % self.auto_ratchet
 
         # Redistribute mode for unnamed/broken miner shares
@@ -2197,13 +2198,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
             self.node.net,
         )
         
-        # CRITICAL: If AutoRatchet selects MergedMiningShare (V36), force v36_active=True.
-        # MergedMiningShare.gentx_before_refhash uses COMBINED_DONATION_SCRIPT, so
-        # generate_transaction MUST also use COMBINED_DONATION_SCRIPT. Without this,
-        # a fresh chain bootstrap with confirmed ratchet state would mismatch:
-        # is_v36_active() needs CHAIN_LENGTH shares (empty=False) but share_type=V36.
+        # CRITICAL: Align v36_active with AutoRatchet's share_type decision.
+        # The AutoRatchet is the authoritative source for share version selection.
+        # is_v36_active() may report True from old shares in the chain, but if
+        # AutoRatchet selected PaddingBugfixShare (V35), we MUST use V35 donation
+        # script to match PaddingBugfixShare.gentx_before_refhash.
         if share_type.VERSION >= 36:
             v36_active = True
+        else:
+            v36_active = False
         
         # Still run the original voting check for switchover logging and protocol version update.
         # The AutoRatchet already handles the actual share_type decision, but this keeps
