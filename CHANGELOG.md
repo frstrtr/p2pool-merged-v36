@@ -2,6 +2,31 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.11-alpha] - 2026-03-03
+
+### Anti-Pool-Hopping Defense Stack (NEW)
+- **Phase 1b: Emergency time-based decay** — Death spiral prevention. Shares older than `2 × SHARE_PERIOD × CHAIN_LENGTH` are exponentially decayed, preventing abandoned shares from inflating payouts during hashrate collapse.
+- **Phase 2a: Exponential PPLNS decay** — Replaces flat PPLNS window with exponential weighting (`λ = ln(2) / half_life`). Recent shares count more than old ones, eliminating the cliff-edge exit exploit that pool hoppers abused.
+- **Phase 2c: Pure difficulty accounting** — Removed finder fee from PPLNS weight calculation. Share weight is now purely `difficulty / total_difficulty`, making payout proportional to actual proof-of-work contributed.
+- **Phase 3L: Log-based pool monitoring** — Real-time anti-hopping monitoring via log output: hashrate concentration warnings, difficulty anomaly detection, share gap alerts. No HTTP endpoints exposed.
+- **Phase R2: AutoRatchet safety pin** — Pins protocol version ratchet to `CHAIN_LENGTH` threshold, preventing premature V37 activation before the network has stabilized.
+
+### Bug Fixes
+- **fix: DOGE P2SH address display** — Dashboard now correctly displays Dogecoin P2SH addresses (e.g., `A5EZ...`) instead of showing raw script hashes or blanks.
+- **fix: Dashboard overload** — Resolved high CPU/memory on dashboard page load caused by excessive DOM updates when many miners are connected. Added merged RPC timeout to prevent hung connections.
+- **fix: DNS placeholders in litecoin_testnet** — Replaced placeholder DNS entries with working testnet bootstrap addresses; added overnight monitoring script.
+
+### Dashboard
+- **Left-aligned Shares and Best Share values** — Share count and best share stats on the dashboard are now left-aligned (`flex-start`) instead of centered, improving readability.
+
+### Documentation
+- **V36 Release Notes** — Comprehensive `docs/V36_RELEASE_NOTES.md` (640+ lines) covering: consensus changes, anti-hopping defense stack, merged mining architecture, miner protection guide, operator guide, migration from V35, V37/c2pool roadmap. Cross-referenced from README, POOL_HOPPING_ATTACKS.md, and FUTURE.md.
+
+### Infrastructure
+- **Mainnet verified** — Both nodes (node29 + node31) tested on LTC mainnet with merged DOGE mining. Sharechain sync, peer discovery, PPLNS payouts, and dashboard all operational.
+
+---
+
 ## [v36-0.10-alpha] - 2026-03-01
 
 ### Features
