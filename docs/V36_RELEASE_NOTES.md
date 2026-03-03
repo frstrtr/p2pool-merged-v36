@@ -630,6 +630,7 @@ both a working reference and a test suite.
 | [POOL_HOPPING_ATTACKS.md](POOL_HOPPING_ATTACKS.md) | Full threat model, attack taxonomy, defense analysis, per-miner impact tables |
 | [FUTURE.md](FUTURE.md) | Roadmap — stratum enhancements, redistribution system, c2pool migration plan |
 | [V36_TRANSITION_GUIDE.md](V36_TRANSITION_GUIDE.md) | AutoRatchet stages, dashboard legend, transition monitoring |
+| [V35_V36_TRANSITION_TEST_RESULTS.md](V35_V36_TRANSITION_TEST_RESULTS.md) | V35→V36 transition test report, ratchet reset procedure for testers |
 | [SECURITY_AUDIT_2026_02.md](SECURITY_AUDIT_2026_02.md) | 41-finding security audit report with fix status |
 | [MULTIADDRESS_MINING_GUIDE.md](MULTIADDRESS_MINING_GUIDE.md) | Stratum username formats, address conversion, redistribution policies |
 | [CHANGELOG.md](../CHANGELOG.md) | Per-release changelog (v36-0.01-alpha through v36-0.10-alpha) |

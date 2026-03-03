@@ -21,6 +21,11 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
 ### Documentation
 - **V36 Release Notes** — Comprehensive `docs/V36_RELEASE_NOTES.md` (640+ lines) covering: consensus changes, anti-hopping defense stack, merged mining architecture, miner protection guide, operator guide, migration from V35, V37/c2pool roadmap. Cross-referenced from README, POOL_HOPPING_ATTACKS.md, and FUTURE.md.
+- **V35→V36 Transition Test Results** — Full four-node test documented in `docs/V35_V36_TRANSITION_TEST_RESULTS.md`: V35 (jtoomim) and V36 (frstrtr) nodes tested sharechain consensus, vote signaling, AutoRatchet activation at 95%, and V35 upgrade warnings. Includes ratchet reset procedure for testers.
+- **Ratchet reset documented** — Added Scenario 6 (stale ratchet on fresh sharechain) to V36_TRANSITION_GUIDE.md FAQ, SETUP_GUIDE.md troubleshooting, and V36_RELEASE_NOTES.md cross-references. Testers must delete `v36_ratchet.json` when flushing sharechains.
+
+### Bug Fixes (Test)
+- **fix: AutoRatchet vote progress logging** — Added periodic vote percentage logging to AutoRatchet (`[AutoRatchet] VOTING: vote=85% (341/400)...`), enabling real-time monitoring of activation progress during transition tests.
 
 ### Infrastructure
 - **Mainnet verified** — Both nodes (node29 + node31) tested on LTC mainnet with merged DOGE mining. Sharechain sync, peer discovery, PPLNS payouts, and dashboard all operational.

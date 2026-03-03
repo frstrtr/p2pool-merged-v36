@@ -2207,6 +2207,14 @@ class AutoRatchet(object):
         share_pct = (v36_shares * 100) // total
         full_window = (total >= net.CHAIN_LENGTH)
         
+        # Periodic vote progress logging (every ~30 calls)
+        if not hasattr(self, '_log_counter'):
+            self._log_counter = 0
+        self._log_counter += 1
+        if self._log_counter % 30 == 0:
+            print '[AutoRatchet] %s: vote=%d%% (%d/%d) share=%d%% full=%s height=%d' % (
+                self._state.upper(), vote_pct, v36_votes, total, share_pct, full_window, height)
+        
         old_state = self._state
         
         # --- State transitions ---

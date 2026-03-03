@@ -469,6 +469,34 @@ This is by design: even when temporarily producing V35-format shares, the
 node advocates for V36. This ensures that the V36 vote count recovers as
 quickly as possible once conditions improve.
 
+#### Scenario 6: Stale Ratchet on Fresh Sharechain (Testers)
+
+**Trigger**: Sharechain is flushed (deleted `shares.*` files) for a fresh test, but
+`v36_ratchet.json` is not deleted. The ratchet starts in CONFIRMED or ACTIVATED
+state on an empty chain.
+
+**What happens**:
+- CONFIRMED + empty chain → node produces V36 shares immediately
+- These V36 shares are rejected by peers (`switch without enough hash power upgraded`)
+  because the sharechain has no V36 signaling history
+- The node appears to work but all its shares are dead on arrival
+
+**Fix**: Delete `v36_ratchet.json` before starting any fresh test:
+
+```bash
+# Stop p2pool, flush chain, reset ratchet
+pkill -f run_p2pool
+rm -f data/litecoin_testnet/shares.*       # or data/litecoin/shares.*
+rm -f data/litecoin_testnet/v36_ratchet.json
+# Restart p2pool
+```
+
+> [!WARNING]
+> **For testers only.** Do NOT delete `v36_ratchet.json` in production — the
+> persisted state correctly ensures seamless V36 resumption after restarts.
+> See [V35_V36_TRANSITION_TEST_RESULTS.md](V35_V36_TRANSITION_TEST_RESULTS.md)
+> for the full test report where this issue was discovered and documented.
+
 #### Summary Table
 
 | # | Scenario | State Change? | Output | Persisted? |
@@ -478,6 +506,7 @@ quickly as possible once conditions improve.
 | 3 | ACTIVATED, empty chain on restart | **No**: stays ACTIVATED | V35 (safety fallback) | No |
 | 4 | ACTIVATED, stale height | Height reset only | V36 (stays ACTIVATED) | Yes (corrected height) |
 | 5 | Any state | N/A | V35 or V36 per above | N/A |
+| 6 | Stale ratchet on empty chain | N/A (must manual reset) | Invalid V36 shares | Delete file |
 
 > [!IMPORTANT]
 > The common thread across all scenarios: **the node never produces V36 shares
@@ -918,6 +947,31 @@ depending on how quickly miners upgrade.
 > confirmation ~53 min. On Bitcoin (`SHARE_PERIOD = 30s`, `CHAIN_LENGTH = 8640`),
 > the chain spans 72 hours and the full transition takes ~12 days minimum.
 
+### I'm testing and getting `switch without enough hash power upgraded` errors
+
+**This is the #1 cause of test failures.** Your `v36_ratchet.json` file has a
+stale state from a previous test run. The ratchet thinks the network has already
+activated V36, but the fresh sharechain has no V36 signaling history.
+
+**Fix**: Delete the ratchet state file and restart:
+
+```bash
+pkill -f run_p2pool
+rm -f data/litecoin_testnet/v36_ratchet.json   # testnet
+rm -f data/litecoin/v36_ratchet.json            # mainnet
+# Restart p2pool
+```
+
+**When to reset**: Every time you flush the sharechain (`rm shares.*`) for a
+fresh test, also delete `v36_ratchet.json`. The two are coupled — the ratchet
+state only makes sense in the context of the sharechain it was computed from.
+
+> [!NOTE]
+> Do NOT delete `v36_ratchet.json` in production. The persisted state correctly
+> ensures V36 nodes resume producing V36 shares after restarts. See
+> [V35_V36_TRANSITION_TEST_RESULTS.md](V35_V36_TRANSITION_TEST_RESULTS.md)
+> for the complete test where this was discovered.
+
 ### What are `full_chain_versions` vs `versions` in the API?
 
 The `/version_signaling` API endpoint returns both:
@@ -967,7 +1021,10 @@ only the timing changes.
 
 ---
 
-*Last updated: 2026-02-25. Covers p2pool-merged-v36 transition mechanism as
+*Last updated: 2026-03-03. Covers p2pool-merged-v36 transition mechanism as
 implemented in `p2pool/data.py` (AutoRatchet, version validation) and
-`p2pool/web.py` (display logic). All specific numeric values are for
-Litecoin mainnet + Dogecoin merged mining unless otherwise noted.*
+`p2pool/web.py` (display logic). Ratchet reset procedure for testers added
+based on V35→V36 transition test (2026-03-03). All specific numeric values
+are for Litecoin mainnet + Dogecoin merged mining unless otherwise noted.
+See [V35_V36_TRANSITION_TEST_RESULTS.md](V35_V36_TRANSITION_TEST_RESULTS.md)
+for the complete transition test report.*

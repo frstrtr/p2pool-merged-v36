@@ -275,6 +275,18 @@ ss -tlnp | grep 44555
 - Check miner connection: P2Pool should show "Connected worker"
 - Verify Scrypt algorithm: `--algo scrypt` in miner
 
+### `switch without enough hash power upgraded` Errors
+- **Cause**: Stale `v36_ratchet.json` from a previous test run
+- **Fix**: Delete the ratchet state file and restart:
+  ```bash
+  pkill -f run_p2pool
+  rm -f data/litecoin_testnet/v36_ratchet.json
+  # Restart p2pool
+  ```
+- **When**: Always delete `v36_ratchet.json` when flushing the sharechain (`rm shares.*`) for a fresh test
+- **Note**: Do NOT delete in production — the file correctly persists state across restarts
+- See [V35_V36_TRANSITION_TEST_RESULTS.md](V35_V36_TRANSITION_TEST_RESULTS.md) for details
+
 ## Expected Mining Results
 
 **Litecoin Testnet:**
