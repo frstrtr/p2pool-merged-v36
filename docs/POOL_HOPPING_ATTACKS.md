@@ -4410,12 +4410,37 @@ Then update the clamp to use `previous_max_for_clamp` instead of
 >   ≈ 2×10⁻⁹ — effectively impossible under normal mining.
 > - **Death spiral recovery:** After threshold, difficulty halves every 40s
 >   (testnet) / 150s (mainnet). A 100× whale departure recovers in ~15 min.
-> - Fresh sharechain deployed with Phase 2a — overnight test pending.
+> - Fresh sharechain deployed with Phase 2a.
 >
 > Actual code differs from the planned pseudocode:
 > - Uses `v36_active` gating (consensus change, not local-only)
 > - Uses integer bit-shift `<< halvings` instead of float `0.5 ** x`
 > - Decay factor applied to clamp reference target, not raw pre_target
+>
+> **Death Spiral Test (2026-03-03 06:44–06:58 UTC):**
+> Three ASIC miners (~3.83 MH/s) blocked via iptables, leaving one CPU miner
+> (~70 kH/s) — a 98% hashrate drop. Timeline:
+>
+> | Time (UTC) | Gap   | Difficulty | Event                          |
+> |------------|-------|------------|--------------------------------|
+> | 06:45:24   |  2s   | 8.27       | Last ASIC share before block   |
+> | 06:46:36   | 72s   | 8.38       | CPU only — below 80s threshold |
+> | 06:47:50   | 74s   | 8.49       | CPU only — still below threshold |
+> | 06:49:32   | 102s  | 3.31       | **EMERGENCY #1** — 60% drop    |
+> | 06:50:33   | 50s   | 4.09       | CPU recovery share             |
+> | 06:51:45   | 72s   | 4.54       | CPU share — just below threshold |
+> | 06:54:00   | 135s  | 0.63       | **EMERGENCY #2** — 92% drop from peak |
+> | 06:54:07   |  1s   | 1.07       | ASICs unblocked, rapid recovery |
+> | 06:54:16   |  1s   | 2.23       | +16s: diff already 3.5× valley |
+> | 06:54:25   |  1s   | 3.33       | +25s: diff 5.3× valley         |
+>
+> Results:
+> - **Emergency decay triggered twice** (102s and 135s gaps)
+> - **Deepest difficulty drop: 8.27 → 0.63** (92% reduction, 13× easier)
+> - **CPU miner sustained mining** throughout — death spiral prevented
+> - **Recovery: 0.63 → 3.33 in 25 seconds** after ASICs returned
+> - **Zero consensus errors** across both nodes (1148+ shares verified)
+> - Test script: `scripts/death_spiral_test.py`
 
 ---
 
