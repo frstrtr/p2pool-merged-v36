@@ -3823,7 +3823,7 @@ complexity, runtime constraints, and impact-per-line-of-code**:
 | **2a** | Exponential decay on PPLNS weights (§7.2) | Yes (V36) | **TESTED** | Arrival HAR 5.27× → **1.52×** (71.1% improvement). See PHASE2A_TEST_REPORT.md |
 | **2c** | Pure difficulty accounting — remove finder fee (§7.7) | Yes (V36) | **DEPLOYED** | Exact work-proportional payouts, lower variance |
 | **3L** | Lightweight log monitoring (§8.1 Step 5) | No | **DEPLOYED** | Attack detection (structured log lines) |
-| **R2** | Pin AutoRatchet to CHAIN_LENGTH (§7.3.16) | Yes (V36) | With Phase 2a | V37 transition safety |
+| **R2** | Pin AutoRatchet to CHAIN_LENGTH (§7.3.16) | Yes (V36) | **DEPLOYED** | V37 transition safety — signaling window stays fixed |
 
 **V36 result: hopper 3.8× → 0.6× (unprofitable). ~135 LOC changed.**
 

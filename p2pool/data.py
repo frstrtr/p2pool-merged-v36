@@ -2081,9 +2081,11 @@ class AutoRatchet(object):
     with cleared share stores) don't regress to V35 once the network
     has confirmed V36.
     
-    Window sizes adapt to the network config:
-      Testnet:  REAL_CHAIN_LENGTH=400,  SHARE_PERIOD=4s   (~27 min)
-      Mainnet:  REAL_CHAIN_LENGTH=8640, SHARE_PERIOD=15s  (~36 hours)
+    Window sizes use the FIXED net.CHAIN_LENGTH (not REAL_CHAIN_LENGTH)
+    to ensure all nodes agree on the signaling window even when V37 makes
+    REAL_CHAIN_LENGTH adaptive:
+      Testnet:  CHAIN_LENGTH=400,  SHARE_PERIOD=4s   (~27 min)
+      Mainnet:  CHAIN_LENGTH=8640, SHARE_PERIOD=15s  (~36 hours)
     
     State machine:
     
@@ -2091,7 +2093,7 @@ class AutoRatchet(object):
         ^                                                   |
         |----(<50% desired_version>=36)-----<               |
                                                             |
-        (sustained 2*REAL_CHAIN_LENGTH at 95% V36 shares)   |
+        (sustained 2*CHAIN_LENGTH at 95% V36 shares)       |
                                                             v
       VOTING <--(follows V35 network, keeps voting)--- CONFIRMED
         ^                                                   |
@@ -2108,7 +2110,7 @@ class AutoRatchet(object):
     
     ACTIVATION_THRESHOLD = 95     # % of window voting V36 to activate
     DEACTIVATION_THRESHOLD = 50   # % below which to revert
-    CONFIRMATION_MULTIPLIER = 2   # confirm after 2x REAL_CHAIN_LENGTH of V36 majority
+    CONFIRMATION_MULTIPLIER = 2   # confirm after 2x CHAIN_LENGTH of V36 majority
     
     STATE_VOTING = 'voting'
     STATE_ACTIVATED = 'activated'
@@ -2162,15 +2164,15 @@ class AutoRatchet(object):
     def get_share_version(self, tracker, best_share_hash, net):
         """Determine share version based on network state + ratchet state.
         
-        Uses net.REAL_CHAIN_LENGTH for window sizing (400 testnet, 8640 mainnet).
-        Confirmation requires 2 * REAL_CHAIN_LENGTH shares of sustained V36 majority.
+        Uses net.CHAIN_LENGTH (fixed) for window sizing (400 testnet, 8640 mainnet).
+        Confirmation requires 2 * CHAIN_LENGTH shares of sustained V36 majority.
         
         Returns:
             (share_class, desired_version) tuple
             share_class: MergedMiningShare or PaddingBugfixShare
             desired_version: always 36 (vote for V36)
         """
-        confirmation_window = net.REAL_CHAIN_LENGTH * self.CONFIRMATION_MULTIPLIER
+        confirmation_window = net.CHAIN_LENGTH * self.CONFIRMATION_MULTIPLIER
         
         # No chain at all — use persisted ratchet state for bootstrap
         if best_share_hash is None or tracker.get_height(best_share_hash) < 1:
@@ -2183,7 +2185,7 @@ class AutoRatchet(object):
         
         # Count version votes in available window
         height = tracker.get_height(best_share_hash)
-        sample = min(height, net.REAL_CHAIN_LENGTH)
+        sample = min(height, net.CHAIN_LENGTH)
         v36_votes = 0
         v36_shares = 0  # actual V36 format shares (not just votes)
         total = 0
@@ -2203,7 +2205,7 @@ class AutoRatchet(object):
         
         vote_pct = (v36_votes * 100) // total
         share_pct = (v36_shares * 100) // total
-        full_window = (total >= net.REAL_CHAIN_LENGTH)
+        full_window = (total >= net.CHAIN_LENGTH)
         
         old_state = self._state
         
@@ -2215,7 +2217,7 @@ class AutoRatchet(object):
                 self._activated_at = int(time.time())
                 self._activated_height = height
                 print '[AutoRatchet] VOTING -> ACTIVATED (%d%% of %d shares vote V36, window=%d)' % (
-                    vote_pct, total, net.REAL_CHAIN_LENGTH)
+                    vote_pct, total, net.CHAIN_LENGTH)
                 self._save()
         
         elif self._state == self.STATE_ACTIVATED:
@@ -2545,7 +2547,7 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
         effective_state = ratchet_state
         if ratchet_state == 'confirmed':
             height = tracker.get_height(best_share)
-            sample = min(height, net.REAL_CHAIN_LENGTH) if height > 0 else 0
+            sample = min(height, net.CHAIN_LENGTH) if height > 0 else 0
             v36_count = sum(1 for share in tracker.get_chain(best_share, sample) if share.VERSION >= 36)
             if sample > 0 and v36_count * 100 // sample < 50:
                 effective_state = 'voting'
