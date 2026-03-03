@@ -3,6 +3,7 @@
 > **Date:** March 2026  
 > **Status:** Active threat — observed on Litecoin mainnet  
 > **Severity:** HIGH — existential risk to pool economics  
+> **See also:** [V36 Release Notes](V36_RELEASE_NOTES.md) for the complete list of deployed defenses | [FUTURE.md](FUTURE.md) for V37 adaptive windows & c2pool migration
 
 ---
 

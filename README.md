@@ -8,6 +8,8 @@
 
 Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), building on the p2pool protocol with V36 share format.
 
+> **📋 New to V36?** Read the **[V36 Release Notes](docs/V36_RELEASE_NOTES.md)** for a complete overview of what changed, why, and how miners are protected from pool hopping attacks.
+
 ## What's different from jtoomim/p2pool (V35)
 
 ### Protocol & Consensus
@@ -84,6 +86,7 @@ The installation guide covers:
 
 | Document | Description |
 |----------|-------------|
+| **[V36_RELEASE_NOTES.md](docs/V36_RELEASE_NOTES.md)** | **V36 release notes — what changed, why, and how miners are protected** |
 | [mm-adapter/README.md](mm-adapter/README.md) | Merged mining adapter setup & config reference |
 | [MULTIADDRESS_MINING_GUIDE.md](docs/MULTIADDRESS_MINING_GUIDE.md) | Multi-address mining configuration |
 | [CUSTOM_NETWORK_GUIDE.md](docs/CUSTOM_NETWORK_GUIDE.md) | Adding support for new cryptocurrencies |
@@ -92,7 +95,8 @@ The installation guide covers:
 | [V36_TRANSITION_GUIDE.md](docs/V36_TRANSITION_GUIDE.md) | V35→V36 transition stages, AutoRatchet, dashboard legend |
 | [WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md) | Windows 10/11 deployment (WSL2, Docker, Native) — tested end-to-end |
 | [SECURITY_AUDIT_2026_02.md](docs/SECURITY_AUDIT_2026_02.md) | Security audit report — 41 findings, origin classification, fix status |
-| [FUTURE.md](docs/FUTURE.md) | Roadmap — redistribution system (`--redistribute`), graduated boost, hybrid mode |
+| [POOL_HOPPING_ATTACKS.md](docs/POOL_HOPPING_ATTACKS.md) | Pool hopping threat model, anti-hopping defense stack, per-miner impact analysis |
+| [FUTURE.md](docs/FUTURE.md) | Roadmap — V37 adaptive windows, c2pool C++ migration, stratum enhancements |
 
 ---
 

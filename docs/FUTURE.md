@@ -6,7 +6,8 @@ The ultimate goal is migrating proven features into
 [c2pool](https://github.com/frstrtr/c2pool) (C++ reimplementation).
 
 > **Scope**: This file covers *future work only*. For already-implemented features,
-> see [CHANGELOG.md](../CHANGELOG.md) and [README.md](../README.md).
+> see [CHANGELOG.md](../CHANGELOG.md), [README.md](../README.md), and [V36 Release Notes](V36_RELEASE_NOTES.md).
+> For anti-hopping defense details, see [POOL_HOPPING_ATTACKS.md](POOL_HOPPING_ATTACKS.md).
 
 ---
 
