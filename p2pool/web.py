@@ -962,7 +962,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                             merged_address = bitcoin_data.script2_to_address(
                                 merged_script, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
                         except Exception:
-                            merged_address = 'script:' + key[7:]  # Fallback for non-P2PKH scripts
+                            # P2PKH failed — try P2SH version
+                            try:
+                                merged_address = bitcoin_data.script2_to_address(
+                                    merged_script, chain['addr_net'].ADDRESS_P2SH_VERSION, -1, chain['addr_net'])
+                            except Exception:
+                                merged_address = 'script:' + key[7:]  # Fallback for truly unknown scripts
                         resolved[merged_address] = resolved.get(merged_address, 0) + weight
                         # Use the share chain mapping to find the parent LTC address
                         parent_addr = merged_key_to_parent.get(key, None)
@@ -1044,7 +1049,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             # (DDoS on web API must not starve the mining reactor loop).
             if donation_reward > 0:
                 from p2pool import data as p2pool_data_mod
-                ltc_donation_addr = p2pool_data_mod.donation_script_to_address(node.net)
+                # V36 uses COMBINED_DONATION_SCRIPT (P2SH), pre-V36 uses DONATION_SCRIPT (P2PK).
+                # Try V36 address first, fall back to pre-V36 if not in result.
+                ltc_donation_addr = p2pool_data_mod.combined_donation_script_to_address(node.net)
+                if ltc_donation_addr not in result:
+                    ltc_donation_addr = p2pool_data_mod.donation_script_to_address(node.net)
                 
                 # Precomputed DOGE P2SH addresses for COMBINED_DONATION_SCRIPT
                 if chain['chainid'] == 98:  # Dogecoin
