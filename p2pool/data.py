@@ -1519,9 +1519,7 @@ class MergedMiningShare(BaseShare):
     VERSION = 36
     VOTING_VERSION = 36
     SUCCESSOR = None  # Current head (until V37)
-    # Testing phase: 3503 allows peers running 3502+ (jtoomim network).
-    # Set to 3600 when V36 is finalized and ready for production.
-    MINIMUM_PROTOCOL_VERSION = 3503
+    MINIMUM_PROTOCOL_VERSION = 3600
     
     # V36 uses COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS redeem script) instead of DONATION_SCRIPT (P2PK)
     # This replaces two separate donation outputs with one combined output.
@@ -2071,7 +2069,7 @@ def update_min_protocol_version(counts, share):
     versions are rejected.  Protocol.VERSION in p2p.py is auto-derived from
     max(share.MINIMUM_PROTOCOL_VERSION) so it always satisfies this check.
     
-    IMPORTANT: Only bumps to V36's protocol (3503) when AutoRatchet is in
+    IMPORTANT: Only bumps to V36's protocol (3600) when AutoRatchet is in
     CONFIRMED state.  During ACTIVATED state, we must still accept V35 peers
     (protocol 3502) so that if V36 hash power drops below 50%, the
     ACTIVATED -> VOTING fallback can occur."""
@@ -2079,9 +2077,9 @@ def update_min_protocol_version(counts, share):
     newminpver = share.MINIMUM_PROTOCOL_VERSION
     if (counts is not None) and (minpver < newminpver):
             if counts.get(share.VERSION, 0) >= sum(counts.itervalues())*95//100:
-                # Guard: don't bump to V36 protocol level (3503) unless AutoRatchet
+                # Guard: don't bump to V36 protocol level (3600) unless AutoRatchet
                 # is in CONFIRMED state.  This preserves fallback capability.
-                if newminpver >= 3503:
+                if newminpver >= 3600:
                     ratchet = getattr(share.net, '_auto_ratchet', None)
                     if ratchet is None or ratchet._state != 'confirmed':
                         return  # Don't bump yet - AutoRatchet not confirmed
