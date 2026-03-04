@@ -4,9 +4,9 @@
 
 [![Latest Release](https://img.shields.io/github/v/release/frstrtr/p2pool-merged-v36)](https://github.com/frstrtr/p2pool-merged-v36/releases/latest)
 [![Docker Image](https://img.shields.io/badge/ghcr.io-p2pool--merged--v36-blue?logo=docker)](https://ghcr.io/frstrtr/p2pool-merged-v36)
-[![License](https://img.shields.io/github/license/frstrtr/p2pool-merged-v36)](LICENSE)
+[![License](https://img.shields.io/github/license/frstrtr/p2pool-merged-v36)](COPYING)
 
-Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), building on the p2pool protocol with V36 share format.
+Decentralized Scrypt mining pool for **Litecoin**, **DigiByte**, and **Dogecoin** (merged mining), building on the p2pool protocol with V36 share format. Supports multiple Scrypt parent chains with a unified multichain dashboard.
 
 > **📋 New to V36?** Read the **[V36 Release Notes](docs/V36_RELEASE_NOTES.md)** for a complete overview of what changed, why, and how miners are protected from pool hopping attacks.
 
@@ -15,6 +15,7 @@ Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), bu
 ### Protocol & Consensus
 - **V36 share format** — extends the share chain with `pubkey_type` field (native P2SH and bech32 address support) and AuxPoW commitment fields; backward-compatible transition via built-in version signaling with 95% activation threshold
 - **Merged mining (AuxPoW)** — mine LTC and DOGE simultaneously on the same decentralized share chain; merged chain rewards are distributed through the same PPLNS consensus mechanism as parent chain rewards
+- **DigiByte (DGB) parent chain** — full Scrypt-based P2Pool network support for DigiByte (mainnet + testnet). DGB and LTC run as independent P2Pool instances, each with optional DOGE merged mining, unified under one dashboard
 - **MM-Adapter bridge** — Python 3 adapter that translates between P2Pool's merged mining protocol and standard Dogecoin Core RPC (`createauxblock`/`submitauxblock`), enabling merged mining without custom daemon patches
 - **Multi-chain address handling** — automatic cross-chain address conversion (LTC P2SH → DOGE P2SH, bech32 → P2PKH for chains without SegWit) and **reverse conversion** (DOGE → LTC when parent address is invalid); full validation pipeline for P2PKH, P2SH, P2WPKH
 
@@ -23,6 +24,8 @@ Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), bu
 - **Multiaddress coinbase** — miners specify both LTC and DOGE payout addresses via stratum; each chain's coinbase pays to the miner's native address format
 
 ### Dashboard
+- **Multichain dashboard** — pool-selector tabs to switch between LTC and DGB P2Pool instances from a single UI; chain-agnostic labels adapt to the active parent chain
+- **Multi-pool reverse proxy** (`multipool/multipool_proxy.py`) — aggregates multiple P2Pool instances behind one web endpoint (port 8080) with automatic API routing
 - Live V35→V36 transition signaling with version counts and activation progress
 - Best share display with network difficulty comparison (parent + merged chains)
 - Share format distribution visualization
@@ -33,13 +36,15 @@ Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), bu
 - Clean separation of parent/merged chain logic throughout the codebase
 - Comprehensive address type preservation across all code paths
 
-## 🎉 Litecoin + Dogecoin Merged Mining
+## 🎉 Litecoin + DigiByte + Dogecoin Mining
 
 **Status:** ✅ **PRODUCTION READY** - Mainnet merged mining operational
 
 ### Key Features
-- ✅ Litecoin scrypt mining with Dogecoin AuxPoW merged mining
-- ✅ Multiaddress coinbase - miners specify both LTC and DOGE addresses
+- ✅ Litecoin Scrypt mining with Dogecoin AuxPoW merged mining
+- ✅ DigiByte Scrypt mining with Dogecoin AuxPoW merged mining
+- ✅ Multichain dashboard with pool-selector tabs (LTC / DGB / +)
+- ✅ Multiaddress coinbase - miners specify both parent and DOGE addresses
 - ✅ Automatic address conversion (same pubkey_hash, correct network format)
 - ✅ V36 combined donation marker (P2SH scriptPubKey over 1-of-2 redeem policy)
 - ✅ Node-owner fees are sharechain-weighted on both parent and merged chains
@@ -49,17 +54,33 @@ Decentralized Scrypt mining pool for **Litecoin + Dogecoin** (merged mining), bu
 ### Architecture
 
 ```
-┌─────────────┐    Stratum   ┌─────────────┐   JSON-RPC   ┌─────────────┐
-│   Miners    │◀────────────▶│   P2Pool    │◀────────────▶│  Litecoin   │
-│  (scrypt)   │   Port 9327  │  (PyPy 2.7) │  Port 9332   │   Core      │
-└─────────────┘              └──────┬──────┘              └─────────────┘
-                                    │
-                                    │ JSON-RPC (Port 44556)
-                                    ▼
-                             ┌──────────────┐   JSON-RPC   ┌─────────────┐
-                             │  MM-Adapter  │◀────────────▶│  Dogecoin   │
-                             │ (Python 3)   │  Port 22555  │   Core      │
-                             └──────────────┘              └─────────────┘
+                         ┌──────────────────────────────────┐
+                         │  Multi-Pool Dashboard (:8080)    │  ← optional unified web UI
+                         └───────────┬──────────────────────┘
+                                     │
+                            ┌────────┴─────────┐
+                            ▼                  ▼
+┌─────────────┐  Stratum  ┌──────────┐      ┌──────────┐  Stratum  ┌─────────────┐
+│   Miners    │◀─────────▶│ P2Pool   │      │ P2Pool   │◀─────────▶│   Miners    │
+│  (scrypt)   │  :9327    │  LTC     │      │  DGB     │   :5025   │  (scrypt)   │
+└─────────────┘           └────┬─────┘      └────┬─────┘           └─────────────┘
+                               │                 │
+                    JSON-RPC   │                  │  JSON-RPC
+                    :9332      │                  │  :14022
+                               ▼                  ▼
+                         ┌──────────┐      ┌──────────┐
+                         │ Litecoin │      │ DigiByte │
+                         │  Core    │      │  Core    │
+                         └──────────┘      └──────────┘
+                               │                 │
+                    :44556     │      :44557      │
+                               ▼                  ▼
+                         ┌──────────┐      ┌──────────┐     JSON-RPC
+                         │MM-Adapter│      │MM-Adapter│◀───────────▶┌──────────┐
+                         │  (LTC)   │      │  (DGB)   │   :22555    │ Dogecoin │
+                         └─────┬────┘      └──────────┘             │  Core    │
+                               │                                    └──────────┘
+                               └─────────────────────────────────────────┘
 ```
 
 ## 📋 Documentation
@@ -90,6 +111,7 @@ The installation guide covers:
 | [mm-adapter/README.md](mm-adapter/README.md) | Merged mining adapter setup & config reference |
 | [MULTIADDRESS_MINING_GUIDE.md](docs/MULTIADDRESS_MINING_GUIDE.md) | Multi-address mining configuration |
 | [CUSTOM_NETWORK_GUIDE.md](docs/CUSTOM_NETWORK_GUIDE.md) | Adding support for new cryptocurrencies |
+| [scripts/start_multichain.sh](scripts/start_multichain.sh) | Turnkey DGB + LTC + DOGE multichain startup script |
 | [ASIC_SUPPORT_COMPLETE.md](docs/ASIC_SUPPORT_COMPLETE.md) | BIP320 version-rolling & Scrypt ASIC support details |
 | [SHARE_ARCHIVE_README.md](docs/SHARE_ARCHIVE_README.md) | Share archival and recovery |
 | [V36_TRANSITION_GUIDE.md](docs/V36_TRANSITION_GUIDE.md) | V35→V36 transition stages, AutoRatchet, dashboard legend |
@@ -592,6 +614,8 @@ pypy run_p2pool.py --help
 Common options:
 - `--net litecoin` - Use Litecoin mainnet
 - `--net litecoin_testnet` - Use Litecoin testnet
+- `--net digibyte` - Use DigiByte mainnet
+- `--net digibyte_testnet` - Use DigiByte testnet
 - `-a ADDRESS` - Your Litecoin payout address
 - `--bitcoind-rpc-port 9332` - Litecoin RPC port (default: 9332)
 - `--bitcoind-address 127.0.0.1` - Litecoin RPC address
@@ -615,6 +639,13 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 **See [INSTALL.md](INSTALL.md) for complete troubleshooting guide.**
 
 ## Recent Updates
+
+### v36-0.13-alpha (March 2026)
+- ✅ **DigiByte (DGB) parent chain support** — full Scrypt P2Pool network configs (mainnet + testnet), DGB subsidy calculation, bootstrap mode
+- ✅ **Multichain dashboard** — pool-selector tabs, chain-agnostic UI (dynamic parent chain names), `multipool.js` transparent API routing
+- ✅ **Multi-pool reverse proxy** (`multipool/multipool_proxy.py`) — aggregates LTC + DGB instances behind one web endpoint
+- ✅ **`scripts/start_multichain.sh`** — turnkey startup for DGB + LTC + DOGE merged mining with optional dashboard proxy
+- ✅ **Vardiff fixes** — ASIC miner support (Antminer R1-LTC), whale-flooding prevention, correct `SANE_TARGET_RANGE` network reference
 
 ### v23.0+ Critical Fixes
 - ✅ Missing type classes in pack.py (ComposedWithContextualOptionalsType, ContextualOptionalType, BoolType)
@@ -645,14 +676,24 @@ All issues and solutions are documented in **[INSTALL.md](INSTALL.md)**, includi
 ## Port Forwarding
 
 If behind NAT, forward these ports:
+
+**Litecoin P2Pool:**
 - **9326**: P2Pool P2P (for peer connections)
 - **9327**: Stratum (for miners)
 
-Do NOT forward port 9332 (Litecoin RPC - security risk)
+**DigiByte P2Pool:**
+- **5024**: P2Pool P2P (for peer connections)
+- **5025**: Stratum (for miners)
+
+**Multichain Dashboard (optional):**
+- **8080**: Multi-pool reverse proxy
+
+Do NOT forward RPC ports (9332, 14022, 22555 - security risk)
 
 ## Web Interface & API
 
-P2Pool provides a web interface at `http://YOUR_IP:9327/`:
+P2Pool provides a web interface at `http://YOUR_IP:9327/` (LTC) or `http://YOUR_IP:5025/` (DGB).
+The optional multichain proxy at `http://YOUR_IP:8080/` aggregates both instances with pool-selector tabs.
 
 ### Web Pages
 - `/static/index.html` - Classic status page

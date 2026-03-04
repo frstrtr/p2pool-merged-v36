@@ -1,6 +1,6 @@
-# P2Pool Installation Guide (Litecoin + Dogecoin Merged Mining)
+# P2Pool Installation Guide (Litecoin + DigiByte + Dogecoin Merged Mining)
 
-Complete installation guide for P2Pool on Ubuntu/Debian and **macOS (Intel)** systems with Litecoin (scrypt) mining and Dogecoin merged mining.
+Complete installation guide for P2Pool on Ubuntu/Debian and **macOS (Intel)** systems with Litecoin and DigiByte (Scrypt) mining and Dogecoin merged mining.
 
 > **Windows 10/11 users**: See [WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md) for WSL2, Docker, and native Windows deployment instructions.
 >
@@ -10,6 +10,7 @@ Complete installation guide for P2Pool on Ubuntu/Debian and **macOS (Intel)** sy
 - [System Requirements](#system-requirements)
 - [Litecoin Core Installation](#litecoin-core-installation)
 - [Dogecoin Core Installation](#dogecoin-core-installation)
+- [DigiByte Core Installation](#digibyte-core-installation)
 - [macOS (Intel) Installation](#macos-intel-installation)
 - [Python Environment Setup](#python-environment-setup)
 - [P2Pool Installation](#p2pool-installation)
@@ -55,13 +56,27 @@ See [POOL_HOPPING_ATTACKS.md §7.3.10](docs/POOL_HOPPING_ATTACKS.md) for the
 complete adaptive window design and resource analysis.
 
 ### Required Ports
+
+**Litecoin:**
 - **9333**: Litecoin P2P (incoming connections)
 - **9332**: Litecoin RPC (localhost only)
+- **9327**: P2Pool LTC Stratum (for miners)
+- **9326**: P2Pool LTC P2P (for peer connections)
+- **44556**: MM-Adapter RPC for LTC node (internal, localhost)
+
+**DigiByte:**
+- **12024**: DigiByte P2P (incoming connections)
+- **14022**: DigiByte RPC (localhost only)
+- **5025**: P2Pool DGB Stratum (for miners)
+- **5024**: P2Pool DGB P2P (for peer connections)
+- **44557**: MM-Adapter RPC for DGB node (internal, localhost)
+
+**Dogecoin (merged mining child chain):**
 - **22556**: Dogecoin P2P (incoming connections)
 - **22555**: Dogecoin RPC (localhost only)
-- **9327**: P2Pool Stratum (for miners)
-- **9326**: P2Pool P2P (for peer connections)
-- **44556**: MM-Adapter RPC (internal, localhost)
+
+**Multichain Dashboard (optional):**
+- **8080**: Multi-pool reverse proxy
 
 ---
 
@@ -235,6 +250,54 @@ dogecoind
 
 # Monitor sync progress
 dogecoin-cli getblockchaininfo
+```
+
+---
+
+## DigiByte Core Installation
+
+DigiByte Core is required if you want to run a DGB P2Pool instance (in addition to or instead of LTC).
+
+### 1. Install DigiByte Core (Binary)
+```bash
+cd ~
+wget https://github.com/digibyte-core/digibyte/releases/download/v8.22.0/digibyte-8.22.0-x86_64-linux-gnu.tar.gz
+tar xzf digibyte-8.22.0-x86_64-linux-gnu.tar.gz
+sudo install -m 0755 digibyte-8.22.0/bin/* /usr/local/bin/
+```
+
+### 2. Configure DigiByte Core
+
+Create `~/.digibyte/digibyte.conf`:
+```ini
+server=1
+daemon=1
+txindex=1
+
+rpcuser=dgbrpc
+rpcpassword=CHANGE_ME
+rpcallowip=127.0.0.1
+rpcallowip=192.168.0.0/16       # Allow LAN P2Pool nodes
+
+[main]
+port=12024
+rpcport=14022
+rpcbind=0.0.0.0
+dbcache=4000
+par=0
+
+rpcworkqueue=512
+rpcthreads=32
+```
+
+### 3. Start DigiByte Core and Sync
+```bash
+digibyted
+
+# Monitor sync progress
+digibyte-cli getblockchaininfo
+
+# Wait until fully synced (DGB blockchain is ~40 GB)
 ```
 
 ---
@@ -474,6 +537,37 @@ pypy run_p2pool.py \
     --disable-upnp \
     litecoinrpc YOUR_LTC_RPC_PASSWORD
 ```
+
+### Start P2Pool (DigiByte + Dogecoin Merged Mining)
+
+DigiByte uses a separate P2Pool instance on different ports. Each DGB instance can also merge-mine DOGE via its own MM-Adapter.
+
+```bash
+pypy run_p2pool.py \
+    --net digibyte \
+    --bitcoind-address DIGIBYTE_DAEMON_IP \
+    --bitcoind-rpc-port 14022 \
+    --bitcoind-p2p-port 12024 \
+    --merged-coind-address 127.0.0.1 \
+    --merged-coind-rpc-port 44557 \
+    --merged-coind-p2p-port 22556 \
+    --merged-coind-p2p-address DOGECOIN_DAEMON_IP \
+    --merged-coind-rpc-user dogecoinrpc \
+    --merged-coind-rpc-password YOUR_DOGE_RPC_PASSWORD \
+    --address YOUR_DGB_ADDRESS \
+    --give-author 1 \
+    -f 1 \
+    --disable-upnp \
+    dgbrpc YOUR_DGB_RPC_PASSWORD
+```
+
+> **Multichain startup:** To run both LTC and DGB instances together with the
+> multi-pool dashboard proxy, use the turnkey script:
+> ```bash
+> ./scripts/start_multichain.sh
+> ```
+> This starts both P2Pool instances, their MM-Adapters, and the optional
+> dashboard proxy on port 8080. See `scripts/start_multichain.sh --help` for options.
 
 ### Run as Background Service
 
@@ -810,8 +904,8 @@ curl -s http://127.0.0.1:9327/local_stats | python3 -m json.tool
 
 Key fields to check:
 - `"peers"` — should show outgoing connections (e.g., `{"incoming": 0, "outgoing": 8}`)
-- `"version"` — should show your p2pool version (e.g., `v36-0.08-alpha`)
-- `"protocol_version"` — should be `3503`
+- `"version"` — should show your p2pool version (e.g., `v36-0.13-alpha`)
+- `"protocol_version"` — should be `3600`
 - `"block_value"` — current LTC block reward
 
 The web dashboard is also available at `http://127.0.0.1:9327/`.
@@ -901,7 +995,7 @@ Result:
   ✓ All dependencies installed (twisted 20.3.0, pycryptodome 3.23.0,
     scrypt 0.8.20, ecdsa 0.19.1, coincurve 13.0.0)
   ✓ MM-Adapter running on 127.0.0.1:44556 → DOGE daemon
-  ✓ P2Pool v36-0.08-alpha, protocol 3503
+  ✓ P2Pool v36-0.13-alpha, protocol 3600
   ✓ 8 outgoing peers, share chain synced in ~90 seconds
   ✓ Merged mining active (DOGE block updates observed)
   ✓ Web dashboard at http://127.0.0.1:9327/
