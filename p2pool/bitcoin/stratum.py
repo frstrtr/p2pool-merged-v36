@@ -448,14 +448,15 @@ class StratumRPCMiningProvider(object):
         else:
             self.fixed_target = False
             if self.target is None:
-                # Initial target: start at the EASIEST sane value.
-                # This lets even small miners submit pseudoshares immediately,
-                # then vardiff adjusts per-connection based on actual submission rate.
-                # Do NOT use share_target (node-wide) or min_share_target (P2Pool share difficulty)
-                # because those can be far too hard for low-hashrate miners. SANE_TARGET_RANGE[1]
-                # gives stratum diff ~61, appropriate for initial connection.
-                # Only actual P2Pool shares (in got_response) need to meet share_info['bits'].target.
-                self.target = self.wb.net.SANE_TARGET_RANGE[1]
+                # Initial target: use node-wide hashrate estimate from get_work().
+                # share_target is computed from local_hash_rate and clipped to
+                # SANE_TARGET_RANGE in get_work(). This gives a reasonable starting
+                # difficulty: if the node already has 100 TH/s of miners, new
+                # connections start at ~diff 1.5M instead of diff ~61, preventing
+                # pseudoshare flooding. For a fresh node with no hashrate data,
+                # share_target falls back to SANE_TARGET_RANGE[1] anyway.
+                # Vardiff then adjusts per-connection based on actual submission rate.
+                self.target = x['share_target']
         jobid = str(random.randrange(2**32))
         self.other.svc_mining.rpc_set_difficulty(bitcoin_data.target_to_difficulty(self.target)*self.wb.net.DUMB_SCRYPT_DIFF).addErrback(lambda err: None)
         self.other.svc_mining.rpc_notify(
@@ -554,8 +555,14 @@ class StratumRPCMiningProvider(object):
                     print "Clipping target from %064x to %064x" % (self.target, newtarget)
                     self.target = newtarget
                 # NOTE: Do NOT clamp to min_share_target here.
-                # Pseudoshares are allowed to be easier than P2Pool share difficulty.
-                # SANE_TARGET_RANGE provides sufficient bounds for vardiff.
+                # The original bug was an INVERTED comparison: our code used
+                #   if self.target > min_share_target: self.target = min_share_target
+                # which forced the target DOWN to share chain difficulty (ceiling).
+                # Jtoomim's correct design uses max(min_share_target, self.target)
+                # which floors UP (never harder than share chain). Since pseudoshare
+                # targets are always much easier (larger) than share chain difficulty,
+                # jtoomim's max() is a harmless no-op. Our fix removes the ceiling
+                # entirely — SANE_TARGET_RANGE provides sufficient outer bounds.
                 # Only shares meeting share_info['bits'].target in got_response()
                 # become actual P2Pool shares on the sharechain.
                 self.recent_shares = [time.time()]
