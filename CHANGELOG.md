@@ -2,6 +2,32 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.12-alpha] - 2026-03-04
+
+### AutoRatchet — 4 Critical Bug Fixes
+
+Comprehensive 5-phase transition test (activation → deactivation → re-activation → confirmation → CONFIRMED reversal) uncovered and fixed four bugs in the AutoRatchet state machine:
+
+- **Bug #1: Protocol version ratchet guard** — `update_min_protocol_version()` bumped `MINIMUM_PROTOCOL_VERSION` to V36 level at activation, permanently banning V35 peers before confirmation was complete. Now guarded: only bumps to ≥3600 when AutoRatchet reaches CONFIRMED state.
+- **Bug #2: v36_active / GENTX mismatch** — `is_v36_active()` returned `True` from stale chain data while AutoRatchet selected V35 share format, causing share validation failures. Fixed by overriding `v36_active` with AutoRatchet's actual share type decision.
+- **Bug #3: Share downgrade transition** — `PaddingBugfixShare` (V35) could not follow `MergedMiningShare` (V36) in the share chain, making deactivation (ACTIVATED→VOTING) impossible. Added downgrade transition check in share `check()` method: V35 shares can now chain after V36 shares when the network reverts.
+- **Bug #4: Confirmation counter vs tracker pruning** — Confirmation counter used `height - activated_height`, but the tracker prunes chains to `2×CHAIN_LENGTH+10` shares. Since confirmation requires `2×CHAIN_LENGTH` (800 testnet / 17280 mainnet), the counter could never reach the threshold. Replaced with a monotonic `_confirm_count` that survives pruning by tracking cumulative height increments. Persisted to `v36_ratchet.json`.
+
+### Protocol Version Bump (3503 → 3600)
+- **MergedMiningShare.MINIMUM_PROTOCOL_VERSION** — Bumped from 3503 (testing jtoomim compat) to 3600 (production). V36 shares now require protocol ≥3600 from peers.
+- **Protocol.VERSION** — Bumped from 3503 to 3600 in `p2p.py`. V36 nodes now advertise protocol 3600.
+- **Guard threshold** — `update_min_protocol_version()` guard updated to match: blocks bump at ≥3600 until CONFIRMED.
+
+### Testnet Cleanup
+- **SANE_TARGET_RANGE reverted** — `litecoin_testnet.py` PARENT max target reverted from `2^256//500000` (CPU mining tweak) back to `2^256//4000000` (matches mainnet). The CPU-friendly value was a temporary testing aid that could cause orphan storms with real miners.
+
+### Test Infrastructure
+- **force_v35_test mode** — Flag file (`force_v35_test` in datadir) triggers V35 non-voting share production in ACTIVATED or CONFIRMED states, enabling deactivation/reversal testing without V35 nodes.
+- **MINIMUM_PROTOCOL_VERSION reset** — On deactivation (ACTIVATED→VOTING), `MINIMUM_PROTOCOL_VERSION` resets to 3301 so V35 peers can reconnect.
+- **Comprehensive test results** — `docs/V36_TRANSITION_TEST_RESULTS.md` documents all 5 phases with timestamps, log excerpts, and the 4 bug discoveries.
+
+---
+
 ## [v36-0.11-alpha] - 2026-03-03
 
 ### Anti-Pool-Hopping Defense Stack (NEW)
