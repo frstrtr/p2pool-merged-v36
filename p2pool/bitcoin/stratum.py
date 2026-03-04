@@ -455,7 +455,7 @@ class StratumRPCMiningProvider(object):
                 # because those can be far too hard for low-hashrate miners. SANE_TARGET_RANGE[1]
                 # gives stratum diff ~61, appropriate for initial connection.
                 # Only actual P2Pool shares (in got_response) need to meet share_info['bits'].target.
-                self.target = self.wb.net.PARENT.SANE_TARGET_RANGE[1]
+                self.target = self.wb.net.SANE_TARGET_RANGE[1]
         jobid = str(random.randrange(2**32))
         self.other.svc_mining.rpc_set_difficulty(bitcoin_data.target_to_difficulty(self.target)*self.wb.net.DUMB_SCRYPT_DIFF).addErrback(lambda err: None)
         self.other.svc_mining.rpc_notify(
