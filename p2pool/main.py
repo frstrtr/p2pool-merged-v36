@@ -457,20 +457,22 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
             print '             Donation to devs: %.1f%% (--give-author)' % args.donation_percentage
             print
             # [CHECK 6] Miner stratum username format for merged mining
+            _psym = getattr(net.PARENT, 'SYMBOL', 'COIN').lower()
             print '  [CHECK 6] Miner stratum username format for merged mining:'
-            print '             <ltc_addr>,<doge_addr>.WORKER   (dot separator)'
-            print '             <ltc_addr>,<doge_addr>_WORKER   (underscore separator)'
+            print '             <%s_addr>,<doge_addr>.WORKER   (dot separator)' % _psym
+            print '             <%s_addr>,<doge_addr>_WORKER   (underscore separator)' % _psym
             print '             Both . and _ are valid worker separators'
-            print '             Example: LUSr5EY...,DANxiiX....Rig1'
-            print '             Example: LUSr5EY...,DANxiiX..._Rig1'
+            print '             Example: %s...,DANxiiX....Rig1' % my_address[:10]
+            print '             Example: %s...,DANxiiX..._Rig1' % my_address[:10]
             print
             # [CHECK 7] Coinbase text configuration
             from p2pool.merged_mining import P2POOL_TAG as _mm_tag
             print '  [CHECK 7] Coinbase text embedded in blocks:'
+            _psym2 = getattr(net.PARENT, 'SYMBOL', 'COIN')
             if args.coinb_texts:
-                print '             Parent chain (LTC scriptSig): %s' % ', '.join(repr(t) for t in args.coinb_texts)
+                print '             Parent chain (%s scriptSig): %s' % (_psym2, ', '.join(repr(t) for t in args.coinb_texts))
             else:
-                print '             Parent chain (LTC scriptSig): (none -- use --coinbtext to set)'
+                print '             Parent chain (%s scriptSig): (none -- use --coinbtext to set)' % _psym2
             print '             Merged chain (DOGE OP_RETURN):  configured in mm-adapter config.yaml'
             print '             Merged chain fallback default:  \'%s\'' % _mm_tag
             print
@@ -759,7 +761,7 @@ def run():
         action='store_true', default=False, dest='merged_coind_rpc_ssl')
     
     parser.add_argument('--coinbtext',
-        help='append this text to the parent chain (Litecoin) coinbase scriptSig. '
+        help='append this text to the parent chain coinbase scriptSig. '
              'For merged chain (Dogecoin) coinbase text, set coinbase_text in mm-adapter config.yaml. '
              'Repeatable: --coinbtext "pool1" --coinbtext "tag2"',
         type=str, action='append', default=[], dest='coinb_texts')
@@ -1034,7 +1036,7 @@ def run():
     # 2. HTTPS block explorer links - just text URLs, no actual connections made
     # 3. Twisted HTTP client redirect handling - fails gracefully if SSL unavailable
     # 
-    # For Litecoin/Dogecoin merged mining, SSL is not required as:
+    # For Scrypt merged mining, SSL is not required as:
     # - Both daemons use HTTP RPC by default
     # - P2Pool share chain uses custom binary protocol (not HTTP/HTTPS)
     # - Merged mining data embedded in coinbase, no external connections

@@ -49,7 +49,7 @@ class Protocol(protocol.Protocol):
             
             type_ = getattr(self, 'message_' + command, None)
             if type_ is None:
-                if p2pool.DEBUG:
+                if p2pool.DEBUG and command not in ('wtxidrelay', 'sendaddrv2', 'sendcmpct', 'sendheaders', 'feefilter', 'cmpctblock', 'getblocktxn', 'blocktxn'):
                     print 'no type for', repr(command)
                 continue
             
@@ -94,7 +94,7 @@ class Protocol(protocol.Protocol):
     def packetReceived(self, command, payload2):
         handler = getattr(self, 'handle_' + command, None)
         if handler is None:
-            if p2pool.DEBUG:
+            if p2pool.DEBUG and command not in ('getheaders',):
                 print 'no handler for', repr(command)
             return
         

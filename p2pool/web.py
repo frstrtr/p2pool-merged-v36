@@ -69,6 +69,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     web_root = resource.Resource()
     
     def get_users():
+        if node.best_share_var.value is None:
+            return {}
         height, last = node.tracker.get_height_and_last(node.best_share_var.value)
         weights, total_weight, donation_weight = node.tracker.get_cumulative_weights(node.best_share_var.value, min(height, 720), 65535*2**256)
         res = {}
@@ -77,6 +79,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         return res
     
     def get_current_scaled_txouts(scale, trunc=0):
+        if node.best_share_var.value is None:
+            return {}
         txouts = node.get_current_txouts()
         total = sum(txouts.itervalues())
         results = dict((addr, value*scale//total) for addr, value in txouts.iteritems())
@@ -488,7 +492,13 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         """
         warnings = []
 
-        parent_symbol = getattr(node.net.PARENT, 'SYMBOL', 'LTC') if hasattr(node.net, 'PARENT') else 'LTC'
+        parent_symbol = getattr(node.net.PARENT, 'SYMBOL', 'COIN') if hasattr(node.net, 'PARENT') else 'COIN'
+        parent_hrp = getattr(node.net.PARENT, 'HUMAN_READABLE_PART', '') if hasattr(node.net, 'PARENT') else ''
+        # Build example address prefix: bech32 if available, otherwise legacy prefix
+        if parent_hrp:
+            parent_addr_example = '%s1q...abc' % parent_hrp  # e.g. dgb1q...abc, ltc1q...abc
+        else:
+            parent_addr_example = '%s_addr...' % parent_symbol
 
         # V35-phase limitation: shares can't carry explicit merged addresses
         if not ratchet_confirmed and effective_target >= 36:
@@ -513,8 +523,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'V36 introduces merged mining. To receive rewards on both '
                 'chains, configure your miner\'s stratum username as: '
                 '%s_ADDRESS,DOGE_ADDRESS.worker_name  '
-                'Example: Labc...xyz,D9ab...def.rig1'
-            ) % parent_symbol,
+                'Example: %s,D9ab...def.rig1'
+            ) % (parent_symbol, parent_addr_example),
         ))
 
         # Auto-conversion warning
@@ -683,7 +693,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     
     def get_global_stats():
         # averaged over last hour
-        if node.tracker.get_height(node.best_share_var.value) < 10:
+        if node.best_share_var.value is None or node.tracker.get_height(node.best_share_var.value) < 10:
             return None
         lookbehind = min(node.tracker.get_height(node.best_share_var.value), 3600//node.net.SHARE_PERIOD)
         
@@ -729,7 +739,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         return None
     
     def get_local_stats():
-        if node.tracker.get_height(node.best_share_var.value) < 10:
+        if node.best_share_var.value is None or node.tracker.get_height(node.best_share_var.value) < 10:
             return None
         lookbehind = min(node.tracker.get_height(node.best_share_var.value), 3600//node.net.SHARE_PERIOD)
         
@@ -820,17 +830,19 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             defer.returnValue(json.dumps(res) if self.mime_type == 'application/json' else res)
     
     def decent_height():
+        if node.best_share_var.value is None:
+            return 0
         return min(node.tracker.get_height(node.best_share_var.value), 720)
-    web_root.putChild('rate', WebInterface(lambda: p2pool_data.get_pool_attempts_per_second(node.tracker, node.best_share_var.value, decent_height())/(1-p2pool_data.get_average_stale_prop(node.tracker, node.best_share_var.value, decent_height()))))
-    web_root.putChild('difficulty', WebInterface(lambda: bitcoin_data.target_to_difficulty(node.tracker.items[node.best_share_var.value].max_target)))
+    web_root.putChild('rate', WebInterface(lambda: p2pool_data.get_pool_attempts_per_second(node.tracker, node.best_share_var.value, decent_height())/(1-p2pool_data.get_average_stale_prop(node.tracker, node.best_share_var.value, decent_height())) if node.best_share_var.value is not None else 0))
+    web_root.putChild('difficulty', WebInterface(lambda: bitcoin_data.target_to_difficulty(node.tracker.items[node.best_share_var.value].max_target) if node.best_share_var.value is not None else None))
     web_root.putChild('users', WebInterface(get_users))
     web_root.putChild('user_stales', WebInterface(lambda:
         p2pool_data.get_user_stale_props(node.tracker, node.best_share_var.value,
-            node.tracker.get_height(node.best_share_var.value), node.net.PARENT)))
+            node.tracker.get_height(node.best_share_var.value), node.net.PARENT) if node.best_share_var.value is not None else {}))
     web_root.putChild('fee', WebInterface(lambda: getattr(wb, 'node_owner_fee', wb.worker_fee)))
     web_root.putChild('current_payouts', WebInterface(lambda: dict(
         (address, value/1e8) for address, value
-            in node.get_current_txouts().iteritems())))
+            in node.get_current_txouts().iteritems()) if node.best_share_var.value is not None else {}))
     
     # Import merged chain networks for address conversion
     try:
@@ -2828,7 +2840,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     new_root.putChild('verified_heads', WebInterface(lambda: ['%064x' % x for x in node.tracker.verified.heads]))
     new_root.putChild('tails', WebInterface(lambda: ['%064x' % x for t in node.tracker.tails for x in node.tracker.reverse.get(t, set())]))
     new_root.putChild('verified_tails', WebInterface(lambda: ['%064x' % x for t in node.tracker.verified.tails for x in node.tracker.verified.reverse.get(t, set())]))
-    new_root.putChild('best_share_hash', WebInterface(lambda: '%064x' % node.best_share_var.value))
+    new_root.putChild('best_share_hash', WebInterface(lambda: '%064x' % node.best_share_var.value if node.best_share_var.value is not None else None))
     new_root.putChild('my_share_hashes', WebInterface(lambda: ['%064x' % my_share_hash for my_share_hash in wb.my_share_hashes]))
     new_root.putChild('my_share_hashes50', WebInterface(lambda: ['%064x' % my_share_hash for my_share_hash in list(wb.my_share_hashes)[:50]]))
     def get_share_data(share_hash_str):
@@ -2839,6 +2851,8 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     new_root.putChild('share_data', WebInterface(lambda share_hash_str: get_share_data(share_hash_str), 'application/octet-stream'))
     new_root.putChild('currency_info', WebInterface(lambda: dict(
         symbol=node.net.PARENT.SYMBOL,
+        name=getattr(node.net.PARENT, 'NAME', node.net.PARENT.SYMBOL).replace('_', ' ').title(),
+        block_period=getattr(node.net.PARENT, 'BLOCK_PERIOD', 150),
         block_explorer_url_prefix=node.net.PARENT.BLOCK_EXPLORER_URL_PREFIX,
         address_explorer_url_prefix=node.net.PARENT.ADDRESS_EXPLORER_URL_PREFIX,
         tx_explorer_url_prefix=node.net.PARENT.TX_EXPLORER_URL_PREFIX,

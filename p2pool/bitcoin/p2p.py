@@ -67,7 +67,7 @@ class Protocol(p2protocol.Protocol):
     
     message_inv = pack.ComposedType([
         ('invs', pack.ListType(pack.ComposedType([
-            ('type', pack.EnumType(pack.IntType(32), {1: 'tx', 2: 'block'})),
+            ('type', pack.EnumType(pack.IntType(32), {1: 'tx', 2: 'block', 3: 'filtered_block', 4: 'cmpct_block', 5: 'witness_tx', 6: 'witness_block'})),
             ('hash', pack.IntType(256)),
         ]))),
     ])
@@ -77,12 +77,14 @@ class Protocol(p2protocol.Protocol):
                 self.send_getdata(requests=[inv])
             elif inv['type'] == 'block':
                 self.factory.new_block.happened(inv['hash'])
+            elif inv['type'] in ('witness_tx', 'witness_block', 'filtered_block', 'cmpct_block'):
+                pass  # silently ignore modern inv types
             else:
                 print 'Unknown inv type', inv
     
     message_getdata = pack.ComposedType([
         ('requests', pack.ListType(pack.ComposedType([
-            ('type', pack.EnumType(pack.IntType(32), {1: 'tx', 2: 'block'})),
+            ('type', pack.EnumType(pack.IntType(32), {1: 'tx', 2: 'block', 3: 'filtered_block', 4: 'cmpct_block', 5: 'witness_tx', 6: 'witness_block'})),
             ('hash', pack.IntType(256)),
         ]))),
     ])
@@ -165,7 +167,7 @@ class Protocol(p2protocol.Protocol):
             self.factory.gotConnection(None)
         if hasattr(self, 'pinger'):
             self.pinger.stop()
-        if p2pool.DEBUG:
+        if p2pool.DEBUG and not getattr(self.factory, '_broadcaster_connection', False):
             print >>sys.stderr, 'Bitcoin connection lost. Reason:', reason.getErrorMessage()
 
 class ClientFactory(protocol.ReconnectingClientFactory):

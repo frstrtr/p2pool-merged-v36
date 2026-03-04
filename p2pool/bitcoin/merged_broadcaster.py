@@ -485,6 +485,8 @@ class MergedMiningBroadcaster(object):
                 self.chain_name, _safe_addr_str(addr)))
         
         factory = bitcoin_p2p.ClientFactory(self.p2p_net)
+        # Tag as broadcaster connection so Protocol.connectionLost skips debug logging
+        factory._broadcaster_connection = True
         # CRITICAL: Disable auto-reconnect. ReconnectingClientFactory will
         # spawn infinite TCP sockets if left enabled, exhausting fd ulimit.
         factory.stopTrying()

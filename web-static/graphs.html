@@ -5,6 +5,7 @@
         <title>P2Pool Graphs</title>
         <link rel="shortcut icon" type="image/x-icon" href="favicon.ico" />
         <script type="text/javascript" src="d3.v2.min.js"></script>
+        <script type="text/javascript" src="multipool.js"></script>
         
         <style type="text/css">
             line {
@@ -22,6 +23,12 @@
                 font-family: Sans-serif;
                 font-size: 12px;
             }
+
+            .pool-tab { background: rgba(255,255,255,0.08); color: #8888a0; padding: 4px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; user-select: none; }
+            .pool-tab:hover { background: rgba(255,255,255,0.15); color: #e0e0e0; }
+            .pool-tab.active { background: #008de4; color: white; border-color: rgba(255,255,255,0.15); box-shadow: 0 2px 8px rgba(0,141,228,0.3); }
+            .pool-tab-add { background: transparent !important; color: #8888a0 !important; border: 1px dashed #3a3a5a !important; font-size: 1rem; padding: 2px 10px; opacity: 0.6; box-shadow: none !important; }
+            .pool-tab-add:hover { opacity: 1; border-color: #008de4 !important; color: #008de4 !important; }
         </style>
     </head>
     
@@ -31,6 +38,7 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <h1 style="font-size: 1.5rem; font-weight: 600; color: #008de4; margin: 0;">P2Pool Graphs</h1>
+                        <div id="pool-tabs" style="display:flex;gap:4px;align-items:center;"></div>
                     </div>
                     <nav style="display: flex; gap: 10px; flex-wrap: wrap;">
                         <a href="dashboard.html" style="color: #e0e0e0; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-size: 0.9rem; background: #16162a; transition: all 0.2s;">Dashboard</a>

@@ -9,6 +9,7 @@
     <title>Active Workers - P2Pool</title>
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico" />
     <script src="d3.v2.min.js"></script>
+    <script src="multipool.js"></script>
     <style>
         :root {
             --primary: #008de4;
@@ -80,6 +81,13 @@
             font-size: 0.9rem;
             font-weight: bold;
         }
+
+        .pool-tabs { display: flex; gap: 4px; align-items: center; }
+        .pool-tab { background: rgba(255,255,255,0.08); color: var(--text-muted); padding: 4px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; user-select: none; }
+        .pool-tab:hover { background: rgba(255,255,255,0.15); color: var(--text); }
+        .pool-tab.active { background: var(--primary); color: white; border-color: rgba(255,255,255,0.15); box-shadow: 0 2px 8px rgba(0,141,228,0.3); }
+        .pool-tab-add { background: transparent !important; color: var(--text-muted) !important; border: 1px dashed var(--border) !important; font-size: 1rem; padding: 2px 10px; opacity: 0.6; box-shadow: none !important; }
+        .pool-tab-add:hover { opacity: 1; border-color: var(--primary) !important; color: var(--primary) !important; }
         
         .version {
             font-size: 0.75rem;
@@ -469,7 +477,9 @@
             <div class="header-content">
                 <div class="logo">
                     <h1>⛏️ P2Pool Miners</h1>
-                    <span class="symbol symbol-small">DASH</span>
+                    <div class="pool-tabs" id="pool-tabs">
+                        <span class="pool-tab active symbol-small">...</span>
+                    </div>
                     <span class="version" id="version">...</span>
                 </div>
                 <nav>
@@ -644,7 +654,7 @@
             }
         });
         
-        // For Scrypt coins (Litecoin), DUMB_SCRYPT_DIFF = 2^16 = 65536
+        // For Scrypt coins, DUMB_SCRYPT_DIFF = 2^16 = 65536
         var DUMB_SCRYPT_DIFF = 65536;
         var VARDIFF_TARGET_SECONDS = 3; // Default vardiff target
         
@@ -672,7 +682,7 @@
                 // Fetch stratum_stats to get ONLY real connected miners
                 d3.json('../stratum_stats', function(stratum_stats) {
                     // Extract base address helper
-                    // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
+                    // Split on comma first (merged mining: PARENT_ADDR,DOGE_ADDR.worker)
                     function extractAddress(workerName) {
                         return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
                     }
@@ -875,7 +885,7 @@
                     if (miner.mergedAutoConverted) {
                         mergedDiv.append('span')
                             .attr('style', 'color: #888; font-size: 0.65rem; margin-left: 4px;')
-                            .attr('title', 'Auto-converted from LTC address (same pubkey hash)')
+                            .attr('title', 'Auto-converted from parent address (same pubkey hash)')
                             .text('(auto)');
                     }
                     mergedDiv.append('a')
@@ -941,7 +951,7 @@
                 payout_stat.append('div').attr('class', 'miner-stat-label').text('Predicted Payout');
                 var payout = payouts[miner.address] || 0;
                 payout_stat.append('div').attr('class', 'miner-stat-value')
-                    .html(d3.format('.4f')(payout) + ' <span class="symbol-small">' + (currency_info.symbol || 'LTC') + '</span>');
+                    .html(d3.format('.4f')(payout) + ' <span class="symbol-small">' + (currency_info.symbol || 'COIN') + '</span>');
                 
                 // Last Seen
                 var ls_stat = stats.append('div').attr('class', 'miner-stat');
@@ -1034,7 +1044,7 @@
                 tbody.innerHTML = '';
                 
                 // Helper to extract base address
-                // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
+                // Split on comma first (merged mining: PARENT_ADDR,DOGE_ADDR.worker)
                 function extractAddress(workerName) {
                     if (!workerName) return '-';
                     return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
@@ -1133,7 +1143,7 @@
                 };
                 
                 // Helper to extract base address
-                // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
+                // Split on comma first (merged mining: PARENT_ADDR,DOGE_ADDR.worker)
                 function extractAddress(workerName) {
                     if (!workerName) return '-';
                     return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];

@@ -6,6 +6,7 @@
     <title>P2Pool Dashboard</title>
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico" />
     <script src="d3.v2.min.js"></script>
+    <script src="multipool.js"></script>
     <script src="highcharts.js"></script>
     <script src="highcharts-exporting.js"></script>
     <style>
@@ -80,6 +81,61 @@
             border-radius: 4px;
             font-size: 0.9rem;
             font-weight: bold;
+        }
+
+        /* Multi-pool tabs */
+        .pool-tabs {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .pool-tab {
+            background: rgba(255,255,255,0.08);
+            color: var(--text-muted);
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+            user-select: none;
+            letter-spacing: 0.5px;
+        }
+
+        .pool-tab:hover {
+            background: rgba(255,255,255,0.15);
+            color: var(--text);
+            transform: translateY(-1px);
+        }
+
+        .pool-tab.active {
+            background: var(--primary);
+            color: white;
+            border-color: rgba(255,255,255,0.15);
+            box-shadow: 0 2px 8px rgba(0,141,228,0.3);
+        }
+
+        .pool-tab.active:hover {
+            transform: none;
+            filter: brightness(1.1);
+        }
+
+        .pool-tab-add {
+            background: transparent !important;
+            color: var(--text-muted) !important;
+            border: 1px dashed var(--border) !important;
+            font-size: 1rem;
+            padding: 2px 10px;
+            opacity: 0.6;
+            box-shadow: none !important;
+        }
+
+        .pool-tab-add:hover {
+            opacity: 1;
+            border-color: var(--primary) !important;
+            color: var(--primary) !important;
         }
         
         .version {
@@ -1189,7 +1245,9 @@
             <div class="header-content">
                 <div class="logo">
                     <h1>P2Pool</h1>
-                    <span class="symbol" id="currency-symbol">DASH</span>
+                    <div class="pool-tabs" id="pool-tabs">
+                        <span class="pool-tab active" id="currency-symbol">...</span>
+                    </div>
                     <span class="version"><span id="version">-</span></span>
                 </div>
                 <nav>
@@ -1207,7 +1265,7 @@
                     <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 5px;">⛏️ Miner Configuration</div>
                     <div style="font-size: 0.85rem; font-family: monospace; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;">
                         <div><strong>Stratum URL:</strong> <span id="miner-url">detecting...</span></div>
-                        <div style="margin-top: 3px;"><strong>Username:</strong> <span style="color: #ffc107;">&lt;LTC_ADDR&gt;</span><span style="color: #888;">,</span><span style="color: #c3a634;">&lt;DOGE_ADDR&gt;</span><span style="color: #888;">.WORKER</span></div>
+                        <div style="margin-top: 3px;"><strong>Username:</strong> <span style="color: #ffc107;">&lt;<span class="parent-symbol-hint">ADDR</span>&gt;</span><span style="color: #888;">,</span><span style="color: #c3a634;">&lt;DOGE_ADDR&gt;</span><span style="color: #888;">.WORKER</span></div>
                         <div style="margin-top: 3px;"><strong>Password:</strong> <span style="color: #888;">anything</span></div>
                     </div>
                 </div>
@@ -1362,7 +1420,7 @@
                 <!-- Second Row: Miners Block Value -->
                 <div class="stat-card">
                     <h3><span class="icon">💰</span> Miners Block Value</h3>
-                    <div class="stat-value warning"><span id="block_value_miner">-</span> <small class="symbol-small">LTC</small></div>
+                    <div class="stat-value warning"><span id="block_value_miner">-</span> <small class="symbol-small" id="block_value_symbol">-</small></div>
                     <div class="stat-sub" style="color: #c3a634; font-size: 1.1em; margin-top: -4px;">+<span id="merged_block_value">-</span> DOGE</div>
                     <div class="stat-detail" style="white-space: nowrap;">Expected: <span id="time_to_block">-</span> <span style="color: #c3a634;">|</span> <span style="color: #c3a634;"><span id="time_to_merged_block">-</span></span></div>
                 </div>
@@ -1599,10 +1657,10 @@
                 <button id="p2pool_peers_show_more" style="display: none; width: 100%; padding: 10px; margin-top: 10px; background: var(--card-bg); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px;">Show 5 more...</button>
             </div>
             
-            <!-- Litecoin Peers (Broadcaster) -->
+            <!-- Parent Chain Peers (Broadcaster) -->
             <div class="table-container table-panel">
                 <div class="section-header">
-                    <h2>📡 Litecoin Peers</h2>
+                    <h2>📡 <span id="parent_chain_peers_title">Parent Chain</span> Peers</h2>
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <span class="badge" id="broadcaster_peers_count">0</span>
                         <span class="badge" id="broadcaster_status_badge" style="background: var(--success);">✓ Healthy</span>
@@ -1780,16 +1838,16 @@
             var p2pool_share_diff = (global_stats && global_stats.min_difficulty) || 3.0;
             var attempts_to_share = local_stats.attempts_to_share || 0;
             
-            // For Scrypt coins (Litecoin), DUMB_SCRYPT_DIFF = 2^16 = 65536
+            // For Scrypt coins, DUMB_SCRYPT_DIFF = 2^16 = 65536
             // For SHA256 coins, it's 2^32
             // This is used to estimate hashrate from difficulty
-            var DUMB_SCRYPT_DIFF = 65536; // 2^16 for Litecoin/Scrypt
+            var DUMB_SCRYPT_DIFF = 65536; // 2^16 for Scrypt
             var VARDIFF_TARGET_SECONDS = 3; // Default vardiff target (seconds per pseudoshare)
             
             // Parse worker names and extract base addresses
             // Supported formats: address.worker, address_worker, address+diff, address/diff
             function extractAddress(workerName) {
-                // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
+                // Split on comma first (merged mining: PARENT_ADDR,DOGE_ADDR.worker)
                 return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
             }
             
@@ -1975,16 +2033,17 @@
                         .attr('href', 'miner.html?address=' + miner.address)
                         .attr('onclick', 'event.stopPropagation()')
                         .text(miner.address);
-                    // LTC address status indicators
+                    // Parent address status indicators
+                    var _sym = (currency_info && currency_info.symbol) || 'parent';
                     if (miner.mergedReverseConverted) {
                         addressCell.append('span')
                             .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
-                            .attr('title', 'LTC address reverse-derived from DOGE key (original LTC address was invalid)')
+                            .attr('title', _sym + ' address reverse-derived from DOGE key (original was invalid)')
                             .text('⚠ from DOGE');
                     } else if (miner.mergedRedistributed) {
                         addressCell.append('span')
                             .attr('style', 'color: #e04040; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
-                            .attr('title', 'LTC address invalid — rewards redistributed to PPLNS miners')
+                            .attr('title', _sym + ' address invalid — rewards redistributed to PPLNS miners')
                             .text('❗ invalid');
                     }
                     if (miner.mergedAddress) {
@@ -1998,22 +2057,22 @@
                             .attr('style', 'color: #c3a634; text-decoration: none;')
                             .text(miner.mergedAddress);
                         if (miner.mergedReverseConverted) {
-                            // Case 4: Invalid LTC but valid DOGE — DOGE preserved, LTC reverse-derived
+                            // Case 4: Invalid parent but valid DOGE — DOGE preserved, parent reverse-derived
                             mergedDiv.append('span')
                                 .attr('style', 'color: #e8a900; font-size: 0.7rem; margin-left: 4px; font-weight: bold;')
-                                .attr('title', 'Case 4: Invalid LTC address — DOGE preserved, LTC reverse-derived from DOGE key')
+                                .attr('title', 'Case 4: Invalid ' + _sym + ' address — DOGE preserved, ' + _sym + ' reverse-derived from DOGE key')
                                 .text('⚠ reverse');
                         } else if (miner.mergedRedistributed) {
                             // Case 3: Both invalid — both redistributed
                             mergedDiv.append('span')
                                 .attr('style', 'color: #e04040; font-size: 0.7rem; margin-left: 4px; font-weight: bold;')
-                                .attr('title', 'Both LTC and DOGE addresses invalid — rewards redistributed to PPLNS miners')
+                                .attr('title', 'Both ' + _sym + ' and DOGE addresses invalid — rewards redistributed to PPLNS miners')
                                 .text('❗ redistributed');
                         } else if (miner.mergedAutoConverted) {
-                            // Case 2: Valid LTC, no explicit DOGE — auto-derived from LTC key
+                            // Case 2: Valid parent, no explicit DOGE — auto-derived from parent key
                             mergedDiv.append('span')
                                 .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
-                                .attr('title', 'Auto-converted from LTC address (same pubkey hash) — set explicit DOGE address for safety')
+                                .attr('title', 'Auto-converted from ' + _sym + ' address (same pubkey hash) — set explicit DOGE address for safety')
                                 .text('⚠ auto');
                         }
                     } else if (miner.mergedRedistributed) {
@@ -2078,7 +2137,7 @@
                     
                     // Payout with symbol
                     var payout = payouts[miner.address] || 0;
-                    var payoutSymbol = (currency_info && currency_info.symbol) || 'LTC';
+                    var payoutSymbol = (currency_info && currency_info.symbol) || 'COIN';
                     minerRow.append('td').text(d3.format('.4f')(payout) + ' ' + payoutSymbol);
                     
                     // Merged payout
@@ -2153,12 +2212,22 @@
         }
         
         var currency_info = {};
+        window.currency_info = currency_info;
+        var parentBlockPeriodMs = 150000; // default, updated from currency_info
+        window.parentBlockPeriodMs = parentBlockPeriodMs;
         
         // Load currency info first
         d3.json('../web/currency_info', function(info) {
             currency_info = info || {};
-            d3.selectAll('.symbol-small').text((info && info.symbol) || 'DASH');
-            d3.select('#currency-symbol').text((info && info.symbol) || 'DASH');
+            var sym = (info && info.symbol) || 'COIN';
+            var chainName = (info && info.name) || sym;
+            d3.selectAll('.symbol-small').text(sym);
+            d3.select('#currency-symbol').text(sym);
+            d3.selectAll('.parent-symbol-hint').text(sym + '_ADDR');
+            d3.select('#parent_chain_peers_title').text(chainName);
+            if (info && info.block_period) {
+                parentBlockPeriodMs = info.block_period * 1000;
+            }
             
             // Now load everything else
             loadStats();
@@ -2756,7 +2825,7 @@
                     d3.json('../merged_stats', function(merged_stats) {
                         if (merged_stats && merged_stats.block_value) {
                             d3.select('#merged_block_value').text(d3.format(',.0f')(merged_stats.block_value));
-                            // Using attempts_to_merged_block if available, otherwise estimate from LTC time
+                            // Using attempts_to_merged_block if available, otherwise estimate from parent time
                             var time_to_merged = local_stats.attempts_to_merged_block ? 
                                 local_stats.attempts_to_merged_block / global_stats.pool_hash_rate :
                                 time_to_block / 1000;  // Rough estimate: DOGE blocks ~1000x more frequent
@@ -4270,9 +4339,9 @@
             
             // Interpolate luck trend to align with hashrate time boundaries
             // Use exponential decay toward 0 after the last known block luck,
-            // based on target block time (150s for Litecoin). This reflects rising expected work
+            // based on target block time from currency_info. This reflects rising expected work
             // with no found block: luck drifts down as time passes without a hit.
-            var targetBlockTimeMs = 150000; // 2.5 minutes (Litecoin target block time)
+            var targetBlockTimeMs = parentBlockPeriodMs; // from currency_info
             if (luckTrendData.length > 0) {
                 // Sort by time
                 luckTrendData.sort(function(a, b) { return a[0] - b[0]; });
@@ -4923,9 +4992,9 @@
             
             // Interpolate luck trend to align with hashrate time boundaries
             // Use exponential decay toward 0 after the last known block luck,
-            // based on target block time (150s for Litecoin). This reflects rising expected work
+            // based on target block time from currency_info. This reflects rising expected work
             // with no found block: luck drifts down as time passes without a hit.
-            var targetBlockTimeMs = 150000; // 2.5 minutes (Litecoin target block time)
+            var targetBlockTimeMs = parentBlockPeriodMs; // from currency_info
             if (luckTrendData.length > 0) {
                 // Sort by time
                 luckTrendData.sort(function(a, b) { return a[0] - b[0]; });
@@ -5456,6 +5525,8 @@
             loadHashrateGraph();
             document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
         }
+        // Expose for multipool.js
+        window.manualRefresh = manualRefresh;
     </script>
 </body>
 </html>

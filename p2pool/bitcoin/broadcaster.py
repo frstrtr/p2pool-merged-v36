@@ -758,6 +758,8 @@ class NetworkBroadcaster(object):
         # Connection attempt logging suppressed for release
         
         factory = bitcoin_p2p.ClientFactory(self.net)
+        # Tag as broadcaster connection so Protocol.connectionLost skips debug logging
+        factory._broadcaster_connection = True
         # CRITICAL: Disable auto-reconnect. ReconnectingClientFactory will
         # spawn infinite TCP sockets if left enabled, exhausting fd ulimit.
         factory.stopTrying()

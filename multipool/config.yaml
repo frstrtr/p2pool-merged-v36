@@ -1,0 +1,26 @@
+# Multi-Pool Dashboard Proxy Configuration
+# 
+# This proxy aggregates multiple p2pool instances into a single
+# dashboard with chain-selector tabs. Each pool gets its own tab.
+#
+# The dashboard serves on port 8080 and proxies API calls to each
+# p2pool backend at the configured URL.
+#
+# Usage:
+#   python3 multipool/multipool_proxy.py --config multipool/config.yaml
+
+server:
+  host: 0.0.0.0
+  port: 8080
+
+pools:
+  dgb:
+    name: DigiByte
+    symbol: DGB
+    url: http://127.0.0.1:5025
+    color: "#0066cc"
+  ltc:
+    name: Litecoin
+    symbol: LTC
+    url: http://192.168.86.29:9327
+    color: "#345d9d"

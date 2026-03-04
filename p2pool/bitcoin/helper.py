@@ -56,6 +56,18 @@ def check(coind, net, args):
             softforks_supported |= set(item['id'] for item in blockchaininfo.get('bip9_softforks', []))
         except TypeError: # https://github.com/bitcoin/bitcoin/pull/7863
             softforks_supported |= set(item for item in blockchaininfo.get('bip9_softforks', []))
+        # Some daemons (e.g. DigiByte) don't report softforks in getblockchaininfo;
+        # fall back to getblocktemplate rules which list active softforks
+        if not softforks_supported:
+            try:
+                gbt_params = dict(rules=['segwit'])
+                gbt_algo = getattr(net, 'GBT_ALGO', None)
+                if gbt_algo is not None:
+                    gbt_params['algo'] = gbt_algo
+                gbt = yield coind.rpc_getblocktemplate(gbt_params)
+                softforks_supported = set(r.lstrip('!') for r in gbt.get('rules', []))
+            except Exception:
+                pass
     except jsonrpc.Error_for_code(-32601): # Method not found
         softforks_supported = set()
     unsupported_forks = getattr(net, 'SOFTFORKS_REQUIRED', set()) - softforks_supported
@@ -65,7 +77,7 @@ def check(coind, net, args):
         print "Consequently, your node may mine invalid blocks or may mine blocks that"
         print "are not part of the Nakamoto consensus blockchain.\n"
         print "Missing fork features:", ', '.join(unsupported_forks)
-        if not args.allow_obsolete_coind:
+        if not args.allow_obsolete_bitcoind:
             print "\nIf you know what you're doing, this error may be overridden by running p2pool"
             print "with the '--allow-obsolete-coind' command-line option.\n\n\n"
             raise deferral.RetrySilentlyException()
@@ -75,7 +87,12 @@ def check(coind, net, args):
 def getwork(coind, net, use_getblocktemplate=False):
     def go():
         if use_getblocktemplate:
-            return coind.rpc_getblocktemplate(dict(mode='template', rules=['segwit','mweb'] if 'mweb' in getattr(net, 'SOFTFORKS_REQUIRED', set()) else ['segwit']))
+            gbt_params = dict(mode='template', rules=['segwit','mweb'] if 'mweb' in getattr(net, 'SOFTFORKS_REQUIRED', set()) else ['segwit'])
+            # Multi-algo coins (e.g. DigiByte) require specifying the mining algorithm
+            gbt_algo = getattr(net, 'GBT_ALGO', None)
+            if gbt_algo is not None:
+                gbt_params['algo'] = gbt_algo
+            return coind.rpc_getblocktemplate(gbt_params)
         else:
             return coind.rpc_getmemorypool()
     try:

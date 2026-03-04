@@ -49,6 +49,10 @@ import time
 import hashlib
 import hmac
 import json
+import logging
+
+# Prevent "No handlers could be found for logger" messages
+logging.getLogger('p2pool.share_messages').addHandler(logging.NullHandler())
 
 
 # ============================================================================
@@ -1537,7 +1541,6 @@ class ShareMessageStore(object):
             if authority_pubkey and msg.has_signature:
                 msg.verify_authority_direct(authority_pubkey)
             if authority_pubkey and not msg.is_protocol_authority:
-                import logging
                 logging.getLogger('p2pool.share_messages').warning(
                     'Authority message ECDSA verification failed — '
                     'install ecdsa or coincurve: '

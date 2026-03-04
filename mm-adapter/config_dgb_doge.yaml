@@ -1,0 +1,39 @@
+# MM Adapter - DGB + DOGE Mainnet Merged Mining Configuration
+# DigiByte (parent) + Dogecoin (aux) merged mining
+#
+# Run: python3 adapter.py --config config_dgb_doge.yaml
+
+# Adapter server settings (P2Pool connects here)
+server:
+  host: "127.0.0.1"
+  port: 44557  # Different port — 44556 used by node29's adapter
+  # Credentials P2Pool uses to connect to this adapter
+  rpc_user: "dogecoinrpc"
+  rpc_password: "dogecoinrpc_dgb_merged_2026"
+
+# Upstream daemon (Dogecoin Mainnet on node27)
+upstream:
+  host: "192.168.86.27"
+  port: 22555  # Dogecoin mainnet RPC port
+  rpc_user: "dogecoinrpc"
+  rpc_password: "dogecoinrpc_mainnet_2026"
+  # Timeout for RPC calls (seconds)
+  timeout: 30
+
+# Chain configuration
+chain:
+  name: "dogecoin_mainnet"
+  chain_id: 98
+
+# Pool branding in OP_RETURN
+coinbase_text: "technocore-dgb"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "text"
+  file: "/tmp/mm_adapter_dgb_doge.log"
+
+# Background template poller
+polling:
+  interval: 1.0  # seconds between daemon polls

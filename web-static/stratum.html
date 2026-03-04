@@ -6,6 +6,7 @@
     <title>P2Pool - Stratum Statistics</title>
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico" />
     <script src="d3.v2.min.js"></script>
+    <script src="multipool.js"></script>
     <style>
         :root {
             --primary: #008de4;
@@ -77,6 +78,13 @@
             font-size: 0.8rem;
             font-weight: bold;
         }
+
+        .pool-tabs { display: flex; gap: 4px; align-items: center; }
+        .pool-tab { background: rgba(255,255,255,0.08); color: var(--text-muted); padding: 4px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; user-select: none; }
+        .pool-tab:hover { background: rgba(255,255,255,0.15); color: var(--text); }
+        .pool-tab.active { background: var(--primary); color: white; border-color: rgba(255,255,255,0.15); box-shadow: 0 2px 8px rgba(0,141,228,0.3); }
+        .pool-tab-add { background: transparent !important; color: var(--text-muted) !important; border: 1px dashed var(--border) !important; font-size: 1rem; padding: 2px 10px; opacity: 0.6; box-shadow: none !important; }
+        .pool-tab-add:hover { opacity: 1; border-color: var(--primary) !important; color: var(--primary) !important; }
         
         nav {
             display: flex;
@@ -497,6 +505,9 @@
             <div class="header-content">
                 <div class="logo">
                     <h1>P2Pool</h1>
+                    <div class="pool-tabs" id="pool-tabs">
+                        <span class="pool-tab active">...</span>
+                    </div>
                     <span class="badge">Stratum Stats</span>
                 </div>
                 <nav>

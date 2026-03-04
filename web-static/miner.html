@@ -9,6 +9,7 @@
     <title>Miner Stats - P2Pool</title>
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico" />
     <script src="d3.v2.min.js"></script>
+    <script src="multipool.js"></script>
     <script src="https://code.highcharts.com/highcharts.js"></script>
     <script src="https://code.highcharts.com/modules/exporting.js"></script>
     <style>
@@ -82,6 +83,13 @@
             font-size: 0.9rem;
             font-weight: bold;
         }
+
+        .pool-tabs { display: flex; gap: 4px; align-items: center; }
+        .pool-tab { background: rgba(255,255,255,0.08); color: var(--text-muted); padding: 4px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; user-select: none; }
+        .pool-tab:hover { background: rgba(255,255,255,0.15); color: var(--text); }
+        .pool-tab.active { background: var(--primary); color: white; border-color: rgba(255,255,255,0.15); box-shadow: 0 2px 8px rgba(0,141,228,0.3); }
+        .pool-tab-add { background: transparent !important; color: var(--text-muted) !important; border: 1px dashed var(--border) !important; font-size: 1rem; padding: 2px 10px; opacity: 0.6; box-shadow: none !important; }
+        .pool-tab-add:hover { opacity: 1; border-color: var(--primary) !important; color: var(--primary) !important; }
         
         nav {
             display: flex;
@@ -414,7 +422,9 @@
             <div class="header-content">
                 <div class="logo">
                     <h1>⛏️ Miner Statistics</h1>
-                    <span class="symbol" id="currency_symbol">---</span>
+                    <div class="pool-tabs" id="pool-tabs">
+                        <span class="pool-tab active" id="currency_symbol">---</span>
+                    </div>
                 </div>
                 <nav>
                     <a href="dashboard.html">Dashboard</a>
@@ -904,7 +914,7 @@
                         var count = 0;
                         
                         // Helper to extract base address
-                        // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
+                        // Split on comma first (merged mining: PARENT_ADDR,DOGE_ADDR.worker)
                         function extractBaseAddress(workerName) {
                             return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
                         }
@@ -1140,7 +1150,7 @@
                 });
             });
             
-            // Load payout data (LTC + DOGE merged)
+            // Load payout data (parent + DOGE merged)
             d3.json('../web/graph_data/current_payouts/last_' + period, function(ltcData) {
                 d3.json('../web/graph_data/merged_current_payouts/last_' + period, function(dogeData) {
                     renderPayoutChart(ltcData, dogeData);
@@ -1155,7 +1165,7 @@
             const doaData = [];
             
             // Helper to extract base address from worker name
-            // Split on comma first (merged mining: LTC_ADDR,DOGE_ADDR.worker)
+            // Split on comma first (merged mining: PARENT_ADDR,DOGE_ADDR.worker)
             function extractBaseAddress(workerName) {
                 return workerName.split(',')[0].split('+')[0].split('/')[0].split('.')[0].split('_')[0];
             }
@@ -1361,7 +1371,7 @@
             const ltcPayoutData = [];
             const dogePayoutData = [];
             
-            // Process LTC payout data
+            // Process parent chain payout data
             if (ltcData) {
                 for (let i = 0; i < ltcData.length; i++) {
                     const point = ltcData[i];
@@ -1386,7 +1396,7 @@
             }
             
             const hasDoge = dogePayoutData.length > 0;
-            const ltcSymbol = currency_info.symbol || 'LTC';
+            const parentSymbol = currency_info.symbol || 'COIN';
             
             Highcharts.chart('payout_chart', {
                 chart: {
@@ -1403,8 +1413,8 @@
                 },
                 yAxis: hasDoge ? [
                     {
-                        // Left Y-axis for LTC
-                        title: { text: ltcSymbol, style: { color: '#28a745' } },
+                        // Left Y-axis for parent chain
+                        title: { text: parentSymbol, style: { color: '#28a745' } },
                         gridLineColor: '#3a3a5a',
                         labels: { style: { color: '#28a745' }, format: '{value:.2f}' },
                         min: 0
@@ -1417,7 +1427,7 @@
                         min: 0
                     }
                 ] : {
-                    title: { text: ltcSymbol, style: { color: '#8888a0' } },
+                    title: { text: parentSymbol, style: { color: '#8888a0' } },
                     gridLineColor: '#3a3a5a',
                     labels: { style: { color: '#8888a0' } },
                     min: 0
@@ -1435,7 +1445,7 @@
                     formatter: function() {
                         let html = '<b>' + Highcharts.dateFormat('%Y-%m-%d %H:%M', this.x) + '</b>';
                         this.points.forEach(function(point) {
-                            const symbol = point.series.name === 'DOGE Payout' ? 'DOGE' : ltcSymbol;
+                            const symbol = point.series.name === 'DOGE Payout' ? 'DOGE' : parentSymbol;
                             const format = point.series.name === 'DOGE Payout' ? ',.2f' : '.4f';
                             html += '<br/><span style="color:' + point.color + '">●</span> ' +
                                    point.series.name + ': ' + d3.format(format)(point.y) + ' ' + symbol;
@@ -1451,7 +1461,7 @@
                 },
                 series: hasDoge ? [
                     {
-                        name: ltcSymbol + ' Payout',
+                        name: parentSymbol + ' Payout',
                         type: 'area',
                         yAxis: 0,
                         data: ltcPayoutData,
@@ -1479,7 +1489,7 @@
                         }
                     }
                 ] : [{
-                    name: ltcSymbol + ' Payout',
+                    name: parentSymbol + ' Payout',
                     type: 'area',
                     data: ltcPayoutData,
                     color: '#28a745',
