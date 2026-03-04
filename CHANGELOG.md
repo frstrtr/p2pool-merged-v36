@@ -2,6 +2,32 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.13-alpha] - 2026-03-04
+
+### DigiByte (DGB) Parent Chain Support (NEW)
+- **DGB mainnet & testnet network configs** — Full Scrypt-based P2Pool network definitions for DigiByte (P2P port 5024, worker/stratum port 5025, `GBT_ALGO='scrypt'`). Includes bitcoin-level parameters: P2P port 12024, RPC port 14024, address version 30, P2SH version 63, bech32 HRP `dgb`, protocol version 70019.
+- **DGB subsidy calculation** — Three-phase reward schedule implemented: pre-DigiShield era, 8000 DGB base era with halvings every 1,051,200 blocks, and 2459 DGB base era with halvings every 4,730,400 blocks.
+- **DGB P2Pool protocol sniffer** — `scripts/dgb_sniffer.py` — Diagnostic tool that connects to live DGB P2Pool nodes, performs handshake, requests shares, and extracts the IDENTIFIER from share ref_type data.
+- **Bootstrap mode** — DGB network starts with `PERSIST=False` and a fresh canonical sharechain, avoiding stale share data during initial network bootstrap.
+
+### Multichain Dashboard & Proxy (NEW)
+- **Multi-pool reverse proxy** — `multipool/multipool_proxy.py` — aiohttp-based reverse proxy that aggregates multiple P2Pool instances (e.g., LTC on :9327 + DGB on :5025) behind a single web interface on port 8080, with chain-selector tabs and automatic API routing.
+- **Pool selector tabs** — Dashboard header now renders clickable pool tabs instead of a static currency symbol. Pools auto-detected from `/web/currency_info`; additional pools can be added/removed and persist in localStorage.
+- **Chain-agnostic dashboard** — Hardcoded "Litecoin" references replaced with dynamic parent chain names. "Litecoin Peers" section renamed to dynamic "Parent Chain Peers" title. Miner configuration hint uses dynamic `<ADDR>` placeholder instead of `<LTC_ADDR>`.
+- **`multipool.js`** — Transparent `d3.json()` override that routes all API calls through the active pool's base URL, enabling cross-origin multi-pool dashboards without code changes in existing dashboard scripts.
+- **`scripts/start_multichain.sh`** — Turnkey startup script for DGB + LTC + DOGE merged mining with optional multi-pool dashboard proxy. Handles mm-adapter instances, daemon health checks, and graceful shutdown.
+- **DGB + DOGE mm-adapter config** — `mm-adapter/config_dgb_doge.yaml` template for running DOGE merged mining against a DGB parent chain P2Pool instance.
+
+### Vardiff Fixes — ASIC Miner Support (3 commits)
+- **fix: Remove `min_share_target` clamping** — Stratum code was clamping pseudoshare difficulty to the P2Pool share difficulty floor, making work impossibly hard for small ASIC miners (e.g., Antminer R1-LTC at 1.73 MH/s required ~4 hours per pseudoshare → 100% rejection). Pseudoshares are now allowed to be easier than the P2Pool share target; only real P2Pool shares enforce `share_info['bits'].target` in `got_response()`.
+- **fix: Use `self.wb.net` (bitcoin network) for `SANE_TARGET_RANGE`** — Was incorrectly using `self.wb.net.PARENT` (p2pool network), which has a completely different target range. This caused the sane bounds check to use wrong values.
+- **fix: Use `share_target` for initial difficulty** — Previous fix started all new connections at the easiest sane target (stratum diff ~61), allowing whale flooding (~380 pseudoshares/sec from a 100 TH/s miner). Now uses `get_work()['share_target']` computed from the node's local hashrate estimate, clipped to `SANE_TARGET_RANGE`. Fresh nodes with no hashrate still fall back to `SANE_TARGET_RANGE[1]`.
+
+### Broadcaster Fix
+- **fix: Connection-lost log spam** — Suppressed noisy repeated log messages when broadcaster connections are temporarily lost.
+
+---
+
 ## [v36-0.12-alpha] - 2026-03-04
 
 ### AutoRatchet — 4 Critical Bug Fixes
