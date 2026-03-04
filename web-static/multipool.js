@@ -85,16 +85,6 @@
         return config;
     }
 
-    function removePool(poolId) {
-        var config = getConfig();
-        config.pools = config.pools.filter(function(p) { return p.id !== poolId; });
-        if (config.activePool === poolId) {
-            config.activePool = config.pools.length > 0 ? config.pools[0].id : null;
-        }
-        saveConfig(config);
-        return config;
-    }
-
     // ── Pool switching ───────────────────────────────────────────────────
     function switchToPool(poolId) {
         var config = getConfig();
@@ -233,102 +223,7 @@
                 }
             });
 
-            // Right-click to remove (non-active pools only)
-            tab.addEventListener('contextmenu', function(e) {
-                if (!isActive && config.pools.length > 1) {
-                    e.preventDefault();
-                    if (confirm('Remove ' + pool.symbol + ' pool (' + pool.url + ')?')) {
-                        removePool(pool.id);
-                        renderTabs();
-                    }
-                }
-            });
-
             container.appendChild(tab);
-        });
-
-        // "+" button to add a pool
-        var addBtn = document.createElement('span');
-        addBtn.className = 'pool-tab pool-tab-add';
-        addBtn.textContent = '+';
-        addBtn.title = 'Add another P2Pool instance';
-        addBtn.addEventListener('click', showAddPoolDialog);
-        container.appendChild(addBtn);
-    }
-
-    // ── Add Pool Dialog ──────────────────────────────────────────────────
-    function showAddPoolDialog() {
-        // Remove existing dialog if any
-        var existing = document.getElementById('multipool-add-dialog');
-        if (existing) existing.remove();
-
-        var overlay = document.createElement('div');
-        overlay.id = 'multipool-add-dialog';
-        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
-
-        var dialog = document.createElement('div');
-        dialog.style.cssText = 'background:#252540;border:1px solid #3a3a5a;border-radius:12px;padding:24px;width:420px;max-width:90vw;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;';
-
-        dialog.innerHTML = '' +
-            '<h3 style="margin:0 0 16px;font-size:1.1rem;color:#008de4;">➕ Add P2Pool Instance</h3>' +
-            '<div style="margin-bottom:12px;">' +
-            '  <label style="display:block;font-size:0.85rem;color:#8888a0;margin-bottom:4px;">Pool URL</label>' +
-            '  <input id="mp-add-url" type="text" placeholder="http://192.168.86.191:9327" ' +
-            '    style="width:100%;padding:8px 12px;background:#1a1a2e;border:1px solid #3a3a5a;border-radius:6px;color:#e0e0e0;font-size:0.9rem;box-sizing:border-box;" />' +
-            '</div>' +
-            '<div style="font-size:0.8rem;color:#8888a0;margin-bottom:16px;">Enter the URL of another p2pool instance. Chain info will be auto-detected.</div>' +
-            '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
-            '  <button id="mp-add-cancel" style="padding:8px 16px;background:#1a1a2e;border:1px solid #3a3a5a;border-radius:6px;color:#e0e0e0;cursor:pointer;font-size:0.9rem;">Cancel</button>' +
-            '  <button id="mp-add-detect" style="padding:8px 16px;background:#008de4;border:none;border-radius:6px;color:white;cursor:pointer;font-size:0.9rem;font-weight:600;">Detect & Add</button>' +
-            '</div>' +
-            '<div id="mp-add-status" style="margin-top:12px;font-size:0.85rem;display:none;"></div>';
-
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        // Focus input
-        setTimeout(function() { document.getElementById('mp-add-url').focus(); }, 100);
-
-        // Cancel
-        document.getElementById('mp-add-cancel').addEventListener('click', function() {
-            overlay.remove();
-        });
-        overlay.addEventListener('click', function(e) {
-            if (e.target === overlay) overlay.remove();
-        });
-
-        // Detect & Add
-        document.getElementById('mp-add-detect').addEventListener('click', function() {
-            var url = document.getElementById('mp-add-url').value.trim().replace(/\/+$/, '');
-            if (!url) return;
-            if (!/^https?:\/\//.test(url)) url = 'http://' + url;
-
-            var status = document.getElementById('mp-add-status');
-            status.style.display = 'block';
-            status.style.color = '#8888a0';
-            status.textContent = 'Connecting to ' + url + '...';
-
-            // Try to detect pool info via CORS
-            _origD3Json(url + '/web/currency_info', function(info) {
-                if (info && info.symbol) {
-                    var poolId = info.symbol.toLowerCase();
-                    addPool(poolId, info.name || info.symbol, info.symbol, url, getChainColor(info.symbol));
-                    status.style.color = '#28a745';
-                    status.textContent = '✓ Detected ' + info.symbol + ' (' + (info.name || '') + '). Added!';
-                    renderTabs();
-                    setTimeout(function() { overlay.remove(); }, 1000);
-                } else {
-                    status.style.color = '#dc3545';
-                    status.textContent = '✗ Could not detect pool info. Is CORS enabled? Check URL.';
-                }
-            });
-        });
-
-        // Enter key in input
-        document.getElementById('mp-add-url').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                document.getElementById('mp-add-detect').click();
-            }
         });
     }
 
@@ -429,10 +324,8 @@
         getConfig: getConfig,
         saveConfig: saveConfig,
         addPool: addPool,
-        removePool: removePool,
         switchToPool: switchToPool,
         renderTabs: renderTabs,
-        showAddPoolDialog: showAddPoolDialog,
         getChainColor: getChainColor
     };
 
