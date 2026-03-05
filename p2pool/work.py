@@ -8,7 +8,7 @@ import re
 import sys
 import time
 
-from twisted.internet import defer, reactor
+from twisted.internet import defer, reactor, task
 from twisted.python import log
 
 from bitcoin import getwork, data as bitcoin_data, helper, script, worker_interface
@@ -264,9 +264,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self._whale_hr_window = 1800       # 30 min rolling window for baseline
         self._whale_departure_active = False
         self._whale_departure_ts = 0       # when departure was detected
+        self._whale_baseline_hr = 0        # frozen baseline captured at trigger
         self._whale_drop_threshold = 0.50   # trigger when current < 50% of avg
         self._whale_recovery_threshold = 0.75  # recover when current > 75% of avg
         self._whale_log_interval = 0       # throttle logging
+        self._whale_last_sample_ts = 0     # sample throttling
+        self._whale_sample_interval = 5.0  # seconds between hashrate samples
+        self._whale_last_att_s = 0
+        self._whale_min_local_hashrate = 1e6  # 1 MH/s: below this local override is ineffective
+        self._whale_gap_trigger_periods = 8   # trigger on long share gap (8*SHARE_PERIOD)
+        self._whale_last_no_local_log = 0
+        self._whale_last_metrics = None
+
+        # Poll detector independently of miner get_work() traffic.
+        self._whale_poll_task = task.LoopingCall(self._whale_poll_tick)
+        self._whale_poll_task.start(self._whale_sample_interval, now=False)
 
         self.removed_unstales_var = variable.Variable((0, 0, 0))
         self.removed_doa_unstales_var = variable.Variable(0)
@@ -1001,6 +1013,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
     def stop(self):
         self.running = False
+        if getattr(self, '_whale_poll_task', None) is not None and self._whale_poll_task.running:
+            self._whale_poll_task.stop()
 
     def get_stale_counts(self):
         '''Returns (orphans, doas), total, (orphans_recorded_in_chain, doas_recorded_in_chain)'''
@@ -1724,7 +1738,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
     # ── Phase 1c: Whale departure recovery ─────────────────────────
 
-    def _detect_whale_departure(self):
+    def _whale_poll_tick(self):
+        # Keep detector active even if no local miners are requesting work.
+        try:
+            self._detect_whale_departure(trigger_source='timer')
+        except Exception:
+            if p2pool.DEBUG:
+                log.err(None, 'whale poll tick failed:')
+
+    def _detect_whale_departure(self, trigger_source='get_work'):
         """Non-consensus local heuristic: detect sudden pool hashrate drop.
 
         Samples the pool hashrate each time get_work() is called. When the
@@ -1743,50 +1765,84 @@ class WorkerBridge(worker_interface.WorkerBridge):
             return False
 
         try:
-            height = self.node.tracker.get_height(self.node.best_share_var.value)
+            best = self.node.best_share_var.value
+            best_item = self.node.tracker.items[best]
+            height = self.node.tracker.get_height(best)
             lookbehind = min(height - 1, self.node.net.TARGET_LOOKBEHIND)
             if lookbehind < 2:
                 return False
-            att_s = p2pool_data.get_pool_attempts_per_second(
-                self.node.tracker, self.node.best_share_var.value, lookbehind)
         except Exception:
             return False
 
         now = time.time()
-        self._whale_hr_samples.append((now, att_s))
+        share_gap = max(0, now - best_item.timestamp)
+
+        # Sample pool hashrate at fixed cadence to avoid O(n) churn on busy stratum.
+        att_s = self._whale_last_att_s
+        if (now - self._whale_last_sample_ts >= self._whale_sample_interval) or att_s <= 0:
+            try:
+                att_s = p2pool_data.get_pool_attempts_per_second(
+                    self.node.tracker, best, lookbehind)
+                self._whale_last_att_s = att_s
+                self._whale_last_sample_ts = now
+                self._whale_hr_samples.append((now, att_s))
+            except Exception:
+                pass
+
+        if att_s <= 0:
+            return self._whale_departure_active
 
         # Trim to rolling window
         cutoff = now - self._whale_hr_window
         self._whale_hr_samples = [(t, h) for t, h in self._whale_hr_samples if t > cutoff]
 
-        if len(self._whale_hr_samples) < 10:
-            return self._whale_departure_active  # not enough data yet
-
-        avg_hr = sum(h for _, h in self._whale_hr_samples) / len(self._whale_hr_samples)
-        if avg_hr <= 0:
+        enough_samples = len(self._whale_hr_samples) >= 10
+        if not enough_samples and not self._whale_departure_active:
             return False
 
-        ratio = att_s / avg_hr
+        avg_hr = sum(h for _, h in self._whale_hr_samples) / len(self._whale_hr_samples) if self._whale_hr_samples else 0
+        if avg_hr <= 0 and not self._whale_departure_active:
+            return False
+
+        baseline_hr = self._whale_baseline_hr if self._whale_departure_active else avg_hr
+        if baseline_hr <= 0:
+            baseline_hr = avg_hr if avg_hr > 0 else att_s
+        ratio = att_s / baseline_hr if baseline_hr > 0 else 1.0
+
+        # Secondary signal: long wall-clock share drought while hashrate is below baseline.
+        gap_trigger = share_gap >= (self.node.net.SHARE_PERIOD * self._whale_gap_trigger_periods)
+
+        self._whale_last_metrics = dict(
+            now=now,
+            att_s=att_s,
+            avg_hr=avg_hr,
+            baseline_hr=baseline_hr,
+            ratio=ratio,
+            share_gap=share_gap,
+            gap_trigger=gap_trigger,
+            source=trigger_source,
+        )
 
         if self._whale_departure_active:
             # Recovery: require sustained improvement to exit emergency mode
             if ratio >= self._whale_recovery_threshold:
                 self._whale_departure_active = False
+                self._whale_baseline_hr = 0
                 duration = now - self._whale_departure_ts
-                print '[WHALE-RECOVERY] Pool hashrate recovered to %.1f%% of average. Emergency mode OFF (was active %.0fs)' % (
-                    ratio * 100, duration)
+                print '[WHALE-RECOVERY] OFF src=%s ratio=%.2f gap=%.0fs duration=%.0fs current=%sH/s baseline=%sH/s' % (
+                    trigger_source, ratio, share_gap, duration, _fmt_hr(att_s), _fmt_hr(baseline_hr))
             elif now - self._whale_log_interval > 30:
                 self._whale_log_interval = now
-                print '[WHALE-DEPARTURE] ACTIVE: current=%sH/s avg_30m=%sH/s ratio=%.2f (need >%.0f%% to recover)' % (
-                    _fmt_hr(att_s), _fmt_hr(avg_hr), ratio, self._whale_recovery_threshold * 100)
+                print '[WHALE-DEPARTURE] ACTIVE src=%s current=%sH/s baseline=%sH/s avg_30m=%sH/s ratio=%.2f gap=%.0fs recover>%.0f%%' % (
+                    trigger_source, _fmt_hr(att_s), _fmt_hr(baseline_hr), _fmt_hr(avg_hr), ratio, share_gap, self._whale_recovery_threshold * 100)
         else:
             # Detection: trigger when hashrate drops below threshold
-            if ratio <= self._whale_drop_threshold:
+            if (enough_samples and ratio <= self._whale_drop_threshold) or (gap_trigger and ratio <= 0.90):
                 self._whale_departure_active = True
                 self._whale_departure_ts = now
-                print '[WHALE-DEPARTURE] DETECTED! Pool hashrate crashed to %.1f%% of 30m average.' % (ratio * 100)
-                print '[WHALE-DEPARTURE] current=%sH/s avg_30m=%sH/s — mining at easiest difficulty to speed recovery' % (
-                    _fmt_hr(att_s), _fmt_hr(avg_hr))
+                self._whale_baseline_hr = baseline_hr
+                print '[WHALE-DEPARTURE] DETECTED src=%s ratio=%.2f gap=%.0fs current=%sH/s baseline=%sH/s avg_30m=%sH/s' % (
+                    trigger_source, ratio, share_gap, _fmt_hr(att_s), _fmt_hr(baseline_hr), _fmt_hr(avg_hr))
 
         return self._whale_departure_active
 
@@ -2331,7 +2387,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         bitcoin_data.average_attempts_to_target((bitcoin_data.target_to_average_attempts(self.node.bitcoind_work.value['bits'].target)*self.node.net.SPREAD)*self.node.net.PARENT.DUST_THRESHOLD/block_subsidy)
                     )
 
-        # Phase 1c: Whale departure recovery — override to easiest difficulty
+        # Phase 1c.1: Whale departure recovery — override to easiest difficulty
         # When a large miner (whale) suddenly leaves, pool hashrate drops but
         # share difficulty is still calibrated for the whale's hashrate. This
         # makes share production painfully slow (e.g., 2 min/share instead of
@@ -2339,8 +2395,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # produces shares faster, each of which lowers the pool target by ~10%,
         # accelerating the difficulty recovery from ~18 min to much less.
         # This is non-consensus: bits stays within [pre_target3//30, pre_target3].
+        local_hash_rate_for_guard = local_addr_rates.get(pubkey_hash, 0)
         if self._detect_whale_departure():
-            desired_share_target = 2**256 - 1  # will be clamped to pre_target3 (easiest)
+            if local_hash_rate_for_guard >= self._whale_min_local_hashrate:
+                desired_share_target = 2**256 - 1  # will be clamped to pre_target3 (easiest)
+            elif time.time() - self._whale_last_no_local_log > 30:
+                self._whale_last_no_local_log = time.time()
+                metrics = self._whale_last_metrics or {}
+                print '[WHALE-DEPARTURE] ACTIVE but override skipped: local=%sH/s < %.1fMH/s (ratio=%.2f gap=%.0fs src=%s)' % (
+                    _fmt_hr(local_hash_rate_for_guard),
+                    self._whale_min_local_hashrate/1e6,
+                    metrics.get('ratio', 0),
+                    metrics.get('share_gap', 0),
+                    metrics.get('source', 'unknown'))
 
         if True:
             # Build share_data differently based on share version
