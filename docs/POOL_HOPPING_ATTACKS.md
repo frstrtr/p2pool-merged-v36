@@ -449,21 +449,21 @@ http://[pool-node]:9327 (March 2, 2026):**
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│ LIVE DATA — P2Pool Mainnet ([pool-node]:9327)           March 2, 2026    │
+│ LIVE DATA — P2Pool Mainnet ([pool-node]:9327)           March 2, 2026     │
 ├───────────────────────────────────────────────────────────────────────────┤
-│ Pool hashrate:              49.5 GH/s (smoothed, /global_stats)         │
-│ Pool hashrate (current):    70.3 GH/s (instantaneous, dashboard)        │
-│ Pool % of network:          0.0016% of 3.05 PH/s                       │
-│ LTC network difficulty:     106,494,367                                 │
-│ LTC expected TTB:           107 days (9,239,886 seconds)                │
-│ DOGE expected TTB:          67 days  (5,770,419 seconds)                │
-│ Share difficulty:            8.56 (min)                                  │
-│ Share chain:                8640 shares (full V35 chain)                 │
-│ PPLNS window:               36 hours                                    │
-│ Window / LTC TTB:           1.4%                                        │
-│ Window / DOGE TTB:          2.2%                                        │
-│ Last LTC block found:       2026-02-26 (block 3062938) — 4 days ago     │
-│ Expected blocks/year:       ~3.4 LTC, ~5.5 DOGE                        │
+│ Pool hashrate:              49.5 GH/s (smoothed, /global_stats)           │
+│ Pool hashrate (current):    70.3 GH/s (instantaneous, dashboard)          │
+│ Pool % of network:          0.0016% of 3.05 PH/s                          │
+│ LTC network difficulty:     106,494,367                                   │
+│ LTC expected TTB:           107 days (9,239,886 seconds)                  │
+│ DOGE expected TTB:          67 days  (5,770,419 seconds)                  │
+│ Share difficulty:            8.56 (min)                                   │
+│ Share chain:                8640 shares (full V35 chain)                  │
+│ PPLNS window:               36 hours                                      │
+│ Window / LTC TTB:           1.4%                                          │
+│ Window / DOGE TTB:          2.2%                                          │
+│ Last LTC block found:       2026-02-26 (block 3062938) — 4 days ago       │
+│ Expected blocks/year:       ~3.4 LTC, ~5.5 DOGE                           │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1260,30 +1260,30 @@ any static identity or threshold.
 │  VESTING EVOLUTION                                                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  LEVEL 1 — COUNT-BASED TENURE (§7.3.2 naive):                              │
+│  LEVEL 1 — COUNT-BASED TENURE (§7.3.2 naive):                               │
 │  └─ Gaming: Keep 1 weak miner to maintain share count                       │
-│  └─ 100 old high-diff shares + 1 new low-diff share = still 101 shares     │
+│  └─ 100 old high-diff shares + 1 new low-diff share = still 101 shares      │
 │  └─ Result: Old high-diff shares count at 100%                              │
-│  └─ Defeated by: Attacks 1, 2, 3, 4                                        │
+│  └─ Defeated by: Attacks 1, 2, 3, 4                                         │
 │                                                                             │
-│  LEVEL 2 — WORK-BASED TENURE:                                              │
+│  LEVEL 2 — WORK-BASED TENURE:                                               │
 │  └─ Gaming: Placeholder has negligible work, but old work persists          │
 │  └─ Need additional check to detect hashrate drop                           │
-│  └─ Defeated by: Attacks 1, 2, 3 (without consistency check)               │
+│  └─ Defeated by: Attacks 1, 2, 3 (without consistency check)                │
 │                                                                             │
 │  LEVEL 3 — WORK + CONSISTENCY CHECK:                                        │
 │  └─ Gaming: Gradual ramp-down avoids threshold detection                    │
 │  └─ Threshold-based detection is inherently binary                          │
-│  └─ Defeated by: Attack 4 (slow ramp down)                                 │
+│  └─ Defeated by: Attack 4 (slow ramp down)                                  │
 │                                                                             │
-│  LEVEL 4 — EXPONENTIAL DECAY + WORK (★ RECOMMENDED):                       │
+│  LEVEL 4 — EXPONENTIAL DECAY + WORK (★ RECOMMENDED):                        │
 │  └─ No threshold to game — decay is continuous and mathematical             │
-│  └─ Old shares ALWAYS lose weight: 50% per RECENCY_HALF_LIFE               │
+│  └─ Old shares ALWAYS lose weight: 50% per RECENCY_HALF_LIFE                │
 │  └─ Only defense: keep mining. That's the desired behavior.                 │
-│  └─ Remaining weakness: Split addresses (Attack 5) — mitigated,            │
+│  └─ Remaining weakness: Split addresses (Attack 5) — mitigated,             │
 │     not eliminated. Increases attacker cost linearly.                       │
 │                                                                             │
-│  FUTURE — MULTI-TEMPORAL WORK-QUALITY WEIGHTING (Part 16):                 │
+│  FUTURE — MULTI-TEMPORAL WORK-QUALITY WEIGHTING (Part 16):                  │
 │  └─ Hash quality (real leading zeros) determines tier placement             │
 │  └─ Summary shares require accumulated work to promote                      │
 │  └─ Sybil resistance built into tier structure                              │
@@ -1575,18 +1575,18 @@ node (4.574×10¹⁷) and varies pool hashrate. The "Current" row matches
 the actual pool state.
 
 ```
-┌────────────────────────┬──────────┬──────────┬───────────┬───────────┬────────────┐
-│ Pool Hashrate          │ TTB      │ Window   │ Shares    │ RAM (comp)│ CPU (PPLNS)│
-├────────────────────────┼──────────┼──────────┼───────────┼───────────┼────────────┤
-│ 1 TH/s                 │ 5.3 days │ 2.6 days │ 15,247    │ 69 MB    │ O(log 15K) │
-│ 500 GH/s               │ 10.6 days│ 5.3 days │ 30,494    │ 137 MB   │ O(log 30K) │
-│ 295 GH/s (peak seen)   │ 17.9 days│ 9.0 days │ 51,683    │ 233 MB   │ O(log 52K) │
-│ 150 GH/s               │ 35.3 days│ 17.6 days│ 101,664   │ 458 MB   │ O(log 102K)│
-│ 72 GH/s  (avg seen)    │ 73.5 days│ 36.8 days│ 211,757   │ 953 MB   │ O(log 212K)│
-│ ★ 49.5 GH/s (CURRENT)  │ 107 days │ 53.5 days│ 307,996   │ 1.39 GB  │ O(log 308K)│
-│ 10 GH/s                │ 1.5 yr   │ 264 days │ 1,524,656 │ 6.86 GB  │ O(log 1.5M)│
-│ 1 GH/s                 │ 14.5 yr  │ 7.2 yr   │ 15,246,560│ 68.6 GB✗ │ O(log 15M) │
-└────────────────────────┴──────────┴──────────┴───────────┴───────────┴────────────┘
+┌────────────────────────┬──────────┬──────────┬───────────┬───────────┬─────────────┐
+│ Pool Hashrate          │ TTB      │ Window   │ Shares    │ RAM (comp)│ CPU (PPLNS) │
+├────────────────────────┼──────────┼──────────┼───────────┼───────────┼─────────────┤
+│ 1 TH/s                 │ 5.3 days │ 2.6 days │ 15,247    │ 69 MB     │ O(log 15K)  │
+│ 500 GH/s               │ 10.6 days│ 5.3 days │ 30,494    │ 137 MB    │ O(log 30K)  │
+│ 295 GH/s (peak seen)   │ 17.9 days│ 9.0 days │ 51,683    │ 233 MB    │ O(log 52K)  │
+│ 150 GH/s               │ 35.3 days│ 17.6 days│ 101,664   │ 458 MB    │ O(log 102K) │
+│ 72 GH/s  (avg seen)    │ 73.5 days│ 36.8 days│ 211,757   │ 953 MB    │ O(log 212K) │
+│ ★ 49.5 GH/s (CURRENT)  │ 107 days │ 53.5 days│ 307,996   │ 1.39 GB   │ O(log 308K) │
+│ 10 GH/s                │ 1.5 yr   │ 264 days │ 1,524,656 │ 6.86 GB   │ O(log 1.5M) │
+│ 1 GH/s                 │ 14.5 yr  │ 7.2 yr   │ 15,246,560│ 68.6 GB✗  │ O(log 15M)  │
+└────────────────────────┴──────────┴──────────┴───────────┴───────────┴─────────────┘
 
 RAM (comp) = with Strategy 2 compaction (§7.3.13). Without compaction,
 multiply by ~4× (full 4× tracker_keeps at ~4,500 bytes/share, see §7.3.14).
@@ -1632,14 +1632,14 @@ no compaction needed.
 ┌────────────────────────┬─────────────┬──────────────────┬──────────────────┐
 │ Pool Hashrate          │ Est. TTB    │ Adaptive Window  │ Window/TTB Ratio │
 ├────────────────────────┼─────────────┼──────────────────┼──────────────────┤
-│ 1 TH/s                 │ ~5.3 days   │ 15,247 (2.6 d)   │ 50% ✓           │
-│ 500 GH/s               │ ~10.6 days  │ 30,494 (5.3 d)   │ 50% ✓           │
-│ 295 GH/s (peak seen)   │ ~17.9 days  │ 51,683 (9.0 d)   │ 50% ✓           │
-│ 150 GH/s               │ ~35.3 days  │ 101,664 (17.6 d) │ 50% ✓           │
-│ 72 GH/s  (avg seen)    │ ~73.5 days  │ 211,757 (36.8 d) │ 50% ✓           │
-│ ★ 49.5 GH/s (CURRENT)  │ ~107 days   │ 307,996 (53.5 d) │ 50% ✓           │
-│ 10 GH/s                │ ~1.5 years  │ 1,524,656 (264 d)│ 50% ✓           │
-│ 1 GH/s                 │ ~14.5 years │ 15,246,560 (7.2y)│ 50% ✓           │
+│ 1 TH/s                 │ ~5.3 days   │ 15,247 (2.6 d)   │ 50% ✓            │
+│ 500 GH/s               │ ~10.6 days  │ 30,494 (5.3 d)   │ 50% ✓            │
+│ 295 GH/s (peak seen)   │ ~17.9 days  │ 51,683 (9.0 d)   │ 50% ✓            │
+│ 150 GH/s               │ ~35.3 days  │ 101,664 (17.6 d) │ 50% ✓            │
+│ 72 GH/s  (avg seen)    │ ~73.5 days  │ 211,757 (36.8 d) │ 50% ✓            │
+│ ★ 49.5 GH/s (CURRENT)  │ ~107 days   │ 307,996 (53.5 d) │ 50% ✓            │
+│ 10 GH/s                │ ~1.5 years  │ 1,524,656 (264 d)│ 50% ✓            │
+│ 1 GH/s                 │ ~14.5 years │ 15,246,560 (7.2y)│ 50% ✓            │
 └────────────────────────┴─────────────┴──────────────────┴──────────────────┘
 
 ★ = actual live pool state on March 2, 2026.
@@ -1710,14 +1710,14 @@ interval. Even at 295 GH/s (peak observed), it's ~18 days vs ~18-day TTB.
 ┌────────────────────────┬──────────┬──────────┬──────────────┬──────────┬──────────┐
 │ Pool Hashrate          │ PPLNS Win│ Vest. LB │ Tracker keeps│ RAM(raw) │RAM(comp) │
 ├────────────────────────┼──────────┼──────────┼──────────────┼──────────┼──────────┤
-│ 1 TH/s                 │ 15,247   │ 30,494   │ ~60,988      │ 274 MB   │ 69 MB   │
-│ 500 GH/s               │ 30,494   │ 60,988   │ ~121,972     │ 549 MB   │ 137 MB  │
-│ 295 GH/s (peak seen)   │ 51,683   │ 103,366  │ ~206,732     │ 930 MB   │ 233 MB  │
-│ 150 GH/s               │ 101,664  │ 203,328  │ ~406,656     │ 1.83 GB  │ 458 MB  │
-│ 72 GH/s  (avg seen)    │ 211,757  │ 423,514  │ ~847,028     │ 3.81 GB  │ 953 MB  │
-│ ★ 49.5 GH/s (CURRENT)  │ 307,996  │ 615,992  │ ~1,231,984   │ 5.55 GB  │ 1.39 GB │
-│ 10 GH/s                │ 1,524,656│ 3,049,312│ ~6,098,624   │ 27.4 GB  │ 6.86 GB │
-│ 1 GH/s                 │15,246,560│30,493,120│ ~60,986,240  │ 274 GB ✗ │ 68.6 GB✗│
+│ 1 TH/s                 │ 15,247   │ 30,494   │ ~60,988      │ 274 MB   │ 69 MB    │
+│ 500 GH/s               │ 30,494   │ 60,988   │ ~121,972     │ 549 MB   │ 137 MB   │
+│ 295 GH/s (peak seen)   │ 51,683   │ 103,366  │ ~206,732     │ 930 MB   │ 233 MB   │
+│ 150 GH/s               │ 101,664  │ 203,328  │ ~406,656     │ 1.83 GB  │ 458 MB   │
+│ 72 GH/s  (avg seen)    │ 211,757  │ 423,514  │ ~847,028     │ 3.81 GB  │ 953 MB   │
+│ ★ 49.5 GH/s (CURRENT)  │ 307,996  │ 615,992  │ ~1,231,984   │ 5.55 GB  │ 1.39 GB  │
+│ 10 GH/s                │ 1,524,656│ 3,049,312│ ~6,098,624   │ 27.4 GB  │ 6.86 GB  │
+│ 1 GH/s                 │15,246,560│30,493,120│ ~60,986,240  │ 274 GB ✗ │ 68.6 GB✗ │
 └────────────────────────┴──────────┴──────────┴──────────────┴──────────┴──────────┘
 
 ★ = actual live pool state on March 2, 2026.
@@ -1893,20 +1893,20 @@ pool's operational tempo.
 
 ```
 ┌────────────────────────────────────┬────────┬────────────────────────────┐
-│ Metric                             │ Fixed  │ Adaptive (at 49.5 GH/s)   │
+│ Metric                             │ Fixed  │ Adaptive (at 49.5 GH/s)    │
 ├────────────────────────────────────┼────────┼────────────────────────────┤
-│ PPLNS window                       │ 36hr   │ 53.5 days                 │
-│ Vesting lookback                   │ 72hr   │ 107 days                  │
-│ Hopper must sustain burst          │ 36hr   │ 53.5 days                 │
-│ Hopper burst fills window?         │ YES    │ NO (50%)                  │
-│ Window/TTB coverage                │ 1.4%   │ 50%                       │
-│ Hopper vesting after 36hr burst    │ ~70%   │ ~10%                      │
-│ Hopper effective reward            │ 3.8×   │ ~0.2×                     │
-│ Defense works at 10 GH/s pool?     │ <1% TTB│ 50% TTB (equally strong)  │
-│ Defense works at 295 GH/s pool?    │ 8% TTB │ 50% TTB (equally strong)  │
-│ Memory cost (at 49.5 GH/s)        │ ~5 MB  │ ~1.39 GB (compacted)      │
-│ Memory cost (at 295 GH/s)         │ ~5 MB  │ ~233 MB (compacted)       │
-│ Scales with pool conditions?       │ No     │ Yes ✓                     │
+│ PPLNS window                       │ 36hr   │ 53.5 days                  │
+│ Vesting lookback                   │ 72hr   │ 107 days                   │
+│ Hopper must sustain burst          │ 36hr   │ 53.5 days                  │
+│ Hopper burst fills window?         │ YES    │ NO (50%)                   │
+│ Window/TTB coverage                │ 1.4%   │ 50%                        │
+│ Hopper vesting after 36hr burst    │ ~70%   │ ~10%                       │
+│ Hopper effective reward            │ 3.8×   │ ~0.2×                      │
+│ Defense works at 10 GH/s pool?     │ <1% TTB│ 50% TTB (equally strong)   │
+│ Defense works at 295 GH/s pool?    │ 8% TTB │ 50% TTB (equally strong)   │
+│ Memory cost (at 49.5 GH/s)         │ ~5 MB  │ ~1.39 GB (compacted)       │
+│ Memory cost (at 295 GH/s)          │ ~5 MB  │ ~233 MB (compacted)        │
+│ Scales with pool conditions?       │ No     │ Yes ✓                      │
 └────────────────────────────────────┴────────┴────────────────────────────┘
 ```
 
@@ -2144,7 +2144,7 @@ not antagonistic — each one closes loopholes in the others.
 │ 2. Slow bleed                │ NONE      │ Exponential decay (§7.2)   │
 │ 3. Block withholding         │ NONE      │ Share-chain determinism    │
 │ 4. Sybil fragmentation       │ NONE      │ Share-chain determinism    │
-│ 5. Memory exhaustion          │ NEGLIGIBLE│ Physical share count bound │
+│ 5. Memory exhaustion         │ NEGLIGIBLE│ Physical share count bound │
 │ 6. Cross-defense interaction │ NONE      │ Work-weighted vesting      │
 └──────────────────────────────┴───────────┴────────────────────────────┘
 ```
@@ -2223,22 +2223,22 @@ Analysis:**
 > for retention.
 
 ```
-┌─────────┬──────────┬──────────────┬──────────────┬──────────────┬────────────┐
-│ Miner   │ Daily    │ Off-period   │ Fixed 36h:   │ Adaptive 53d:│ Retention  │
-│         │ mining   │ (longest     │ shares lost  │ shares lost  │ improvement│
-│         │ hours    │ consecutive) │ after off?   │ after off?   │            │
-├─────────┼──────────┼──────────────┼──────────────┼──────────────┼────────────┤
-│ Alice   │ 24h      │ 0h           │ No           │ No           │ —          │
-│ Bob     │ 24h      │ 0h           │ No           │ No           │ —          │
-│ Carol   │ 24h (new)│ N/A          │ No (building)│ No (building)│ —          │
-│ Dave    │ 16h      │ 8h           │ No           │ No           │ —          │
-│ Eve     │ 72h/week │ 96h (Mon-Thu)│ **YES** ✗    │ No           │ ★★★★       │
-│ Frank   │ 6h       │ 18h          │ No (tight)   │ No           │ ★          │
-│ Grace   │ 9h       │ 15h          │ No           │ No           │ ★          │
-│ Henry   │ 14h      │ 10h          │ No           │ No           │ —          │
-│ Iris    │ 11h      │ 13h          │ No           │ No           │ —          │
+┌─────────┬──────────┬───────────────┬──────────────┬──────────────┬────────────┐
+│ Miner   │ Daily    │ Off-period    │ Fixed 36h:   │ Adaptive 53d:│ Retention  │
+│         │ mining   │ (longest      │ shares lost  │ shares lost  │ improvement│
+│         │ hours    │ consecutive)  │ after off?   │ after off?   │            │
+├─────────┼──────────┼───────────────┼──────────────┼──────────────┼────────────┤
+│ Alice   │ 24h      │ 0h            │ No           │ No           │ —          │
+│ Bob     │ 24h      │ 0h            │ No           │ No           │ —          │
+│ Carol   │ 24h (new)│ N/A           │ No (building)│ No (building)│ —          │
+│ Dave    │ 16h      │ 8h            │ No           │ No           │ —          │
+│ Eve     │ 72h/week │ 96h (Mon-Thu) │ **YES** ✗    │ No           │ ★★★★       │
+│ Frank   │ 6h       │ 18h           │ No (tight)   │ No           │ ★          │
+│ Grace   │ 9h       │ 15h           │ No           │ No           │ ★          │
+│ Henry   │ 14h      │ 10h           │ No           │ No           │ —          │
+│ Iris    │ 11h      │ 13h           │ No           │ No           │ —          │
 │ Jack    │ ~14h×4d  │ **72h** (trip)│ **YES** ✗    │ No           │ ★★★★       │
-└─────────┴──────────┴──────────────┴──────────────┴──────────────┴────────────┘
+└─────────┴──────────┴───────────────┴──────────────┴──────────────┴────────────┘
 
 ✗ = shares completely scrolled out of PPLNS window, miner restarts from zero
 ★ = stars indicate how much the adaptive window improves retention for this miner
@@ -4044,22 +4044,22 @@ understand their position in the pool.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  POOL HEALTH                                      [dashboard.html]│
+│  POOL HEALTH                                    [dashboard.html]│
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Pool Hashrate: 49.5 GH/s          Active Miners: 31           │
+│                                                                 │
+│  Pool Hashrate: 49.5 GH/s          Active Miners: 31            │
 │  Share Difficulty: 8.56 min         PPLNS Window: 308K shares   │
 │  Time to Block: ~107 days           Last Block: 3.2 days ago    │
-│                                                                  │
+│                                                                 │
 │  Defense Status:                                                │
 │    Asymmetric Clamp: ✅ Active  (up: 127, fast-down: 3 today)   │
-│    Emergency Decay:  ✅ Standby (0 triggers, last: never)        │
+│    Emergency Decay:  ✅ Standby (0 triggers, last: never)       │
 │    Exp. PPLNS Decay: ✅ Active  (half-life: 9.0h)               │
-│    Vesting:          ✅ Active  (31 miners fully vested)         │
+│    Vesting:          ✅ Active  (31 miners fully vested)        │
 │    Adaptive Window:  ✅ Active  (53.5 days, 308K shares)        │
-│                                                                  │
-│  ⚠ Alerts (last 24h): 0 hopping alerts, 0 concentration alerts │
-│                                                                  │
+│                                                                 │
+│  ⚠ Alerts (last 24h): 0 hopping alerts, 0 concentration alerts  │
+│                                                                 │
 │  Miner Retention (30d): 28/31 miners active > 7 days            │
 │  New miners this week: 3  |  Churned: 0                         │
 └─────────────────────────────────────────────────────────────────┘
@@ -4073,17 +4073,17 @@ each miner's payout was calculated:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  🎉 BLOCK FOUND at height 2,847,123!                            │
-│  Reward: 6.25 LTC distributed to 31 miners                     │
-│                                                                  │
-│  YOUR PAYOUT: 0.194 LTC (3.1% of block)                        │
-│                                                                  │
-│  Breakdown:                                                      │
-│    Raw shares in window:     12,847                              │
+│  Reward: 6.25 LTC distributed to 31 miners                      │
+│                                                                 │
+│  YOUR PAYOUT: 0.194 LTC (3.1% of block)                         │
+│                                                                 │
+│  Breakdown:                                                     │
+│    Raw shares in window:     12,847                             │
 │    After PPLNS decay:        ×0.972 → 12,487 effective          │
 │    After vesting:            ×0.820 → 10,239 final weight       │
 │    Your share of total:      10,239 / 330,142 = 3.1%            │
-│                                                                  │
-│  ⓘ Tip: Mining consistently increases your vesting factor.      │
+│                                                                 │
+│  ⓘ Tip: Mining consistently increases your vesting factor.     │
 │    Current: 0.82 → Keep mining 14 more hours for 0.95           │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -4111,21 +4111,21 @@ centralized pools; transparency retains them.
 ┌───────────────────────────────────────────┬────────┬──────────┬──────────┬─────────┐
 │ Configuration                             │Hopper %│ LTC/hr   │ vs Loyal │ Track   │
 ├───────────────────────────────────────────┼────────┼──────────┼──────────┼─────────┤
-│ No defense (current V35)                  │ 11.8%  │ 0.1481   │ 3.8× ✗  │  —      │
-│ Phase 1a only (asym clamp) [TESTED]       │ 11.8%  │ 0.1481   │ 3.8× ✗  │ REVERTED│
-│   └─ Test showed clamp never triggers     │        │          │         │         │
-│   └─ Hopper arrival efficiency: 5.27× ✗   │        │          │         │         │
-│ Phase 1b only (emergency decay) [DEPLOYED] │ 11.8%  │ 0.1481   │ 3.8× ✗* │ V36     │
-│   └─ Death spiral safety net (no hopper    │        │          │         │         │
-│   │  profit impact — prevents pool death)  │        │          │         │         │
-│ Phase 2a only (exp decay) [TESTED]        │ ~3.3%  │ ~0.04    │ 1.52× ✗ │ V36     │
-│   └─ Arrival HAR reduced 5.27× → 1.52×   │        │          │         │         │
-│   └─ 71.1% improvement over flat PPLNS    │        │          │         │         │
-│ ─── V36 RELEASE LINE ───────────────────  │        │          │         │         │
-│ Phase 2a+2c (V36 full stack) [DEPLOYED]    │ ~2%    │ ~0.025   │ 0.6× ✓  │ V36 ★  │
+│ No defense (current V35)                  │ 11.8%  │ 0.1481   │ 3.8× ✗   │  —      │
+│ Phase 1a only (asym clamp) [TESTED]       │ 11.8%  │ 0.1481   │ 3.8× ✗   │ REVERTED│
+│   └─ Test showed clamp never triggers     │        │          │          │         │
+│   └─ Hopper arrival efficiency: 5.27× ✗   │        │          │          │         │
+│ Phase 1b only (emergency decay) [DEPLOYED]│ 11.8%  │ 0.1481   │ 3.8× ✗*  │ V36     │
+│   └─ Death spiral safety net (no hopper   │        │          │          │         │
+│   │  profit impact — prevents pool death) │        │          │          │         │
+│ Phase 2a only (exp decay) [TESTED]        │ ~3.3%  │ ~0.04    │ 1.52× ✗  │ V36     │
+│   └─ Arrival HAR reduced 5.27× → 1.52×    │        │          │          │         │
+│   └─ 71.1% improvement over flat PPLNS    │        │          │          │         │
+│ ─── V36 RELEASE LINE ───────────────────  │        │          │          │         │
+│ Phase 2a+2c (V36 full stack) [DEPLOYED]   │ ~2%    │ ~0.025   │ 0.6× ✓   │ V36 ★   │
 ├───────────────────────────────────────────┼────────┼──────────┼──────────┼─────────┤
-│ + Phase 2b (vesting, c2pool)              │ ~1%    │ ~0.013   │ 0.3× ✓✓ │ V37     │
-│ + Phase 4 (adaptive windows, c2pool)      │ ~0.3%  │ ~0.004   │ 0.1× ✓✓✓│ V37     │
+│ + Phase 2b (vesting, c2pool)              │ ~1%    │ ~0.013   │ 0.3× ✓✓  │ V37     │
+│ + Phase 4 (adaptive windows, c2pool)      │ ~0.3%  │ ~0.004   │ 0.1× ✓✓✓ │ V37     │
 └───────────────────────────────────────────┴────────┴──────────┴──────────┴─────────┘
 
 ✗ = hopping profitable    ≈ = break-even    ✓ = hopping unprofitable
@@ -5237,24 +5237,24 @@ Difficulty increases remain capped at +10% per share (unchanged).
 │ Bob    │ NO CHANGE in steady state. After whale incidents, Bob   │
 │        │ resumes finding shares 4× faster than before. This is   │
 │        │ critical for Bob — at 0.3% hashrate, a 3h recovery at   │
-│        │ inflated difficulty means zero shares for Bob. Now the   │
+│        │ inflated difficulty means zero shares for Bob. Now the  │
 │        │ window is ~40m. Payout: 0% base, +benefit during        │
 │        │ recovery periods.                                       │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Carol  │ POSITIVE. If Carol joins during a difficulty recovery,   │
-│        │ she starts mining at reasonable difficulty instead of    │
-│        │ waiting hours. First-share time: improved.               │
+│ Carol  │ POSITIVE. If Carol joins during a difficulty recovery,  │
+│        │ she starts mining at reasonable difficulty instead of   │
+│        │ waiting hours. First-share time: improved.              │
 │        │ Payout: 0% base, faster start.                          │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Dave   │ SLIGHT POSITIVE. When Dave reconnects after his 8h      │
-│        │ sleep, any difficulty drift caused by other miners       │
-│        │ departing resolves faster.                               │
+│        │ sleep, any difficulty drift caused by other miners      │
+│        │ departing resolves faster.                              │
 │        │ Payout: 0% base, +benefit on reconnect.                 │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Eve    │ POSITIVE. Monday morning difficulty recovery (from       │
-│        │ weekend concentration dissipating) is faster. Other      │
-│        │ miners who relied on Eve's weekend hashrate don't suffer │
-│        │ a 3-hour difficulty adjustment on Monday morning.        │
+│ Eve    │ POSITIVE. Monday morning difficulty recovery (from      │
+│        │ weekend concentration dissipating) is faster. Other     │
+│        │ miners who relied on Eve's weekend hashrate don't suffer│
+│        │ a 3-hour difficulty adjustment on Monday morning.       │
 │        │ Payout: 0% base.                                        │
 └────────┴─────────────────────────────────────────────────────────┘
 ```
@@ -5280,7 +5280,7 @@ zero during steady state and spike only during genuine recovery periods.
 │ Alice  │ NO CHANGE in normal operation. Emergency decay only     │
 │        │ triggers during extreme events (>300s share gap).       │
 │        │ Alice's continuous mining means 15s share gaps.         │
-│        │ LIFE-SAVING in extreme events: without Step 2, a 100×  │
+│        │ LIFE-SAVING in extreme events: without Step 2, a 100×   │
 │        │ whale flash could permanently kill the pool. Alice      │
 │        │ would lose her entire mining operation. With Step 2,    │
 │        │ recovery takes ~15 minutes.                             │
@@ -5298,7 +5298,7 @@ zero during steady state and spike only during genuine recovery periods.
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Dave   │ NO EFFECT. Dave's 8h offline gap does not trigger       │
 │        │ emergency mode — other miners continue finding shares   │
-│        │ during Dave's absence. At 49.5 GH/s, the pool finds    │
+│        │ during Dave's absence. At 49.5 GH/s, the pool finds     │
 │        │ ~2,880 shares during Dave's 8h sleep.                   │
 │        │ Payout: 0% base.                                        │
 ├────────┼─────────────────────────────────────────────────────────┤
@@ -5348,88 +5348,88 @@ distributed.
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Alice  │ SLIGHT NEGATIVE (-3%). Alice mines 24/7, so she always  │
 │        │ has fresh shares at 100% weight. Her oldest shares      │
-│        │ (27-36h old) now carry 6-12% weight instead of 100%.   │
+│        │ (27-36h old) now carry 6-12% weight instead of 100%.    │
 │        │ However, these oldest shares are being replaced by new  │
 │        │ shares at full weight — Alice is effectively paying     │
 │        │ herself. The -3% represents the residual tail loss.     │
 │        │                                                         │
 │        │ Alice's payout check:                                   │
-│        │   Before: 13.0% of block rewards (flat PPLNS)          │
-│        │   After:  12.6% of block rewards (exp decay)           │
-│        │   Net:    -0.4 percentage points                       │
+│        │   Before: 13.0% of block rewards (flat PPLNS)           │
+│        │   After:  12.6% of block rewards (exp decay)            │
+│        │   Net:    -0.4 percentage points                        │
 │        │                                                         │
-│        │ WHERE THE 0.4% GOES: redistributed to miners who were  │
+│        │ WHERE THE 0.4% GOES: redistributed to miners who were   │
 │        │ previously under-rewarded (like miners who joined       │
 │        │ recently but haven't accumulated deep history).         │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Bob    │ NEUTRAL (0%). Bob mines 24/7 at 0.3%. Exponential      │
+│ Bob    │ NEUTRAL (0%). Bob mines 24/7 at 0.3%. Exponential       │
 │        │ decay is ratio-preserving for continuous miners.        │
 │        │ Alice's and Bob's shares decay at IDENTICAL rates.      │
 │        │ Bob's share of the pie stays at 0.3%.                   │
 │        │                                                         │
 │        │ Bob's payout check:                                     │
-│        │   Before: 0.30% of block rewards                       │
-│        │   After:  0.30% of block rewards                       │
-│        │   Net:    0% (no change detectable above variance)     │
+│        │   Before: 0.30% of block rewards                        │
+│        │   After:  0.30% of block rewards                        │
+│        │   Net:    0% (no change detectable above variance)      │
 │        │                                                         │
-│        │ VARIANCE UNCHANGED: still ±1.8% from share count —     │
+│        │ VARIANCE UNCHANGED: still ±1.8% from share count —      │
 │        │ decay doesn't increase variance, just shifts absolute   │
 │        │ weights while preserving ratios.                        │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Carol  │ SLIGHT NEGATIVE (-5% initial, normalizing within 24h). │
+│ Carol  │ SLIGHT NEGATIVE (-5% initial, normalizing within 24h).  │
 │        │ Carol just joined. Her only shares are brand new and    │
 │        │ start decaying immediately with nothing older to        │
 │        │ compare against. But Carol is ADDING shares — each new  │
 │        │ share at full weight compensates for decaying old ones. │
 │        │                                                         │
 │        │ Carol's timeline:                                       │
-│        │   Hour 1:  All shares <1h old, decay < 8% — ~5% loss  │
-│        │   Hour 6:  Mix of fresh and 6h-old shares — ~4% loss  │
-│        │   Hour 12: Approaching steady state — ~3% loss         │
-│        │   Hour 24: Full steady state — same as Alice (~3%)     │
+│        │   Hour 1:  All shares <1h old, decay < 8% — ~5% loss    │
+│        │   Hour 6:  Mix of fresh and 6h-old shares — ~4% loss    │
+│        │   Hour 12: Approaching steady state — ~3% loss          │
+│        │   Hour 24: Full steady state — same as Alice (~3%)      │
 │        │                                                         │
-│        │ Carol's initial -5% is TRANSIENT and converges to      │
-│        │ Alice's -3% within 24h. The absolute LTC lost during   │
+│        │ Carol's initial -5% is TRANSIENT and converges to       │
+│        │ Alice's -3% within 24h. The absolute LTC lost during    │
 │        │ this period is small (Carol has few shares).            │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Dave   │ MODERATE NEGATIVE (-8%). Dave's pattern: mine 16h,      │
 │        │ sleep 8h. When Dave wakes up:                           │
-│        │   - His 16h-old shares: 29% weight (decayed heavily)   │
-│        │   - His 8h-old shares (when he stopped): 54% weight    │
-│        │   - Alice's same-age shares: supplemented by fresh     │
-│        │     shares at 100%, so Alice's average weight is       │
+│        │   - His 16h-old shares: 29% weight (decayed heavily)    │
+│        │   - His 8h-old shares (when he stopped): 54% weight     │
+│        │   - Alice's same-age shares: supplemented by fresh      │
+│        │     shares at 100%, so Alice's average weight is        │
 │        │     higher per unit history.                            │
 │        │                                                         │
-│        │ Dave mines 16/24 = 67% of the time. Under flat PPLNS,  │
-│        │ Dave earned ~92% of Alice's per-GH rate. With decay,   │
-│        │ Dave earns ~84% of Alice's rate. The 8% reduction      │
+│        │ Dave mines 16/24 = 67% of the time. Under flat PPLNS,   │
+│        │ Dave earned ~92% of Alice's per-GH rate. With decay,    │
+│        │ Dave earns ~84% of Alice's rate. The 8% reduction       │
 │        │ CORRECTLY reflects that Dave's stale hours contributed  │
 │        │ no work to the pool.                                    │
 │        │                                                         │
 │        │ Dave's payout check:                                    │
-│        │   Before: 7% hashrate × 92% efficiency = 6.4% payout  │
-│        │   After:  7% hashrate × 84% efficiency = 5.9% payout  │
-│        │   Net:    -0.5 percentage points (-8% relative)        │
+│        │   Before: 7% hashrate × 92% efficiency = 6.4% payout    │
+│        │   After:  7% hashrate × 84% efficiency = 5.9% payout    │
+│        │   Net:    -0.5 percentage points (-8% relative)         │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Eve    │ SIGNIFICANT NEGATIVE (-15 to -25%). Eve mines Fri–Sun   │
 │        │ (72h) then is absent Mon–Thu (96h).                     │
 │        │                                                         │
 │        │ Eve's share weights during the week:                    │
-│        │   Sunday shares on Monday:  54% weight (1 half-life)   │
-│        │   Sunday shares on Tuesday: 29% weight (2 half-lives)  │
-│        │   Sunday shares on Wednesday: 16% (3 half-lives)       │
-│        │   Sunday shares on Thursday: 8% (4 half-lives)         │
-│        │   Friday shares on Thursday: 2% (8+ half-lives)        │
+│        │   Sunday shares on Monday:  54% weight (1 half-life)    │
+│        │   Sunday shares on Tuesday: 29% weight (2 half-lives)   │
+│        │   Sunday shares on Wednesday: 16% (3 half-lives)        │
+│        │   Sunday shares on Thursday: 8% (4 half-lives)          │
+│        │   Friday shares on Thursday: 2% (8+ half-lives)         │
 │        │                                                         │
-│        │ Eve mines 72/168 = 43% of the time. Under flat PPLNS,  │
-│        │ she earned ~75−80% of a 24/7 miner's rate (because her │
+│        │ Eve mines 72/168 = 43% of the time. Under flat PPLNS,   │
+│        │ she earned ~75−80% of a 24/7 miner's rate (because her  │
 │        │ weekend burst held full weight all week). With decay,   │
 │        │ she earns ~55−65% — closer to her actual 43%.           │
 │        │                                                         │
 │        │ Eve's payout check:                                     │
-│        │   Before: 10% hashrate × 77% efficiency = 7.7% payout │
-│        │   After:  10% hashrate × 60% efficiency = 6.0% payout │
-│        │   Net:    -1.7 percentage points (-22% relative)       │
+│        │   Before: 10% hashrate × 77% efficiency = 7.7% payout   │
+│        │   After:  10% hashrate × 60% efficiency = 6.0% payout   │
+│        │   Net:    -1.7 percentage points (-22% relative)        │
 │        │                                                         │
 │        │ IS THIS FAIR? Yes. Eve was previously over-rewarded at  │
 │        │ the expense of Alice and Bob, whose continuous work     │
@@ -5477,18 +5477,18 @@ value. Every miner gains lower payout variance.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ Step 3a: Pure Difficulty Accounting — Finder Fee Removed              │
+│ Step 3a: Pure Difficulty Accounting — Finder Fee Removed               │
 │                                                                        │
 │ Before (V35):                                                          │
-│   Block reward split: 99.5% PPLNS + 0.5% finder lottery               │
-│   PPLNS window: 8,639 shares (excludes 2 most recent)                 │
+│   Block reward split: 99.5% PPLNS + 0.5% finder lottery                │
+│   PPLNS window: 8,639 shares (excludes 2 most recent)                  │
 │                                                                        │
 │ After (V36):                                                           │
-│   Block reward split: 100% PPLNS                                      │
-│   PPLNS window: 8,640 shares (includes parent, excludes only self)    │
+│   Block reward split: 100% PPLNS                                       │
+│   PPLNS window: 8,640 shares (includes parent, excludes only self)     │
 │                                                                        │
-│ Expected payout change: +0.0% (lottery→guaranteed is same EV)         │
-│ Variance change:        REDUCED (no more 0.5% lottery component)      │
+│ Expected payout change: +0.0% (lottery→guaranteed is same EV)          │
+│ Variance change:        REDUCED (no more 0.5% lottery component)       │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -5561,84 +5561,84 @@ work over 2×CHAIN_LENGTH lookback.
 ┌────────┬─────────────────────────────────────────────────────────┐
 │ Miner  │ Experience after Step 4                                 │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Alice  │ NO ADDITIONAL CHANGE (0%). Alice mines 24/7 — her      │
+│ Alice  │ NO ADDITIONAL CHANGE (0%). Alice mines 24/7 — her       │
 │        │ vesting factor is permanently 1.0. The vesting          │
 │        │ mechanism adds zero overhead to Alice's payouts.        │
 │        │                                                         │
-│        │ Combined with Step 3: -3% total (from decay only).     │
+│        │ Combined with Step 3: -3% total (from decay only).      │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Bob    │ NO ADDITIONAL CHANGE (0%). Bob mines 24/7 at 500 MH/s. │
+│ Bob    │ NO ADDITIONAL CHANGE (0%). Bob mines 24/7 at 500 MH/s.  │
 │        │ Vesting is work-weighted: Bob's smaller but CONSISTENT  │
-│        │ work gives vesting = 1.0, same as Alice. Work rate     │
+│        │ work gives vesting = 1.0, same as Alice. Work rate      │
 │        │ doesn't matter — consistency does.                      │
 │        │                                                         │
 │        │ Combined with Step 3: ~0% total.                        │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Carol  │ MODERATE NEGATIVE (-20% initial, normalizing in ~72h). │
+│ Carol  │ MODERATE NEGATIVE (-20% initial, normalizing in ~72h).  │
 │        │ THIS IS THE BIGGEST IMPACT for Carol. Her vesting       │
 │        │ lookback is empty on day 1.                             │
 │        │                                                         │
 │        │ Carol's vesting ramp-up:                                │
-│        │   Hour 1:   Vesting = 0.03  (3% of full credit)       │
-│        │   Hour 6:   Vesting = 0.15  (15%)                     │
-│        │   Hour 12:  Vesting = 0.35  (35%)                     │
-│        │   Hour 24:  Vesting = 0.60  (60%)                     │
-│        │   Hour 48:  Vesting = 0.85  (85%)                     │
-│        │   Hour 72:  Vesting = 0.95  (95%)                     │
-│        │   Hour 96:  Vesting = 0.99  (99%)                     │
+│        │   Hour 1:   Vesting = 0.03  (3% of full credit)         │
+│        │   Hour 6:   Vesting = 0.15  (15%)                       │
+│        │   Hour 12:  Vesting = 0.35  (35%)                       │
+│        │   Hour 24:  Vesting = 0.60  (60%)                       │
+│        │   Hour 48:  Vesting = 0.85  (85%)                       │
+│        │   Hour 72:  Vesting = 0.95  (95%)                       │
+│        │   Hour 96:  Vesting = 0.99  (99%)                       │
 │        │                                                         │
-│        │ WHAT CAROL SEES ON THE DASHBOARD:                      │
-│        │   "Vesting: 35% | ETA to 95%: ~60 hours | Keep mining" │
+│        │ WHAT CAROL SEES ON THE DASHBOARD:                       │
+│        │   "Vesting: 35% | ETA to 95%: ~60 hours | Keep mining"  │
 │        │                                                         │
-│        │ HOW MUCH DOES CAROL ACTUALLY LOSE?                     │
-│        │   Carol's hashrate = 5 GH/s = 3% of pool.             │
-│        │   In the first 24h, Carol finds ~346 shares.           │
-│        │   Average vesting over 24h: ~0.28                      │
-│        │   Effective shares: 346 × 0.28 = ~97 effective shares  │
-│        │   Lost payout: 249 shares worth of credit (~72%)       │
-│        │   BUT: the pool finds a block every ~107 days.         │
-│        │   Probability of a block in Carol's first 24h: ~0.9%   │
-│        │   Expected loss: 0.9% × 72% × Carol's share = tiny    │
+│        │ HOW MUCH DOES CAROL ACTUALLY LOSE?                      │
+│        │   Carol's hashrate = 5 GH/s = 3% of pool.               │
+│        │   In the first 24h, Carol finds ~346 shares.            │
+│        │   Average vesting over 24h: ~0.28                       │
+│        │   Effective shares: 346 × 0.28 = ~97 effective shares   │
+│        │   Lost payout: 249 shares worth of credit (~72%)        │
+│        │   BUT: the pool finds a block every ~107 days.          │
+│        │   Probability of a block in Carol's first 24h: ~0.9%    │
+│        │   Expected loss: 0.9% × 72% × Carol's share = tiny      │
 │        │                                                         │
 │        │ After 72h, Carol is at 95% vesting and mining normally. │
 │        │ The ramp-up cost is a one-time fee that protects the    │
 │        │ pool against burst attacks.                             │
 │        │                                                         │
-│        │ Combined with Step 3: -5% initial + -20% vesting =     │
-│        │ heavy initial discount, converging to ~-3% by day 4.   │
+│        │ Combined with Step 3: -5% initial + -20% vesting =      │
+│        │ heavy initial discount, converging to ~-3% by day 4.    │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Dave   │ SLIGHT NEGATIVE (-3% additional). Dave's 8h daily gap  │
-│        │ causes his vesting to dip from 1.0 to ~0.92 overnight. │
+│ Dave   │ SLIGHT NEGATIVE (-3% additional). Dave's 8h daily gap   │
+│        │ causes his vesting to dip from 1.0 to ~0.92 overnight.  │
 │        │ When he resumes mining:                                 │
-│        │   +2 hours: vesting recovers to ~0.97                  │
-│        │   +4 hours: vesting back to 1.0                        │
+│        │   +2 hours: vesting recovers to ~0.97                   │
+│        │   +4 hours: vesting back to 1.0                         │
 │        │                                                         │
 │        │ Average daily vesting: ~0.97                            │
-│        │ Combined with Step 3: -8% (decay) + -3% (vesting)      │
+│        │ Combined with Step 3: -8% (decay) + -3% (vesting)       │
 │        │   = -11% total.                                         │
 │        │                                                         │
-│        │ Reality check: Dave mines 67% of the time. Earning     │
-│        │ 89% of a 24/7 miner's rate (per GH) is still generous. │
+│        │ Reality check: Dave mines 67% of the time. Earning      │
+│        │ 89% of a 24/7 miner's rate (per GH) is still generous.  │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Eve    │ MODERATE NEGATIVE (-10 to -15% additional). Eve's Mon– │
+│ Eve    │ MODERATE NEGATIVE (-10 to -15% additional). Eve's Mon–  │
 │        │ Thu absence causes significant vesting decay:           │
 │        │                                                         │
 │        │ Eve's weekly vesting cycle:                             │
-│        │   Friday morning (returns):     Vesting ≈ 0.30         │
-│        │   Friday evening (6h mining):   Vesting ≈ 0.55         │
-│        │   Saturday (18h mining):        Vesting ≈ 0.80         │
-│        │   Sunday evening (peak):        Vesting ≈ 0.95         │
-│        │   Monday morning (stops):       Vesting ≈ 0.95         │
-│        │   Tuesday (offline 24h):        Vesting ≈ 0.70         │
-│        │   Wednesday (offline 48h):      Vesting ≈ 0.50         │
-│        │   Thursday (offline 72h):       Vesting ≈ 0.35         │
+│        │   Friday morning (returns):     Vesting ≈ 0.30          │
+│        │   Friday evening (6h mining):   Vesting ≈ 0.55          │
+│        │   Saturday (18h mining):        Vesting ≈ 0.80          │
+│        │   Sunday evening (peak):        Vesting ≈ 0.95          │
+│        │   Monday morning (stops):       Vesting ≈ 0.95          │
+│        │   Tuesday (offline 24h):        Vesting ≈ 0.70          │
+│        │   Wednesday (offline 48h):      Vesting ≈ 0.50          │
+│        │   Thursday (offline 72h):       Vesting ≈ 0.35          │
 │        │                                                         │
 │        │ Average weekend vesting: ~0.65                          │
-│        │ Eve's effective payout rate: 60%→50% of Alice's rate   │
-│        │ Combined with Step 3: -22% (decay) + -12% (vesting)    │
-│        │   = ~-34% relative to flat PPLNS (now ~50% of Alice).  │
+│        │ Eve's effective payout rate: 60%→50% of Alice's rate    │
+│        │ Combined with Step 3: -22% (decay) + -12% (vesting)     │
+│        │   = ~-34% relative to flat PPLNS (now ~50% of Alice).   │
 │        │                                                         │
-│        │ Eve mines 43% of the time and earns ~50% of Alice's    │
+│        │ Eve mines 43% of the time and earns ~50% of Alice's     │
 │        │ rate. The remaining 7% premium (50 vs 43) reflects that │
 │        │ Eve's concentrated weekend burst has SOME recency value │
 │        │ — she IS mining during those hours. The system is not   │
@@ -5654,16 +5654,16 @@ work over 2×CHAIN_LENGTH lookback.
 ├────────┼───────────┼───────────────────────────────────────────────┤
 │ Alice  │ ~-3%      │ Slight tail loss; variance reduced.           │
 │ Bob    │ ~0%       │ Virtually invisible. Bob mines normally.      │
-│ Carol  │ ~-5%i     │ No ramp-up in V36. Initial decay penalty,    │
-│        │ → ~-3%ss  │ converges to ~-3% at steady-state.           │
-│ Dave   │ ~-8%      │ Reflects 67% time (no vesting in V36).       │
-│ Eve    │ ~-22%     │ Reflects 43% time (decay only).              │
-│ Frank  │ ~-25%     │ Reflects 25% duty cycle (decay only).        │
-│ Grace  │ ~-18%     │ Reflects 37.5% duty cycle (decay only).      │
-│ Henry  │ ~-6%      │ Near full-time; 58% duty cycle.              │
-│ Iris   │ ~-10%     │ Moderate; 46% duty cycle.                    │
-│ Jack   │ ~-35%     │ Sporadic; multi-day gaps cost the most.      │
-│ Hopper │  0.6×     │ UNPROFITABLE — V36 goal achieved.            │
+│ Carol  │ ~-5%i     │ No ramp-up in V36. Initial decay penalty,     │
+│        │ → ~-3%ss  │ converges to ~-3% at steady-state.            │
+│ Dave   │ ~-8%      │ Reflects 67% time (no vesting in V36).        │
+│ Eve    │ ~-22%     │ Reflects 43% time (decay only).               │
+│ Frank  │ ~-25%     │ Reflects 25% duty cycle (decay only).         │
+│ Grace  │ ~-18%     │ Reflects 37.5% duty cycle (decay only).       │
+│ Henry  │ ~-6%      │ Near full-time; 58% duty cycle.               │
+│ Iris   │ ~-10%     │ Moderate; 46% duty cycle.                     │
+│ Jack   │ ~-35%     │ Sporadic; multi-day gaps cost the most.       │
+│ Hopper │  0.6×     │ UNPROFITABLE — V36 goal achieved.             │
 └────────┴───────────┴───────────────────────────────────────────────┘
 ```
 
@@ -5717,21 +5717,21 @@ into all defense mechanisms. No payout changes — this is visibility only.
 │        │ Payout: 0% change.                                      │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Carol  │ CRITICAL FOR CAROL. The miner.html panel shows:         │
-│        │   Vesting: ███░░░░░░░ 0.35                             │
-│        │   ETA to 95%: ~60h | Keep mining!                      │
+│        │   Vesting: ███░░░░░░░ 0.35                              │
+│        │   ETA to 95%: ~60h | Keep mining!                       │
 │        │ This manages Carol's expectations — she sees the        │
 │        │ progress bar filling up hour by hour. Without this,     │
 │        │ Carol might think the pool is broken.                   │
 │        │ Payout: 0% change (transparency only).                  │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Dave   │ Can see vesting dip to 0.92 during sleep and watch it  │
+│ Dave   │ Can see vesting dip to 0.92 during sleep and watch it   │
 │        │ recover when he starts mining. The share trend chart    │
 │        │ shows his daily cycle: mining→sleep→mining.             │
 │        │ Payout: 0% change.                                      │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Eve    │ IMPORTANT FOR EVE. Dashboard shows her vesting cycle:   │
-│        │   Friday: 0.30 → Sunday: 0.95 → Thursday: 0.35         │
-│        │ Eve can see WHY her payout is ~50% of Alice's rate:    │
+│        │   Friday: 0.30 → Sunday: 0.95 → Thursday: 0.35          │
+│        │ Eve can see WHY her payout is ~50% of Alice's rate:     │
 │        │ her shares decay during the week and her vesting resets │
 │        │ partially. If Eve increases to 4-day mining, she can    │
 │        │ watch her effective rate improve.                       │
@@ -5739,11 +5739,11 @@ into all defense mechanisms. No payout changes — this is visibility only.
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Frank  │ MOST IMPORTANT DASHBOARD USER. Frank mines midnight–    │
 │        │ 06:00 daily due to electricity ToU pricing. Dashboard:  │
-│        │   Vesting: ██████░░░░ 0.65                             │
-│        │   PPLNS: 12,847 effective shares in window             │
-│        │   Trend: ▁▂█████▁░░░░░░░░░░░░░▁▂████                  │
+│        │   Vesting: ██████░░░░ 0.65                              │
+│        │   PPLNS: 12,847 effective shares in window              │
+│        │   Trend: ▁▂█████▁░░░░░░░░░░░░░▁▂████                    │
 │        │           ^night^---18h off---^tonight                  │
-│        │ Frank sees TWO critical facts: (1) his vesting is NOT  │
+│        │ Frank sees TWO critical facts: (1) his vesting is NOT   │
 │        │ zero when he starts — it carries over from last night;  │
 │        │ (2) his accumulated shares from previous nights are     │
 │        │ still in the PPLNS window. Without this visibility,     │
@@ -5751,13 +5751,13 @@ into all defense mechanisms. No payout changes — this is visibility only.
 │        │ Payout: 0% change.                                      │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Grace  │ Solar miner opens dashboard at 08:00 sunrise:           │
-│        │   Vesting: █████░░░░░ 0.52                             │
+│        │   Vesting: █████░░░░░ 0.52                              │
 │        │   Accumulated: 8,200 effective shares (from yesterday)  │
 │        │ By 17:00 sunset:                                        │
-│        │   Vesting: ████████░░ 0.80                             │
+│        │   Vesting: ████████░░ 0.80                              │
 │        │   Accumulated: 14,100 effective shares                  │
 │        │ Grace watches her progress bar grow during the day.     │
-│        │ Tomorrow at sunrise, it'll be back to ~0.52 — but NOT  │
+│        │ Tomorrow at sunrise, it'll be back to ~0.52 — but NOT   │
 │        │ zero. The dashboard shows mining is accumulating value. │
 │        │ Payout: 0% change.                                      │
 ├────────┼─────────────────────────────────────────────────────────┤
@@ -5766,21 +5766,21 @@ into all defense mechanisms. No payout changes — this is visibility only.
 │        │ Payout: 0% change.                                      │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Iris   │ Dashboard shows overnight mining pattern clearly:       │
-│        │   Start (22:00): Vesting 0.78 → End (09:00): 0.92     │
-│        │ Iris can see GPU mining at night earns more per-GH     │
-│        │ than daytime mining would, due to higher vesting.      │
+│        │   Start (22:00): Vesting 0.78 → End (09:00): 0.92       │
+│        │ Iris can see GPU mining at night earns more per-GH      │
+│        │ than daytime mining would, due to higher vesting.       │
 │        │ Payout: 0% change.                                      │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Jack   │ RETENTION CRITICAL. Jack returns after 2-day break:     │
-│        │   Vesting: █░░░░░░░░░ 0.12                             │
+│        │   Vesting: █░░░░░░░░░ 0.12                              │
 │        │   Accumulated: 1,847 effective shares (reduced but      │
 │        │     NOT ZERO — shares from last week still in window!)  │
-│        │   ETA to 50%: ~12h | Welcome back!                     │
-│        │ The dashboard message "welcome back" + non-zero share  │
+│        │   ETA to 50%: ~12h | Welcome back!                      │
+│        │ The dashboard message "welcome back" + non-zero share   │
 │        │ count is CRITICAL for Jack's retention. Without this,   │
-│        │ Jack sees a raw 0.12 vesting and assumes he's starting │
+│        │ Jack sees a raw 0.12 vesting and assumes he's starting  │
 │        │ from scratch — which might make him quit. The dashboard │
-│        │ must show that his previous work is remembered.        │
+│        │ must show that his previous work is remembered.         │
 │        │ Payout: 0% change.                                      │
 └────────┴─────────────────────────────────────────────────────────┘
 ```
@@ -5815,46 +5815,46 @@ the window expands from 36h to ~53.5 days. Vesting lookback expands to
 ┌────────┬─────────────────────────────────────────────────────────┐
 │ Miner  │ Experience after Step 6                                 │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Alice  │ SLIGHT POSITIVE (+2-3%). Longer window means MORE of   │
+│ Alice  │ SLIGHT POSITIVE (+2-3%). Longer window means MORE of    │
 │        │ Alice's shares contribute to payout calculations. With  │
-│        │ fixed 36h window, Alice had ~8,640 shares. With 53.5-  │
+│        │ fixed 36h window, Alice had ~8,640 shares. With 53.5-   │
 │        │ day adaptive window, she has ~308K shares (decayed).    │
 │        │ The exponential decay means far shares contribute       │
 │        │ little — but there are MORE of them, and Alice has been │
-│        │ mining 24/7 to fill the entire window. Net: Alice's    │
+│        │ mining 24/7 to fill the entire window. Net: Alice's     │
 │        │ share of payouts increases slightly (+2-3%) because the │
 │        │ expanded window captures more of her consistent work.   │
 │        │                                                         │
-│        │ Combined net: -3% (decay) +2% (adaptive) = ~-1%        │
+│        │ Combined net: -3% (decay) +2% (adaptive) = ~-1%         │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Bob    │ SLIGHT POSITIVE (+2-3%). Same reasoning as Alice.       │
 │        │ Bob's 24/7 mining fills the expanded window.            │
 │        │                                                         │
-│        │ BONUS: Bob's payout VARIANCE decreases because the     │
+│        │ BONUS: Bob's payout VARIANCE decreases because the      │
 │        │ larger window includes more shares. Variance drops      │
-│        │ from ±1.8% (8,640-share window) to roughly ±0.3%       │
+│        │ from ±1.8% (8,640-share window) to roughly ±0.3%        │
 │        │ (308K-share window). Bob's payouts become much more     │
 │        │ predictable.                                            │
 │        │                                                         │
 │        │ Combined net: ~+2%.                                     │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Carol  │ SLIGHT NEGATIVE (ramp-up extends by ~1 day). The       │
-│        │ adaptive vesting lookback is longer (107 days vs 72h), │
+│ Carol  │ SLIGHT NEGATIVE (ramp-up extends by ~1 day). The        │
+│        │ adaptive vesting lookback is longer (107 days vs 72h),  │
 │        │ but the WORK_THRESHOLD scales proportionally, so        │
 │        │ Carol's ramp-up timeline is similar:                    │
-│        │   Hour 24: Vesting ≈ 0.55 (was 0.60 with fixed)       │
-│        │   Hour 48: Vesting ≈ 0.80 (was 0.85)                  │
-│        │   Hour 72: Vesting ≈ 0.92 (was 0.95)                  │
-│        │   Hour 96: Vesting ≈ 0.97 (was 0.99)                  │
+│        │   Hour 24: Vesting ≈ 0.55 (was 0.60 with fixed)         │
+│        │   Hour 48: Vesting ≈ 0.80 (was 0.85)                    │
+│        │   Hour 72: Vesting ≈ 0.92 (was 0.95)                    │
+│        │   Hour 96: Vesting ≈ 0.97 (was 0.99)                    │
 │        │                                                         │
-│        │ ~1 day longer to 95% vesting. Small absolute cost.     │
+│        │ ~1 day longer to 95% vesting. Small absolute cost.      │
 │        │ Combined net: ~equal to fixed window after ramp-up.     │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Dave   │ NEUTRAL. Dave's 16/24 pattern sees the same            │
+│ Dave   │ NEUTRAL. Dave's 16/24 pattern sees the same             │
 │        │ proportional effect. The larger window doesn't help or  │
 │        │ hurt Dave specifically — his daily cycle repeats within │
 │        │ the window regardless of window size. Vesting behavior  │
-│        │ is identical (still dips to 0.92 during 8h sleep).     │
+│        │ is identical (still dips to 0.92 during 8h sleep).      │
 │        │                                                         │
 │        │ Combined net: ~-11% (unchanged from Step 4).            │
 ├────────┼─────────────────────────────────────────────────────────┤
@@ -5864,82 +5864,82 @@ the window expands from 36h to ~53.5 days. Vesting lookback expands to
 │        │ day adaptive window, ALL of Eve's weekend shares stay   │
 │        │ in the PPLNS window for weeks.                          │
 │        │                                                         │
-│        │ Yes, the shares DECAY — but they still earn SOMETHING: │
+│        │ Yes, the shares DECAY — but they still earn SOMETHING:  │
 │        │   Eve's Sunday shares on Wednesday: 16% weight          │
 │        │   Eve's Sunday shares next Friday: 4% weight            │
-│        │ These small weights add up to ~5% improvement for Eve. │
+│        │ These small weights add up to ~5% improvement for Eve.  │
 │        │                                                         │
-│        │ Combined net: -22% (decay) + -12% (vesting) +5%        │
+│        │ Combined net: -22% (decay) + -12% (vesting) +5%         │
 │        │   (adaptive) = ~-29% relative to flat PPLNS.            │
-│        │ Eve earns ~53% of Alice's rate (was ~50% in Step 4).   │
+│        │ Eve earns ~53% of Alice's rate (was ~50% in Step 4).    │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Frank  │ STRONGLY POSITIVE (+8-12%). THIS IS TRANSFORMATIVE.     │
 │        │ Under fixed 36h: Frank had 2 nights in window (~12h).   │
 │        │ Under adaptive 53.5-day: Frank has ~53 nights!          │
-│        │   Last night's shares: 100% → 35% (24h decay)          │
-│        │   Night before:        35% → 12% (48h decay)           │
-│        │   3 nights ago:        12% → 4%  (72h decay)           │
+│        │   Last night's shares: 100% → 35% (24h decay)           │
+│        │   Night before:        35% → 12% (48h decay)            │
+│        │   3 nights ago:        12% → 4%  (72h decay)            │
 │        │   Sum of 53 nights: meaningful cumulative weight.       │
 │        │                                                         │
 │        │ Frank's dashboard now shows: "12,847 effective shares   │
 │        │ accumulated from 53 sessions"                           │
 │        │                                                         │
-│        │ Combined net: -25% (decay) + -15% (vesting) +10%       │
+│        │ Combined net: -25% (decay) + -15% (vesting) +10%        │
 │        │   (adaptive) = ~-30% relative to flat PPLNS.            │
-│        │ Frank earns ~28% of Alice's rate per GH.               │
-│        │ His duty cycle is 25% → system is FAIR.                │
+│        │ Frank earns ~28% of Alice's rate per GH.                │
+│        │ His duty cycle is 25% → system is FAIR.                 │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Grace  │ STRONGLY POSITIVE (+8-12%). Same logic as Frank.        │
-│        │ Under fixed 36h: Grace had 2 daytime sessions (~18h).  │
-│        │ Under adaptive 53.5-day: ~53 daytime sessions.         │
-│        │ Grace's 9h/day solar sessions accumulate weight.       │
+│        │ Under fixed 36h: Grace had 2 daytime sessions (~18h).   │
+│        │ Under adaptive 53.5-day: ~53 daytime sessions.          │
+│        │ Grace's 9h/day solar sessions accumulate weight.        │
 │        │                                                         │
-│        │ Combined net: -18% (decay) + -12% (vesting) +10%       │
+│        │ Combined net: -18% (decay) + -12% (vesting) +10%        │
 │        │   (adaptive) = ~-20% relative to flat PPLNS.            │
-│        │ Grace earns ~32% of Alice's rate per GH.               │
-│        │ Her duty cycle is 37.5% → slight vesting discount      │
-│        │ from daily gap, but close to proportional.             │
+│        │ Grace earns ~32% of Alice's rate per GH.                │
+│        │ Her duty cycle is 37.5% → slight vesting discount       │
+│        │ from daily gap, but close to proportional.              │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Henry  │ POSITIVE (+3%). Very similar to Alice and Bob. Henry's  │
 │        │ 14h/day pattern fills the adaptive window almost as     │
-│        │ densely as a 24/7 miner. The 10h daily gap is small    │
-│        │ enough that vesting stays high (>0.88 always).         │
+│        │ densely as a 24/7 miner. The 10h daily gap is small     │
+│        │ enough that vesting stays high (>0.88 always).          │
 │        │                                                         │
 │        │ Combined net: ~-7% relative to flat PPLNS.              │
-│        │ Henry earns ~93% of Alice's rate per GH.               │
-│        │ Duty cycle: 58% → earning 93%/58% = 1.6× per active   │
-│        │ hour. Slightly over-rewarded vs pure duty, reflecting  │
+│        │ Henry earns ~93% of Alice's rate per GH.                │
+│        │ Duty cycle: 58% → earning 93%/58% = 1.6× per active     │
+│        │ hour. Slightly over-rewarded vs pure duty, reflecting   │
 │        │ his consistency (daily without gaps).                   │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Iris   │ MODERATE POSITIVE (+5-7%). Iris's 11h/day sessions     │
+│ Iris   │ MODERATE POSITIVE (+5-7%). Iris's 11h/day sessions      │
 │        │ accumulate over the adaptive window. Under fixed 36h,   │
-│        │ ~2.5 sessions fit. Under adaptive 53.5-day, ~53.       │
+│        │ ~2.5 sessions fit. Under adaptive 53.5-day, ~53.        │
 │        │                                                         │
 │        │ Combined net: ~-10% relative to flat PPLNS.             │
-│        │ Iris earns ~46% of Alice's rate per GH.               │
-│        │ Duty cycle: 46% → essentially 1:1 proportional.       │
+│        │ Iris earns ~46% of Alice's rate per GH.                 │
+│        │ Duty cycle: 46% → essentially 1:1 proportional.         │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Jack   │ VERY STRONGLY POSITIVE (+15-25%). THE BIGGEST WINNER.  │
+│ Jack   │ VERY STRONGLY POSITIVE (+15-25%). THE BIGGEST WINNER.   │
 │        │ Under fixed 36h: Jack's shares VANISH every time he     │
-│        │ takes a 2-day break. TOTAL LOSS. ZERO RETENTION.       │
-│        │ Under adaptive 53.5-day: Jack's shares from LAST WEEK  │
-│        │ are still in the window when he returns!               │
+│        │ takes a 2-day break. TOTAL LOSS. ZERO RETENTION.        │
+│        │ Under adaptive 53.5-day: Jack's shares from LAST WEEK   │
+│        │ are still in the window when he returns!                │
 │        │                                                         │
-│        │ Jack mines 3 days, takes 2 days off, mines 2 days:     │
+│        │ Jack mines 3 days, takes 2 days off, mines 2 days:      │
 │        │   Day 1-3 (mining): building shares, vesting climbing   │
-│        │   Day 4-5 (off): shares decaying but NOT gone          │
-│        │   Day 6-7 (mining): old shares still there + new ones  │
+│        │   Day 4-5 (off): shares decaying but NOT gone           │
+│        │   Day 6-7 (mining): old shares still there + new ones   │
 │        │                                                         │
-│        │ Without adaptive: Jack comes back to zero every time.  │
+│        │ Without adaptive: Jack comes back to zero every time.   │
 │        │ With adaptive: Jack sees "1,847 effective shares        │
-│        │ remaining from last week" on the dashboard. Keeps him. │
+│        │ remaining from last week" on the dashboard. Keeps him.  │
 │        │                                                         │
 │        │ Combined net: ~-35% relative to flat PPLNS.             │
-│        │ But compared to fixed window: very large relative gain │
-│        │ because fixed window gave Jack near-zero after >36h    │
+│        │ But compared to fixed window: very large relative gain  │
+│        │ because fixed window gave Jack near-zero after >36h     │
 │        │ breaks.                                                 │
-│        │ Adaptive windows convert Jack from "lost miner" to     │
-│        │ "retained part-time contributor."                        │
+│        │ Adaptive windows convert Jack from "lost miner" to      │
+│        │ "retained part-time contributor."                       │
 └────────┴─────────────────────────────────────────────────────────┘
 ```
 
@@ -5974,16 +5974,16 @@ gap-fill from peers.
 │ Alice  │ POSITIVE. If Alice's node crashes, she's back mining    │
 │        │ in ~8s instead of waiting through a multi-minute gap-   │
 │        │ fill process. During extended recovery, Alice           │
-│        │ earns nothing. Over a year with ~2 crashes, Alice      │
+│        │ earns nothing. Over a year with ~2 crashes, Alice       │
 │        │ saves ~20 minutes of downtime. Small but free.          │
 │        │ Payout: ~0% direct change. Uptime improvement.          │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Bob    │ POSITIVE. Same crash recovery benefit. For Bob,         │
-│        │ multi-minute downtime means missing 0-1 shares.        │
+│        │ multi-minute downtime means missing 0-1 shares.         │
 │        │ 8 seconds means missing 0.                              │
 │        │ Payout: ~0% change. Quality-of-life improvement.        │
 ├────────┼─────────────────────────────────────────────────────────┤
-│ Carol  │ NO EFFECT unless Carol's node crashes during ramp-up.  │
+│ Carol  │ NO EFFECT unless Carol's node crashes during ramp-up.   │
 │        │ If it does, faster recovery preserves more of Carol's   │
 │        │ vesting progress (the IncrementalVestingCache is in     │
 │        │ memory, but the share chain restores from DB, allowing  │
@@ -5995,7 +5995,7 @@ gap-fill from peers.
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Eve    │ SLIGHT POSITIVE. If Eve's node crashes Friday morning,  │
 │        │ she's back in ~8s instead of waiting several minutes.   │
-│        │ Given Eve only mines                                     │
+│        │ Given Eve only mines                                    │
 │        │ 72h/week, several minutes of downtime are proportionally│
 │        │ significant than for Alice.                             │
 └────────┴─────────────────────────────────────────────────────────┘
@@ -6018,7 +6018,7 @@ deferred to V37.
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Alice  │ Monitors /version_signaling — sees V36 share % climb.   │
 │        │ Once 95% threshold sustained, consensus rules change.   │
-│        │ Alice's payout shifts by ~-3% over the next few hours  │
+│        │ Alice's payout shifts by ~-3% over the next few hours   │
 │        │ as exponential decay takes effect (fixed 8,640 window). │
 │        │ No action needed from Alice.                            │
 ├────────┼─────────────────────────────────────────────────────────┤
@@ -6034,21 +6034,21 @@ deferred to V37.
 │        │ evaluates ALL shares in the window). Carol’s pre-       │
 │        │ activation shares were at full weight; post-activation  │
 │        │ they’re at decayed weight. The transition is smooth     │
-│        │ because Carol’s continuous mining generates fresh        │
+│        │ because Carol’s continuous mining generates fresh       │
 │        │ shares at full weight under the new rules.              │
-│        │ (No vesting ramp-up in V36 — that ships in V37.)       │
+│        │ (No vesting ramp-up in V36 — that ships in V37.)        │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Dave   │ Dave may notice his payouts drop by ~8% relative to     │
 │        │ pre-activation. If Dave checks /weight_stats, he sees:  │
-│        │   "PPLNS decay weight: 84%"                            │
+│        │   "PPLNS decay weight: 84%"                             │
 │        │ Dave can understand that his 8h daily gap now correctly │
 │        │ reduces his effective contribution.                     │
 ├────────┼─────────────────────────────────────────────────────────┤
 │ Eve    │ Eve will notice a significant payout reduction (~22%)   │
 │        │ compared to flat PPLNS. Eve should check /weight_stats  │
 │        │ to understand the breakdown:                            │
-│        │   "Decay: [varies 8–100%]                              │
-│        │    Effective rate: ~78% of 24/7 miner"                 │
+│        │   "Decay: [varies 8–100%]                               │
+│        │    Effective rate: ~78% of 24/7 miner"                  │
 │        │ The API clearly shows that the change                   │
 │        │ aligns payouts with actual contribution time.           │
 │        │ (V37 adds vesting, further adjusting Eve’s rate.)       │
@@ -6082,36 +6082,36 @@ are deferred to C++ c2pool. The "V36 TOTAL" column shows the impact miners
 see with only the Python release deployed.
 
 ```
-┌────────┬────────┬────────┬────────┬─────────┬────────┬────────┬────────┬──────────────────┐
-│        │Step 1-2│ Step 3 │Step 3a │ V36     ║ Step 4 │ Step 6 │ V37    │ FULL STACK       │
-│ Miner  │(clamp/ │(PPLNS  │(pure   │ TOTAL   ║(vest-  │(adapt- │ adds   │ (V36+V37)        │
-│        │ emerg) │ decay) │ diff)  │ (PyPy)  ║ ing)   │ ive)   │        │                  │
-├────────┼────────┼────────┼────────┼─────────╬────────┼────────┼────────┼──────────────────┤
-│ Alice  │  0%    │  -3%   │ 0% EV  │ ~-3%    ║  0%    │ +2%    │ +2%    │ ~-1% ≈ no change │
-│        │        │        │ -47%var│(low var)║        │        │        │ (lower variance) │
-│ Bob    │  0%    │  0%    │ 0% EV  │ ~0%     ║  0%    │ +2%    │ +2%    │ ~+2% slight gain │
-│        │        │        │ -93%var│(low var)║        │        │        │ (much lower var) │
-│ Carol* │  0%    │  -5%i  │ 0% EV  │ ~-5%i   ║ -20%i  │ -1d    │ -21%i  │ 72h ramp → ~-3%  │
-│        │        │        │ -98%var│→ ~-3%ss ║        │        │        │ (lowest variance)│
-│ Dave   │  0%    │  -8%   │ 0% EV  │ ~-8%    ║  -3%   │  0%    │ -3%    │ ~-11%            │
-│        │        │        │ -74%var│(low var)║        │        │        │ (lower variance) │
-│ Eve    │  0%    │ -22%   │ 0% EV  │ ~-22%   ║ -12%   │ +5%    │ -7%    │ ~-29%            │
-│        │        │        │ -85%var│(low var)║        │        │        │ (lower variance) │
-│ Frank  │  0%    │ -25%   │ 0% EV  │ ~-25%   ║ -15%   │ +10%   │ -5%    │ ~-30%            │
-│ (night)│        │        │ -80%var│(low var)║        │        │        │ (25% duty → fair)│
-│ Grace  │  0%    │ -18%   │ 0% EV  │ ~-18%   ║ -12%   │ +10%   │ -2%    │ ~-20%            │
-│ (solar)│        │        │ -82%var│(low var)║        │        │        │ (38% duty → fair)│
-│ Henry  │  0%    │  -6%   │ 0% EV  │ ~-6%    ║  -4%   │ +3%    │ -1%    │ ~-7%             │
-│ (heat) │        │        │ -70%var│(low var)║        │        │        │ (58% duty → fair)│
-│ Iris   │  0%    │ -10%   │ 0% EV  │ ~-10%   ║  -6%   │ +6%    │  0%    │ ~-10%            │
-│ (GPU)  │        │        │ -76%var│(low var)║        │        │        │ (46% duty → fair)│
-│ Jack   │  0%    │ -35%   │ 0% EV  │ ~-35%   ║ -25%   │ +20%   │ -5%    │ ~-40%            │
-│(sporadic)│      │        │ -65%var│(low var)║        │        │        │ (40% duty,gaps)  │
-├────────┼────────┼────────┼────────┼─────────╬────────┼────────┼────────┼──────────────────┤
-│ Hopper │  ↓     │  ↓↓    │  n/a   │ 0.6× ✓  ║  ↓↓↓   │  ↓↓↓↓  │ ↓↓↓↓↓  │ ~0.1× ✓✓✓       │
-│        │        │        │        │(unprof.)║        │        │        │ (irrational)     │
-└────────┴────────┴────────┴────────┴─────────╬────────┴────────┴────────┴──────────────────┘
-                                    V36 PyPy  ║        V37 c2pool (deferred)
+┌──────────┬────────┬────────┬────────┬─────────┬────────┬────────┬────────┬──────────────────┐
+│          │Step 1-2│ Step 3 │Step 3a │ V36     ║ Step 4 │ Step 6 │ V37    │ FULL STACK       │
+│ Miner    │(clamp/ │(PPLNS  │(pure   │ TOTAL   ║(vest-  │(adapt- │ adds   │ (V36+V37)        │
+│          │ emerg) │ decay) │ diff)  │ (PyPy)  ║ ing)   │ ive)   │        │                  │
+├──────────┼────────┼────────┼────────┼─────────╬────────┼────────┼────────┼──────────────────┤
+│ Alice    │  0%    │  -3%   │ 0% EV  │ ~-3%    ║  0%    │ +2%    │ +2%    │ ~-1% ≈ no change │
+│          │        │        │ -47%var│(low var)║        │        │        │ (lower variance) │
+│ Bob      │  0%    │  0%    │ 0% EV  │ ~0%     ║  0%    │ +2%    │ +2%    │ ~+2% slight gain │
+│          │        │        │ -93%var│(low var)║        │        │        │ (much lower var) │
+│ Carol*   │  0%    │  -5%i  │ 0% EV  │ ~-5%i   ║ -20%i  │ -1d    │ -21%i  │ 72h ramp → ~-3%  │
+│          │        │        │ -98%var│→ ~-3%ss ║        │        │        │ (lowest variance)│
+│ Dave     │  0%    │  -8%   │ 0% EV  │ ~-8%    ║  -3%   │  0%    │ -3%    │ ~-11%            │
+│          │        │        │ -74%var│(low var)║        │        │        │ (lower variance) │
+│ Eve      │  0%    │ -22%   │ 0% EV  │ ~-22%   ║ -12%   │ +5%    │ -7%    │ ~-29%            │
+│          │        │        │ -85%var│(low var)║        │        │        │ (lower variance) │
+│ Frank    │  0%    │ -25%   │ 0% EV  │ ~-25%   ║ -15%   │ +10%   │ -5%    │ ~-30%            │
+│ (night)  │        │        │ -80%var│(low var)║        │        │        │ (25% duty → fair)│
+│ Grace    │  0%    │ -18%   │ 0% EV  │ ~-18%   ║ -12%   │ +10%   │ -2%    │ ~-20%            │
+│ (solar)  │        │        │ -82%var│(low var)║        │        │        │ (38% duty → fair)│
+│ Henry    │  0%    │  -6%   │ 0% EV  │ ~-6%    ║  -4%   │ +3%    │ -1%    │ ~-7%             │
+│ (heat)   │        │        │ -70%var│(low var)║        │        │        │ (58% duty → fair)│
+│ Iris     │  0%    │ -10%   │ 0% EV  │ ~-10%   ║  -6%   │ +6%    │  0%    │ ~-10%            │
+│ (GPU)    │        │        │ -76%var│(low var)║        │        │        │ (46% duty → fair)│
+│ Jack     │  0%    │ -35%   │ 0% EV  │ ~-35%   ║ -25%   │ +20%   │ -5%    │ ~-40%            │
+│(sporadic)│        │        │ -65%var│(low var)║        │        │        │ (40% duty,gaps)  │
+├──────────┼────────┼────────┼────────┼─────────╬────────┼────────┼────────┼──────────────────┤
+│ Hopper   │  ↓     │  ↓↓    │  n/a   │ 0.6× ✓  ║  ↓↓↓   │  ↓↓↓↓  │ ↓↓↓↓↓  │ ~0.1× ✓✓✓        │
+│          │        │        │        │(unprof.)║        │        │        │ (irrational)     │
+└──────────┴────────┴────────┴────────┴─────────╬────────┴────────┴────────┴──────────────────┘
+                                      V36 PyPy  ║        V37 c2pool (deferred)
 
 * Carol: "i" = initial penalty, "ss" = steady-state (converges after 24-72h).
 * Step 3a: "EV" = expected value, "var" = variance. EV is unchanged for all
@@ -6148,7 +6148,7 @@ Legend:
 │ Grace    │ 38%          │ ~-18%         │ Strong correction                   │
 │ Frank    │ 25%          │ ~-25%         │ Strong correction                   │
 │ Jack     │ ~40%         │ ~-35%         │ Strongest correction (irregularity) │
-│ Hopper   │ <5%          │ ~-84% (0.6×)  │ UNPROFITABLE — goal achieved       │
+│ Hopper   │ <5%          │ ~-84% (0.6×)  │ UNPROFITABLE — goal achieved        │
 └──────────┴──────────────┴───────────────┴─────────────────────────────────────┘
 
 Key observations:
@@ -6176,7 +6176,7 @@ Key observations:
 │ Grace    │ 38%          │ ~-20%         │ Strong correction                   │
 │ Frank    │ 25%          │ ~-30%         │ Strong correction                   │
 │ Jack     │ ~40%         │ ~-40%         │ Strongest correction (irregularity) │
-│ Hopper   │ <5%          │ ~-90% (0.1×)  │ Economically irrational            │
+│ Hopper   │ <5%          │ ~-90% (0.1×)  │ Economically irrational             │
 └──────────┴──────────────┴───────────────┴─────────────────────────────────────┘
 ```
 
@@ -6566,41 +6566,41 @@ Add the following merged-specific sub-scenarios to the S12 test suite:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ MERGED MINING FOLLOWS PARENT CHAIN PPLNS — NO SEPARATE DEFENSE     │
+│ MERGED MINING FOLLOWS PARENT CHAIN PPLNS — NO SEPARATE DEFENSE       │
 │ STRATEGY NEEDED.                                                     │
 │                                                                      │
 │ V36 implementation work (Python 2.7/PyPy):                           │
-│   Step 3:  ~8 LOC — mirror _decay_power() in MergedWeightsSkipList  │
-│   Step 3a: ~-98 LOC — REMOVE finder fee pipeline (SIMPLIFICATION!)  │
-│   Steps 1,2,5L,8: zero merged-specific LOC                          │
+│   Step 3:  ~8 LOC — mirror _decay_power() in MergedWeightsSkipList   │
+│   Step 3a: ~-98 LOC — REMOVE finder fee pipeline (SIMPLIFICATION!)   │
+│   Steps 1,2,5L,8: zero merged-specific LOC                           │
 │                                                                      │
 │ V37 implementation work (C++ c2pool):                                │
-│   Step 4:  ~20 LOC — apply vesting in get_v36_merged_weights()      │
-│   Steps 6,7,5F: zero merged-specific LOC                            │
+│   Step 4:  ~20 LOC — apply vesting in get_v36_merged_weights()       │
+│   Steps 6,7,5F: zero merged-specific LOC                             │
 │                                                                      │
 │ Step 3a removes the entire finder-script derivation pipeline:        │
-│   ✗ get_canonical_merged_finder_script() — deleted (33 LOC)         │
+│   ✗ get_canonical_merged_finder_script() — deleted (33 LOC)          │
 │   ✗ Finder fee calc in build_canonical_merged_coinbase() — deleted   │
-│   ✗ Finder fee in build_merged_coinbase() — deleted (30 LOC)        │
-│   ✗ Finder script derivation in work.py — deleted (24 LOC)          │
+│   ✗ Finder fee in build_merged_coinbase() — deleted (30 LOC)         │
+│   ✗ Finder script derivation in work.py — deleted (24 LOC)           │
 │   → Eliminates entire class of consensus-split edge cases            │
 │                                                                      │
 │ Redistribution of unconvertible addresses:                           │
-│   ✓ Works correctly WITH all defenses                               │
-│   ✓ Decayed weights mean less redistribution from stale work        │
-│   ✓ Vested weights mean less redistribution from burst miners       │
-│   ✓ Both redistribution points (work.py + data.py) see same weights │
-│   ✓ Consensus hash (merged_payout_hash) remains deterministic       │
-│   ✓ Pre-V36 exclusion unaffected (zero × anything = zero)          │
+│   ✓ Works correctly WITH all defenses                                │
+│   ✓ Decayed weights mean less redistribution from stale work         │
+│   ✓ Vested weights mean less redistribution from burst miners        │
+│   ✓ Both redistribution points (work.py + data.py) see same weights  │
+│   ✓ Consensus hash (merged_payout_hash) remains deterministic        │
+│   ✓ Pre-V36 exclusion unaffected (zero × anything = zero)            │
 │                                                                      │
-│ Net effect on honest miners with convertible addresses: ZERO        │
+│ Net effect on honest miners with convertible addresses: ZERO         │
 │ (same proportional share as parent chain)                            │
 │                                                                      │
 │ Net effect on redistribution from unconvertible addresses:           │
-│   - Less redistribution from stale/unvested work (CORRECT)          │
-│   - Hopper with P2TR: windfall drops from ~28% to ~3% (CORRECT)    │
-│   - Honest miner with P2TR: redistributed amount decays with        │
-│     their shares (CORRECT — stale work should matter less)          │
+│   - Less redistribution from stale/unvested work (CORRECT)           │
+│   - Hopper with P2TR: windfall drops from ~28% to ~3% (CORRECT)      │
+│   - Honest miner with P2TR: redistributed amount decays with         │
+│     their shares (CORRECT — stale work should matter less)           │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
