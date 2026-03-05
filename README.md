@@ -2,9 +2,9 @@
 
 > **Lineage:** [`p2pool/p2pool`](https://github.com/p2pool/p2pool) (forrestv) → [`jtoomim/p2pool`](https://github.com/jtoomim/p2pool) (V35) → **`frstrtr/p2pool-merged-v36`** (V36 + merged mining)
 
-[![Latest Release](https://img.shields.io/github/v/release/frstrtr/p2pool-merged-v36)](https://github.com/frstrtr/p2pool-merged-v36/releases/latest)
+[![Latest Tag](https://img.shields.io/github/v/tag/frstrtr/p2pool-merged-v36)](https://github.com/frstrtr/p2pool-merged-v36/tags)
 [![Docker Image](https://img.shields.io/badge/ghcr.io-p2pool--merged--v36-blue?logo=docker)](https://ghcr.io/frstrtr/p2pool-merged-v36)
-[![License](https://img.shields.io/github/license/frstrtr/p2pool-merged-v36)](COPYING)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](COPYING)
 
 Decentralized Scrypt mining pool for **Litecoin**, **DigiByte**, and **Dogecoin** (merged mining), building on the p2pool protocol with V36 share format. Supports multiple Scrypt parent chains with a unified multichain dashboard.
 
