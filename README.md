@@ -2,7 +2,7 @@
 
 > **Lineage:** [`p2pool/p2pool`](https://github.com/p2pool/p2pool) (forrestv) → [`jtoomim/p2pool`](https://github.com/jtoomim/p2pool) (V35) → **`frstrtr/p2pool-merged-v36`** (V36 + merged mining)
 
-[![Latest Release](https://img.shields.io/github/v/release/frstrtr/p2pool-merged-v36)](https://github.com/frstrtr/p2pool-merged-v36/releases/latest)
+[![Latest Release](https://img.shields.io/github/v/release/frstrtr/p2pool-merged-v36?include_prereleases)](https://github.com/frstrtr/p2pool-merged-v36/releases/latest)
 [![Docker Image](https://img.shields.io/badge/ghcr.io-p2pool--merged--v36-blue?logo=docker)](https://ghcr.io/frstrtr/p2pool-merged-v36)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](COPYING)
 
