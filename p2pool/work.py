@@ -160,6 +160,16 @@ def is_pubkey_hash_address(address, net):
     except Exception as e:
         return (False, None, 'Failed to parse address: %s' % str(e))
 
+
+def _fmt_hr(n):
+    """Format hashrate with SI suffix (e.g., 435.5GH/s -> '435.5G')."""
+    for suffix in ['', 'k', 'M', 'G', 'T', 'P']:
+        if abs(n) < 1000:
+            return '%.1f%s' % (n, suffix)
+        n /= 1000.0
+    return '%.1f%s' % (n, 'E')
+
+
 class WorkerBridge(worker_interface.WorkerBridge):
     COINBASE_XNONCE1_LENGTH = 1
     COINBASE_NONCE_LENGTH = 8
@@ -243,6 +253,20 @@ class WorkerBridge(worker_interface.WorkerBridge):
             'round_ts': 0,
             'round_start': time.time(),
         }
+
+        # Phase 1c: Whale departure recovery (non-consensus local heuristic)
+        # Tracks pool hashrate to detect sudden drops from whale miners leaving.
+        # When detected, overrides desired_share_target to mine at easiest allowed
+        # difficulty (pre_target3), maximizing share production rate to speed up
+        # the share chain's difficulty readjustment. V35-compatible: only affects
+        # what OUR node mines, not consensus rules.
+        self._whale_hr_samples = []        # [(timestamp, attempts_per_second)]
+        self._whale_hr_window = 1800       # 30 min rolling window for baseline
+        self._whale_departure_active = False
+        self._whale_departure_ts = 0       # when departure was detected
+        self._whale_drop_threshold = 0.50   # trigger when current < 50% of avg
+        self._whale_recovery_threshold = 0.75  # recover when current > 75% of avg
+        self._whale_log_interval = 0       # throttle logging
 
         self.removed_unstales_var = variable.Variable((0, 0, 0))
         self.removed_doa_unstales_var = variable.Variable(0)
@@ -1698,6 +1722,74 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 return hash_rate
         return None
 
+    # ── Phase 1c: Whale departure recovery ─────────────────────────
+
+    def _detect_whale_departure(self):
+        """Non-consensus local heuristic: detect sudden pool hashrate drop.
+
+        Samples the pool hashrate each time get_work() is called. When the
+        current hashrate drops below 50% of the 30-minute rolling average,
+        this returns True — signaling that desired_share_target should be
+        overridden to maximum easiness so the remaining miners produce
+        shares as fast as consensus allows, speeding up difficulty recovery.
+
+        This is V35-compatible: it only changes what OUR node mines locally.
+        The resulting shares still satisfy bits ∈ [pre_target3//30, pre_target3]
+        which all V35 nodes accept.
+
+        Returns True if whale departure detected, False otherwise.
+        """
+        if self.node.best_share_var.value is None:
+            return False
+
+        try:
+            height = self.node.tracker.get_height(self.node.best_share_var.value)
+            lookbehind = min(height - 1, self.node.net.TARGET_LOOKBEHIND)
+            if lookbehind < 2:
+                return False
+            att_s = p2pool_data.get_pool_attempts_per_second(
+                self.node.tracker, self.node.best_share_var.value, lookbehind)
+        except Exception:
+            return False
+
+        now = time.time()
+        self._whale_hr_samples.append((now, att_s))
+
+        # Trim to rolling window
+        cutoff = now - self._whale_hr_window
+        self._whale_hr_samples = [(t, h) for t, h in self._whale_hr_samples if t > cutoff]
+
+        if len(self._whale_hr_samples) < 10:
+            return self._whale_departure_active  # not enough data yet
+
+        avg_hr = sum(h for _, h in self._whale_hr_samples) / len(self._whale_hr_samples)
+        if avg_hr <= 0:
+            return False
+
+        ratio = att_s / avg_hr
+
+        if self._whale_departure_active:
+            # Recovery: require sustained improvement to exit emergency mode
+            if ratio >= self._whale_recovery_threshold:
+                self._whale_departure_active = False
+                duration = now - self._whale_departure_ts
+                print '[WHALE-RECOVERY] Pool hashrate recovered to %.1f%% of average. Emergency mode OFF (was active %.0fs)' % (
+                    ratio * 100, duration)
+            elif now - self._whale_log_interval > 30:
+                self._whale_log_interval = now
+                print '[WHALE-DEPARTURE] ACTIVE: current=%sH/s avg_30m=%sH/s ratio=%.2f (need >%.0f%% to recover)' % (
+                    _fmt_hr(att_s), _fmt_hr(avg_hr), ratio, self._whale_recovery_threshold * 100)
+        else:
+            # Detection: trigger when hashrate drops below threshold
+            if ratio <= self._whale_drop_threshold:
+                self._whale_departure_active = True
+                self._whale_departure_ts = now
+                print '[WHALE-DEPARTURE] DETECTED! Pool hashrate crashed to %.1f%% of 30m average.' % (ratio * 100)
+                print '[WHALE-DEPARTURE] current=%sH/s avg_30m=%sH/s — mining at easiest difficulty to speed recovery' % (
+                    _fmt_hr(att_s), _fmt_hr(avg_hr))
+
+        return self._whale_departure_active
+
     def get_local_rates(self):
         miner_hash_rates = {}
         miner_dead_hash_rates = {}
@@ -2229,8 +2321,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 desired_share_target = min(desired_share_target,
                     bitcoin_data.average_attempts_to_target(local_hash_rate * self.node.net.SHARE_PERIOD / 0.0167)) # limit to 1.67% of pool shares by modulating share difficulty
 
-
-
             lookbehind = 3600//self.node.net.SHARE_PERIOD
             block_subsidy = self.node.bitcoind_work.value['subsidy']
             if previous_share is not None and self.node.tracker.get_height(previous_share.hash) > lookbehind:
@@ -2240,6 +2330,17 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     desired_share_target = min(desired_share_target,
                         bitcoin_data.average_attempts_to_target((bitcoin_data.target_to_average_attempts(self.node.bitcoind_work.value['bits'].target)*self.node.net.SPREAD)*self.node.net.PARENT.DUST_THRESHOLD/block_subsidy)
                     )
+
+        # Phase 1c: Whale departure recovery — override to easiest difficulty
+        # When a large miner (whale) suddenly leaves, pool hashrate drops but
+        # share difficulty is still calibrated for the whale's hashrate. This
+        # makes share production painfully slow (e.g., 2 min/share instead of
+        # 15s). By mining at the easiest consensus-allowed difficulty, our node
+        # produces shares faster, each of which lowers the pool target by ~10%,
+        # accelerating the difficulty recovery from ~18 min to much less.
+        # This is non-consensus: bits stays within [pre_target3//30, pre_target3].
+        if self._detect_whale_departure():
+            desired_share_target = 2**256 - 1  # will be clamped to pre_target3 (easiest)
 
         if True:
             # Build share_data differently based on share version
