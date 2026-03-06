@@ -201,9 +201,13 @@ class PoolStatistics(object):
                     for mk, mv in conn_merged.items():
                         if not mk.startswith('_') and isinstance(mv, basestring):
                             merged_display[mk] = mv
+                    # conn.address holds pubkey_hash (integer); conn.user holds the
+                    # processed address string (e.g. "LXxxxxxx.worker").  Callers
+                    # such as _get_connected_zero_pplns_miners() need the string form
+                    # to strip the worker suffix and compare against PPLNS addresses.
                     workers[worker_name] = {
                         'connections': 0,
-                        'address': getattr(conn, 'address', None),
+                        'address': getattr(conn, 'user', None),
                         'difficulties': [],
                         'ips': set(),
                         'merged_addresses': merged_display,

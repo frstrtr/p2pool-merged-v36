@@ -1003,11 +1003,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
         compute_work()
 
         self.new_work_event = variable.Event()
+        # Tracks only parent chain (LTC) block changes — used for DOA detection.
+        # DOA = share built on a block that is no longer current on the parent chain.
+        # This is separate from new_work_event (which also fires on p2pool share and
+        # merged-chain changes) to avoid false DOA from p2pool-share-triggered events.
+        self.parent_block_event = variable.Event()
         @self.current_work.transitioned.watch
         def _(before, after):
             # trigger LP if version/previous_block/bits changed or transactions changed from nothing
             if any(before[x] != after[x] for x in ['version', 'previous_block', 'bits']) or (not before['transactions'] and after['transactions']):
                 self.new_work_event.happened()
+            # trigger DOA counter only on actual parent-chain block change
+            if any(before[x] != after[x] for x in ['version', 'previous_block', 'bits']):
+                self.parent_block_event.happened()
         self.merged_work.changed.watch(lambda _: self.new_work_event.happened())
         self.node.best_share_var.changed.watch(lambda _: self.new_work_event.happened())
 
@@ -2510,6 +2518,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         getwork_time = time.time()
         lp_count = self.new_work_event.times
+        lp_block_count = self.parent_block_event.times
         
         # CRITICAL: When segwit is activated, Share.__init__ validates using segwit_data['txid_merkle_link']
         # (merkle tree of txids, NOT wtxids). The stratum merkle_link sent to miners MUST match this,
@@ -2755,26 +2764,30 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
             # DOA (Dead On Arrival) Share Prevention
             # =============================================
-            # Shares are marked DOA if work has changed too many times since the share was issued.
-            # Work events fire on: new blocks, new best shares, merged mining updates, etc.
+            # A share is DOA when it was mined using work that referenced an outdated
+            # PARENT CHAIN (LTC) block — i.e. a new LTC block arrived between job
+            # issue and share submission.  The share physically cannot be included in
+            # the new block, so it is dead on arrival.
             #
-            # Problem: With fast miners or isolated testing, shares arrive after many work events:
-            #   - Each new share triggers best_share_var.changed -> new_work_event.happened()
-            #   - At 13 GH/s with diff 32, shares come every ~10 sec
-            #   - But work events can fire much faster (every share found)
-            #   - If tolerance is too low (e.g., 3), most shares become DOA
+            # Previous implementation (WRONG):
+            #   work_event_diff = new_work_event.times - lp_count
+            #   new_work_event fires on EVERY p2pool share received (~once per 15s)
+            #   max_work_events = 3 → window = 45s    
+            #   → Any miner below ~pool_hashrate/3 had DOA shares every time!
+            #   → Adding DOGE merged mining added ~1 extra event per 60s on top
+            #   → DOA rate rose as network grew and merged mining went active
             #
-            # DOA shares don't contribute to the share chain, so:
-            #   - Chain height stays low (< TARGET_LOOKBEHIND = 200)
-            #   - Vardiff can't adjust (stuck at MAX_TARGET floor)
-            #   - More rapid shares -> more DOA -> vicious cycle
-            #
-            # Solution: Higher tolerance for isolated/testing nodes (PERSIST=False)
-            work_event_diff = self.new_work_event.times - lp_count
-            # PERSIST=False (isolated testing): 30 events tolerance - allows chain to grow
-            # PERSIST=True (production): 3 events - tighter for network consistency
-            max_work_events = 30 if not self.node.net.PERSIST else 3
-            on_time = work_event_diff <= max_work_events
+            # Correct implementation: DOA iff the LTC block changed since work issue.
+            # parent_block_event fires ONLY when bitcoind reports a new block
+            # (version/previous_block/bits change).  p2pool shares and DOGE blocks
+            # do NOT affect this counter, so slow/small miners are not penalised.
+            if self.node.net.PERSIST:
+                # Production: original p2pool semantics — DOA only on new LTC block
+                on_time = (self.parent_block_event.times == lp_block_count)
+            else:
+                # Isolated / testing: fall back to work-event count tolerance
+                work_event_diff = self.new_work_event.times - lp_count
+                on_time = work_event_diff <= 30
 
             # Merged mining diagnostic: always log when parent block found
             if pow_hash <= header['bits'].target:
