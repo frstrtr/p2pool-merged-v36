@@ -2246,10 +2246,21 @@ class AutoRatchet(object):
                 self._state = self.STATE_ACTIVATED
                 self._activated_at = int(time.time())
                 self._activated_height = height
-                self._confirm_count = 0
+                # Credit shares already beyond the voting window as confirmation
+                # progress.  On a node that joins late (or restarts with a deep
+                # chain), height may already far exceed CHAIN_LENGTH.
+                retroactive = max(0, height - net.CHAIN_LENGTH)
+                self._confirm_count = retroactive
                 self._last_seen_height = height
-                print '[AutoRatchet] VOTING -> ACTIVATED (%d%% of %d shares vote V36, window=%d)' % (
-                    vote_pct, total, net.CHAIN_LENGTH)
+                print '[AutoRatchet] VOTING -> ACTIVATED (%d%% of %d shares vote V36, window=%d, retroactive_confirm=%d)' % (
+                    vote_pct, total, net.CHAIN_LENGTH, retroactive)
+                # If retroactive count already satisfies the confirmation window,
+                # skip straight to CONFIRMED (chain is already deep enough).
+                if retroactive >= confirmation_window and share_pct >= self.ACTIVATION_THRESHOLD:
+                    self._state = self.STATE_CONFIRMED
+                    self._confirmed_at = int(time.time())
+                    print '[AutoRatchet] VOTING -> CONFIRMED (retroactive: %d >= %d window, %d%% V36)' % (
+                        retroactive, confirmation_window, share_pct)
                 self._save()
         
         elif self._state == self.STATE_ACTIVATED:
