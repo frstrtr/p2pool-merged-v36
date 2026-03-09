@@ -1489,6 +1489,10 @@
             <div class="section-header">
                 <h2>⛏️ Active Miners on This Node <span style="font-size: 14px; color: var(--muted); font-weight: normal;">(Connected via Stratum)</span></h2>
                 <div style="display: flex; gap: 10px; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">
+                        <input type="checkbox" id="show_historical_miners" style="cursor: pointer;">
+                        Show historical
+                    </label>
                     <span class="badge" id="active_miners_count">0</span>
                     <a href="miners.html" style="color: var(--primary); text-decoration: none; font-size: 14px;">View Details →</a>
                 </div>
@@ -1960,11 +1964,18 @@
                     return b.totalConnections - a.totalConnections;
                 });
                 
-                // Update count badge to show unique miners
-                d3.select('#active_miners_count').text(miners.length);
+                // Keep full miners list for toggling
+                var allMiners = miners;
                 
-                // Show top 10 miners
-                var display = miners.slice(0, 10);
+                function renderMinersTable(showHistorical) {
+                    var filtered = showHistorical ? allMiners : allMiners.filter(function(m) { return m.totalConnections > 0; });
+                
+                    // Update count badge: active count (/ total if showing historical)
+                    var activeCount = allMiners.filter(function(m) { return m.totalConnections > 0; }).length;
+                    d3.select('#active_miners_count').text(showHistorical ? activeCount + ' / ' + allMiners.length : activeCount);
+                
+                    // Show top 10 active, or all historical
+                    var display = showHistorical ? filtered : filtered.slice(0, 10);
                 
                 // Clear existing rows
                 d3.select('#active_miners tbody').selectAll('tr').remove();
@@ -1973,7 +1984,7 @@
                     d3.select('#active_miners tbody').append('tr').append('td')
                         .attr('colspan', '8')
                         .attr('style', 'text-align: center; color: #888;')
-                        .text('No miners currently connected via stratum');
+                        .text(showHistorical ? 'No miners found' : 'No miners currently connected via stratum');
                     return;
                 }
                 
@@ -2193,6 +2204,15 @@
                     });
                 });
                 });
+                });
+                } // end renderMinersTable
+                
+                // Initial render — show only currently connected (active) miners
+                renderMinersTable(false);
+                
+                // Wire checkbox to toggle historical miners visibility
+                d3.select('#show_historical_miners').on('change', function() {
+                    renderMinersTable(this.checked);
                 });
             });
         }
