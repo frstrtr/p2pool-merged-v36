@@ -273,6 +273,21 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             v36_share_count = sum(c for v, c in share_type_counts.iteritems() if v >= 36)
             if total_shares > 0 and v36_share_count * 100 // total_shares < 50:
                 effective_ratchet_state = 'voting'  # stale confirmed, override
+        
+        # Chain-based confirmation: if chain_height >= 3*CHAIN_LENGTH (canonical
+        # confirmation depth: CHAIN_LENGTH active chain + 2*CHAIN_LENGTH confirmation
+        # window) and 100% V36 shares, treat the transition as confirmed even if this
+        # node's AutoRatchet never reached 'confirmed' (e.g. node with no miner, or
+        # fresh node that joined after V36 was already dominant).
+        v36_share_count = sum(c for v, c in share_type_counts.iteritems() if v >= 36)
+        chain_confirmed_v36 = (
+            chain_height >= chain_length * 3 and
+            total_shares > 0 and
+            v36_share_count == total_shares
+        )
+        if chain_confirmed_v36:
+            effective_ratchet_state = 'confirmed'
+        
         ratchet_confirmed = effective_ratchet_state == 'confirmed'
         ratchet_active = effective_ratchet_state in ('voting', 'activated')
         show_transition = (is_transitioning or ratchet_active) and not ratchet_confirmed

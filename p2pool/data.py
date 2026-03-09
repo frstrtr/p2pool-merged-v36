@@ -2610,6 +2610,19 @@ def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value
                 effective_state = 'voting'
         
         ratchet_confirmed = effective_state == 'confirmed'
+    
+    # Chain-based confirmation: if chain_height >= 3*CHAIN_LENGTH (canonical
+    # confirmation depth: CHAIN_LENGTH + 2*CHAIN_LENGTH confirmation window) and
+    # 100% V36, treat transition as confirmed even without local AutoRatchet state
+    # (e.g. nodes that joined after V36 was already dominant).
+    if not ratchet_confirmed:
+        height = tracker.get_height(best_share)
+        if height >= net.CHAIN_LENGTH * 3:
+            sample = min(height, net.CHAIN_LENGTH)
+            v36_count = sum(1 for share in tracker.get_chain(best_share, sample) if share.VERSION >= 36)
+            if sample > 0 and v36_count == sample:
+                ratchet_confirmed = True
+    
     if ratchet_confirmed:
         return res
     try:
