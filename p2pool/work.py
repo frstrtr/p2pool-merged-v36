@@ -400,9 +400,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             auxpow_capable = True
                             
                             chainid = template['auxpow']['chainid']
-                            # CRITICAL: template['auxpow']['target'] is LE hex (Dogecoin internal format)
-                            # but template['target'] is BE hex (standard getblocktemplate format).
-                            # Use template['target'] so int(target_hex, 16) gives the correct value.
+                            # CRITICAL: Both template['target'] and template['auxpow']['target'] are
+                            # LE hex (Dogecoin internal byte order). We store the raw LE hex here
+                            # and convert to integer below using pack.IntType(256).unpack().
                             target_hex = template['target']
                             
                             # Initialize merged broadcaster for this chain (once)
@@ -738,8 +738,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             # PHASE B: Store for embedding in Litecoin coinbase
                             # This hash will be embedded in the Litecoin coinbase via mm_data
                             # NOW with actual block hash for merged mining commitment
-                            # target_hex comes from template['target'] (BE hex), so int() works directly.
-                            parsed_target = int(target_hex, 16)
+                            # target_hex from getblocktemplate is LE hex; unpack as LE to get correct integer.
+                            parsed_target = pack.IntType(256).unpack(target_hex.decode('hex'))
                             pass  # Suppressed: print '[DEBUG] Dogecoin target from template: %064x' % parsed_target
                             
                             # Determine network name from chainid

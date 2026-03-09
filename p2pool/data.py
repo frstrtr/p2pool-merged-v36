@@ -2359,6 +2359,11 @@ def get_user_stale_props(tracker, share_hash, lookbehind, net):
     return dict((pubkey_hash, stale/total) for pubkey_hash, (stale, total) in res.iteritems())
 
 def get_expected_payouts(tracker, best_share_hash, block_target, subsidy, net):
+    # Testnet nodes can temporarily have an empty sharechain after restart.
+    # Return no payouts instead of raising KeyError and breaking web endpoints.
+    if best_share_hash is None or best_share_hash not in tracker.items:
+        return {}
+
     best_share = tracker.items[best_share_hash]
     _max_shares = min(tracker.get_height(best_share_hash), net.REAL_CHAIN_LENGTH)
     _desired_weight = 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target)
