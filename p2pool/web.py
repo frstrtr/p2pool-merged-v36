@@ -332,8 +332,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             v36_format_count = sum(c for v, c in share_type_counts.iteritems() if v >= 36)
             v36_format_pct = (v36_format_count * 100 // total_shares) if total_shares > 0 else 0
             confirm_window = chain_length * 2
-            activated_height = getattr(ratchet, '_activated_height', None)
-            shares_since = max(0, chain_height - activated_height) if activated_height else 0
+            shares_since = getattr(ratchet, '_confirm_count', 0) if ratchet else 0
             status = 'confirming'
             message = 'V36 ACTIVATED — confirmation in progress: %d/%d shares (%d%% V36 format)' % (
                 shares_since, confirm_window, v36_format_pct)
@@ -439,7 +438,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             message=message,
             # Confirmation tracking (ACTIVATED state)
             confirmation_window=chain_length * 2,
-            shares_since_activation=max(0, chain_height - (getattr(ratchet, '_activated_height', None) or chain_height)) if ratchet else 0,
+            shares_since_activation=getattr(ratchet, '_confirm_count', 0) if ratchet else 0,
             # AutoRatchet state
             auto_ratchet=ratchet_info,
             # Transition message from share messaging system

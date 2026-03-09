@@ -1019,6 +1019,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.merged_work.changed.watch(lambda _: self.new_work_event.happened())
         self.node.best_share_var.changed.watch(lambda _: self.new_work_event.happened())
 
+        # Tick AutoRatchet on every new share so it advances even on non-mining
+        # nodes that only receive shares from peers.  get_share_version() is the
+        # sole driver of the VOTING → ACTIVATED → CONFIRMED state machine; without
+        # this, nodes that never call get_work() stay stuck in "voting" forever.
+        def _ratchet_tick(_ignored):
+            try:
+                self.auto_ratchet.get_share_version(
+                    self.node.tracker,
+                    self.node.best_share_var.value,
+                    self.node.net,
+                )
+            except Exception:
+                pass  # non-critical; don't break the event chain
+        self.node.best_share_var.changed.watch(_ratchet_tick)
+
     def stop(self):
         self.running = False
         if getattr(self, '_whale_poll_task', None) is not None and self._whale_poll_task.running:
