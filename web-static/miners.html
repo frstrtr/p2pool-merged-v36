@@ -878,7 +878,7 @@
                         .attr('style', 'font-size: 0.8rem; color: #c3a634; margin-top: 4px; font-family: "Courier New", monospace;');
                     mergedDiv.append('span').text('🐕 ');
                     mergedDiv.append('a')
-                        .attr('href', 'https://dogechain.info/address/' + encodeURIComponent(miner.mergedAddress))
+                        .attr('href', 'https://blockchair.com/dogecoin/address/' + encodeURIComponent(miner.mergedAddress))
                         .attr('target', '_blank')
                         .attr('style', 'color: #c3a634; text-decoration: none;')
                         .text(miner.mergedAddress);
@@ -889,7 +889,7 @@
                             .text('(auto)');
                     }
                     mergedDiv.append('a')
-                        .attr('href', 'https://dogechain.info/address/' + encodeURIComponent(miner.mergedAddress))
+                        .attr('href', 'https://blockchair.com/dogecoin/address/' + encodeURIComponent(miner.mergedAddress))
                         .attr('target', '_blank')
                         .attr('style', 'margin-left: 5px; font-size: 0.7rem; color: #c3a634;')
                         .text('↗');
@@ -1139,7 +1139,7 @@
                 
                 // Block explorer URLs
                 var merged_explorers = {
-                    98: { testnet: 'https://dogechain.info/block/', mainnet: 'https://dogechain.info/block/' }
+                    98: { testnet: 'https://blockchair.com/dogecoin/block/', mainnet: 'https://blockchair.com/dogecoin/block/' }
                 };
                 
                 // Helper to extract base address

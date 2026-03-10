@@ -12,7 +12,7 @@ P2Pool V36 dashboards now automatically discover merged-mined blocks by scanning
 - **API**: New `/discovered_merged_blocks` endpoint returns parent blocks enriched with aux hash, miner address, and source node info
 - **Dashboard**: New **🔗 Discovered Merged Blocks** table section shows:
   - Parent block height and hash (links to LTC block explorer)
-  - Aux block hash (links to dogechain.info)
+  - Aux block hash (links to blockchair.com/dogecoin)
   - Miner payout address
   - Source node IP (⭐ local for blocks found by this node)
   - Block confirmation status
