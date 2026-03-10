@@ -2,7 +2,14 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
-## [v36-0.13-alpha] - 2026-03-04
+## [v36-0.13-alpha] - 2026-03-10
+
+### Discovered Merged Blocks — Dashboard Feature (NEW)
+- **`extract_aux_hash_from_coinbase()` helper** — Scans coinbase scriptSig for the `fabe6d6d` merged mining magic marker and extracts the 32-byte aux chain block hash. Returns raw LE hex matching dogecoind's block hash indexing.
+- **`/discovered_merged_blocks` API endpoint** — Returns parent blocks that contain merged mining aux commitments, enriched with block info (timestamp, height, hash, miner, peer_addr, status). Scans both stored block_history and the live share tracker for backfill.
+- **🔗 Discovered Merged Blocks dashboard section** — New full-width table between the blocks/payouts row and peers section. Columns: Time, Parent Height, Parent Block Hash (LTC explorer link), Aux Block Hash (dogechain.info link in purple), Miner, Node, Status (✓/✗/⏳). Hidden when no merged blocks exist; auto-refreshes every 30s.
+- **Node tracking (`peer_addr`)** — Every block_info dict now records `peer_addr` (the P2Pool node IP:port that relayed the share, or `'local'` for blocks found by this node's stratum workers). Backfilled from `s.peer_addr` for existing blocks in tracker. Displayed as ⭐ local (green) or IP address in the dashboard.
+- **Aux hash backfill** — Existing blocks in history are retroactively enriched with `aux_hash` and `peer_addr` fields during the periodic tracker scan, ensuring blocks recorded before this feature was deployed still show merged mining data.
 
 ### DigiByte (DGB) Parent Chain Support (NEW)
 - **DGB mainnet & testnet network configs** — Full Scrypt-based P2Pool network definitions for DigiByte (P2P port 5024, worker/stratum port 5025, `GBT_ALGO='scrypt'`). Includes bitcoin-level parameters: P2P port 12024, RPC port 14024, address version 30, P2SH version 63, bech32 HRP `dgb`, protocol version 70019.

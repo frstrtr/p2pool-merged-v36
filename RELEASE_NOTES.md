@@ -1,50 +1,66 @@
-# v36-0.09-alpha Release Notes
+# v36-0.13-alpha Release Notes
 
-**Release date:** 2026-03-01
+**Release date:** 2026-03-10
 
 ## Highlights
 
-### macOS (Intel) Support
+### Discovered Merged Blocks — Heuristic Cross-Chain Block Finder (NEW)
 
-P2Pool Merged Mining V36 now has full macOS (Intel) installation support. The new section in `INSTALL.md` provides a complete walkthrough:
+P2Pool V36 dashboards now automatically discover merged-mined blocks by scanning the `fabe6d6d` coinbase marker in parent chain (LTC) blocks. This works on **any** V35 or V36 node, even without a merged chain daemon running:
 
-- **Homebrew-based setup** — PyPy 2.7, autoconf/automake/libtool, and all Python dependencies installed via Homebrew and pip
-- **Dependency compilation** — Step-by-step build of `scrypt` and `coincurve` (libsecp256k1) from source for PyPy on macOS
-- **MM-Adapter** — Python 3 venv setup for the merged mining adapter bridge
-- **Full merged mining** — LTC + DOGE merged mining launch commands with all required flags
-- **Background service** — `launchd` plist template for running P2Pool as a macOS background service
-- **Firewall notes** — Port configuration guidance for macOS firewall
+- **Backend**: New `extract_aux_hash_from_coinbase()` helper extracts the 32-byte aux chain block hash from the coinbase scriptSig's merged mining commitment
+- **API**: New `/discovered_merged_blocks` endpoint returns parent blocks enriched with aux hash, miner address, and source node info
+- **Dashboard**: New **🔗 Discovered Merged Blocks** table section shows:
+  - Parent block height and hash (links to LTC block explorer)
+  - Aux block hash (links to dogechain.info)
+  - Miner payout address
+  - Source node IP (⭐ local for blocks found by this node)
+  - Block confirmation status
+- **Backfill**: Existing blocks in history are retroactively enriched with aux hashes and peer addresses from the share tracker
+- **Auto-refresh**: Section updates every 30s alongside other dashboard panels; hidden when no merged blocks exist
 
-Tested and verified on macOS 26.3 (x86_64, Intel Mac Pro) with full merged mining operational against LAN Litecoin and Dogecoin Core daemons.
+### Node Tracking for Block Finders
 
-### Documentation Improvements
+Every block in history now records which P2Pool node relayed the share that found it:
+- `peer_addr` field tracks the source node IP:port (or "local" for blocks found by this node's stratum workers)
+- Backfilled for existing blocks from the share tracker's `s.peer_addr` attribute
+- Displayed in the Discovered Merged Blocks table with visual distinction (⭐ local in green, remote IPs in secondary color)
 
-- Replaced example-only placeholder values across all documentation, scripts, and test fixtures for consistency and clarity
-- Updated `.gitignore` to cover local MM-Adapter configuration files
-- 38 files updated across `docs/`, `scripts/`, `tests/`, `mm-adapter/`, `README.md`
+### DigiByte (DGB) Parent Chain Support
 
-### Docker Image on ghcr.io
+Full P2Pool network definitions for DigiByte (Scrypt):
+- DGB mainnet & testnet network configs with complete bitcoin-level parameters
+- DGB subsidy calculation — three-phase reward schedule with halvings
+- `scripts/dgb_sniffer.py` — P2Pool protocol diagnostic tool for DGB
+- Bootstrap mode with `PERSIST=False` for fresh sharechain startup
 
-Pre-built Docker image published to GitHub Container Registry — no local build needed:
+### Multichain Dashboard & Proxy
 
-```bash
-docker pull ghcr.io/frstrtr/p2pool-merged-v36:latest
-```
+- **Multi-pool reverse proxy** (`multipool/multipool_proxy.py`) — aggregates multiple P2Pool instances behind a single web interface
+- **Pool selector tabs** — clickable chain tabs in dashboard header with localStorage persistence
+- **Chain-agnostic dashboard** — dynamic parent chain names, configurable address hints
+- **`multipool.js`** — transparent d3.json() override for cross-origin multi-pool support
+- **`scripts/start_multichain.sh`** — turnkey startup for DGB + LTC + DOGE merged mining
 
-Available tags: `latest`, `v36-0.09-alpha`
+### Vardiff Fixes — ASIC Miner Support
 
-## Platform Support
+Three critical fixes for hardware miners:
+- Removed `min_share_target` clamping that made work impossibly hard for small ASICs
+- Fixed network object reference for `SANE_TARGET_RANGE` bounds
+- Use `share_target` for initial difficulty instead of easiest sane target
 
-| Platform | Status |
-|----------|--------|
-| Ubuntu/Debian (bare metal) | ✅ Tested |
-| Docker (Linux) | ✅ Tested |
-| Windows 10/11 (WSL2) | ✅ Tested |
-| **macOS (Intel)** | ✅ **NEW — Tested** |
+### Additional Fixes
+
+- **AutoRatchet**: Tick on share arrival (non-mining nodes advance), retroactive confirmation from sharechain depth, hide transition dialog when confirmed
+- **Merged mining**: Target byte-order bug fix + empty sharechain guard
+- **Dashboard**: Hide inactive miners by default with "Show historical" checkbox
+- **DOA detection**: Uses parent-block-only counter; boost uses conn.user (string)
+- **ltc_scrypt**: Fix load order — C extension first, py-scrypt fallback
+- **Whale departure recovery**: Non-consensus local heuristic for hashrate departure events
 
 ## Upgrade Notes
 
-No breaking changes. Drop-in replacement for v36-0.08-alpha.
+Drop-in replacement for v36-0.12-alpha. No breaking changes. The new discovered merged blocks section appears automatically when parent chain blocks contain merged mining commitments.
 
 ## Full Changelog
 

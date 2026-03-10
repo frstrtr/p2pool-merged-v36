@@ -1823,6 +1823,28 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except Exception as e:
             log.err(None, 'Error saving block history:')
     
+    def extract_aux_hash_from_coinbase(coinbase_bytes):
+        """Extract merged mining aux block hash from coinbase scriptSig.
+        
+        Looks for the fabe6d6d magic marker that signals a merged mining
+        commitment. The next 32 bytes are the aux chain block hash.
+        Returns the hash as a hex string (same byte order as stored in
+        coinbase, which matches dogecoind's getblockhash output), or None.
+        """
+        try:
+            marker = '\xfa\xbe\x6d\x6d'
+            pos = coinbase_bytes.find(marker)
+            if pos < 0:
+                return None
+            aux_hash_bytes = coinbase_bytes[pos+4:pos+36]
+            if len(aux_hash_bytes) < 32:
+                return None
+            # Return as hex — this is the raw LE byte order which is how
+            # dogecoind indexes blocks (scrypt hash in display order)
+            return aux_hash_bytes.encode('hex')
+        except Exception:
+            return None
+
     def add_block_to_history(block_info):
         """Add a new block to history if not already known"""
         block_hash = block_info['hash']
@@ -1903,6 +1925,14 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                                     b['miner_payout'] = current_txouts.get(miner_addr, 0)
                                 except:
                                     pass
+                            # Backfill aux hash if missing
+                            if not b.get('aux_hash'):
+                                aux_hash = extract_aux_hash_from_coinbase(s.share_data['coinbase'])
+                                if aux_hash:
+                                    b['aux_hash'] = aux_hash
+                            # Backfill peer_addr (source node) if missing
+                            if not b.get('peer_addr'):
+                                b['peer_addr'] = '%s:%d' % s.peer_addr if s.peer_addr else 'local'
                             break
                     continue
                 
@@ -1928,6 +1958,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     'number': p2pool_data.parse_bip0034(s.share_data['coinbase'])[0],
                     'share': '%064x' % s.hash,
                     'miner': miner_addr,
+                    'peer_addr': '%s:%d' % s.peer_addr if s.peer_addr else 'local',
                     'network_difficulty': bitcoin_data.target_to_difficulty(s.header['bits'].target),
                     'share_difficulty': bitcoin_data.target_to_difficulty(s.target),
                     'actual_hash_difficulty': bitcoin_data.target_to_difficulty(s.pow_hash),
@@ -1936,6 +1967,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     'pool_hashrate_at_find': pool_hashrate,
                     'subsidy': node.bitcoind_work.value.get('subsidy', 0),
                 }
+                # Extract merged mining aux hash from coinbase (fabe6d6d commitment)
+                aux_hash = extract_aux_hash_from_coinbase(s.share_data['coinbase'])
+                if aux_hash:
+                    block_info['aux_hash'] = aux_hash
                 # Get miner's payout from current txouts
                 try:
                     current_txouts = node.get_current_txouts()
@@ -2070,6 +2105,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'pow_hash_hex': block_info.get('pow_hash_hex', ''),  # Scrypt/PoW hash for display
                 'number': block_info['number'],
                 'miner': block_info.get('miner', ''),  # Miner address who found the block
+                'peer_addr': 'local',  # Block found by this node's stratum worker
                 'share': '',  # Will be filled in when tracker catches up
                 'network_difficulty': block_info['network_difficulty'],
                 'share_difficulty': 0,  # Will be filled in when tracker catches up  
@@ -2080,6 +2116,12 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 'subsidy': block_info.get('subsidy', 0),
                 'miner_payout': block_info.get('miner_payout', 0),
             }
+            
+            # Extract merged mining aux hash if coinbase data is available
+            if block_info.get('coinbase'):
+                aux_hash = extract_aux_hash_from_coinbase(block_info['coinbase'])
+                if aux_hash:
+                    full_block_info['aux_hash'] = aux_hash
             
             # Calculate expected time and luck
             if pool_hashrate > 0:
@@ -2198,6 +2240,51 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     x_merged = deferral.RobustLoopingCall(save_merged_block_history)
     x_merged.start(60)  # Save every 60 seconds
     stop_event.watch(x_merged.stop)
+    
+    # Discovered merged blocks endpoint — heuristic cross-reference of parent
+    # chain blocks with their fabe6d6d aux hash commitments.  Works for any
+    # V35 or V36 node that finds LTC blocks containing merged mining data,
+    # even if the node itself doesn't run the merged chain daemon.
+    def get_discovered_merged_blocks():
+        """Return parent blocks that contain merged mining aux commitments.
+        
+        For each parent block in history whose coinbase contains the
+        fabe6d6d magic, return the block info enriched with the aux
+        chain block hash so dashboards can link to the merged chain
+        explorer.
+        """
+        result = []
+        # First pass: return blocks that already have aux_hash stored
+        for b in block_history:
+            if b.get('aux_hash'):
+                result.append(b)
+        
+        # Second pass: scan tracker for blocks missing aux_hash
+        # (backfill for blocks recorded before this feature existed)
+        try:
+            height = node.tracker.get_height(node.best_share_var.value)
+            if height > 0:
+                chain_length = min(height, node.net.CHAIN_LENGTH)
+                for s in node.tracker.get_chain(node.best_share_var.value, chain_length):
+                    if s.pow_hash <= s.header['bits'].target:
+                        block_hash = '%064x' % s.header_hash
+                        # Find matching history entry without aux_hash
+                        for b in block_history:
+                            if b['hash'] == block_hash and not b.get('aux_hash'):
+                                aux_hash = extract_aux_hash_from_coinbase(s.share_data['coinbase'])
+                                if aux_hash:
+                                    b['aux_hash'] = aux_hash
+                                    if b not in result:
+                                        result.append(b)
+                                break
+        except Exception:
+            pass
+        
+        # Sort newest first
+        result.sort(key=lambda x: x.get('ts', 0), reverse=True)
+        return result
+    
+    web_root.putChild('discovered_merged_blocks', WebInterface(get_discovered_merged_blocks))
     
     # Merged mined blocks endpoint - show verified and pending blocks (not orphaned)
     web_root.putChild('recent_merged_blocks', WebInterface(lambda: [b for b in wb.recent_merged_blocks[::-1] if b.get('verified') != False]))

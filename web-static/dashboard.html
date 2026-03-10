@@ -1605,6 +1605,35 @@
             </div>
         </div>
         
+        <!-- Discovered Merged Blocks (heuristic: fabe6d6d coinbase marker) -->
+        <div class="table-container" id="discovered_merged_section" style="display: none;">
+            <div class="section-header" style="flex-wrap: wrap; flex-direction: column; align-items: flex-start; gap: 6px;">
+                <h2>🔗 Discovered Merged Blocks</h2>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <span class="badge" id="discovered_merged_count" style="background: #6f42c1;">0</span>
+                    <span class="badge" style="background: var(--text-muted); font-size: 11px;" title="Parent blocks whose coinbase contains the fabe6d6d merged‑mining marker. The aux hash links to the merged chain explorer.">heuristic</span>
+                </div>
+            </div>
+            <div class="table-scroll">
+                <table id="discovered_merged_blocks">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Parent Height</th>
+                            <th>Parent Block Hash</th>
+                            <th>Aux Block Hash</th>
+                            <th title="Payout address of the miner who found the block">Miner</th>
+                            <th title="P2Pool node that relayed the share">Node</th>
+                            <th title="Block status">✓</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="loading" id="discovered_merged_loading">Loading discovered merged blocks</div>
+            <button id="discovered_merged_show_more" style="display: none; width: 100%; padding: 10px; margin-top: 10px; background: var(--card-bg); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px;">Show more...</button>
+        </div>
+        
         <!-- Network Peers: Side-by-side layout -->
         <div class="two-col">
             <!-- P2Pool Nodes -->
@@ -2239,6 +2268,7 @@
             loadStats();
             loadBlocks();
             loadMergedBlocks();
+            loadDiscoveredMergedBlocks();
             loadPayouts();
             loadPoolLuck();
             loadPeers();
@@ -3151,6 +3181,104 @@
                     var step = (remaining <= 10) ? remaining : 10;
                     window.mergedBlocksDisplayCount = Math.min(window.mergedBlocksDisplayCount + step, window.allMergedBlocks.length);
                     renderMergedBlocks();
+                });
+            });
+        }
+        
+        function loadDiscoveredMergedBlocks() {
+            d3.json('../discovered_merged_blocks', function(blocks) {
+                d3.select('#discovered_merged_loading').style('display', 'none');
+                
+                if (!blocks || blocks.length === 0) {
+                    d3.select('#discovered_merged_section').style('display', 'none');
+                    return;
+                }
+                
+                d3.select('#discovered_merged_section').style('display', 'block');
+                d3.select('#discovered_merged_count').text(blocks.length);
+                
+                d3.select('#discovered_merged_blocks tbody').selectAll('tr').remove();
+                
+                window.allDiscoveredMerged = blocks;
+                window.discoveredMergedDisplayCount = Math.min(10, blocks.length);
+                
+                function renderDiscoveredMerged() {
+                    var displayBlocks = window.allDiscoveredMerged.slice(0, window.discoveredMergedDisplayCount);
+                    
+                    d3.select('#discovered_merged_blocks tbody').selectAll('tr').remove();
+                    var tr = d3.select('#discovered_merged_blocks tbody').selectAll('tr').data(displayBlocks).enter().append('tr');
+                    
+                    tr.append('td').text(function(b) { return format_time_short(b.ts); });
+                    tr.append('td').text(function(b) { return b.number || '-'; });
+                    tr.append('td').append('a')
+                        .attr('class', 'hash-link')
+                        .attr('href', function(b) { return currency_info.block_explorer_url_prefix + b.hash; })
+                        .attr('target', '_blank')
+                        .attr('title', function(b) { return b.hash; })
+                        .text(function(b) { return '...' + b.hash.substr(-8); });
+                    tr.append('td').append('a')
+                        .attr('class', 'hash-link')
+                        .style('color', '#6f42c1')
+                        .attr('href', function(b) { return 'https://dogechain.info/block/' + b.aux_hash; })
+                        .attr('target', '_blank')
+                        .attr('title', function(b) { return 'Aux hash: ' + b.aux_hash; })
+                        .text(function(b) { return '...' + b.aux_hash.substr(-12); });
+                    tr.append('td')
+                        .style('font-family', 'monospace')
+                        .style('font-size', '11px')
+                        .text(function(b) {
+                            if (!b.miner) return '-';
+                            return b.miner.length > 16 ? b.miner.substr(0, 8) + '...' : b.miner;
+                        })
+                        .attr('title', function(b) { return b.miner || ''; });
+                    tr.append('td')
+                        .style('font-family', 'monospace')
+                        .style('font-size', '11px')
+                        .text(function(b) {
+                            var addr = b.peer_addr || '-';
+                            if (addr === 'local') return '⭐ local';
+                            // Strip port for display, show full on hover
+                            return addr.split(':')[0];
+                        })
+                        .attr('title', function(b) { return b.peer_addr || ''; })
+                        .style('color', function(b) {
+                            return (b.peer_addr === 'local') ? 'var(--success)' : 'var(--text-secondary)';
+                        });
+                    tr.append('td')
+                        .attr('class', function(b) {
+                            if (b.status === 'confirmed') return 'status-confirmed';
+                            if (b.status === 'orphaned') return 'status-orphaned';
+                            return 'status-pending';
+                        })
+                        .attr('style', 'text-align: center; font-size: 18px;')
+                        .attr('title', function(b) {
+                            if (b.status === 'confirmed') return 'Confirmed';
+                            if (b.status === 'orphaned') return 'Orphaned';
+                            return 'Pending';
+                        })
+                        .text(function(b) {
+                            if (b.status === 'confirmed') return '✓';
+                            if (b.status === 'orphaned') return '✗';
+                            return '⏳';
+                        });
+                    
+                    var showMoreBtn = d3.select('#discovered_merged_show_more');
+                    var remaining = window.allDiscoveredMerged.length - window.discoveredMergedDisplayCount;
+                    if (remaining > 0) {
+                        showMoreBtn.style('display', 'block')
+                            .text('Show ' + Math.min(10, remaining) + ' more... (' + remaining + ' remaining)');
+                    } else {
+                        showMoreBtn.style('display', 'none');
+                    }
+                }
+                
+                renderDiscoveredMerged();
+                
+                d3.select('#discovered_merged_show_more').on('click', function() {
+                    var remaining = window.allDiscoveredMerged.length - window.discoveredMergedDisplayCount;
+                    var step = (remaining <= 10) ? remaining : 10;
+                    window.discoveredMergedDisplayCount = Math.min(window.discoveredMergedDisplayCount + step, window.allDiscoveredMerged.length);
+                    renderDiscoveredMerged();
                 });
             });
         }
@@ -5505,6 +5633,7 @@
                     loadStats();
                     loadBlocks();
                     loadMergedBlocks();
+                    loadDiscoveredMergedBlocks();
                     loadPayouts();
                     loadPoolLuck();
                     loadShares();
@@ -5522,6 +5651,7 @@
             loadStats();
             loadBlocks();
             loadMergedBlocks();
+            loadDiscoveredMergedBlocks();
             loadPayouts();
             loadPoolLuck();
             loadShares();
