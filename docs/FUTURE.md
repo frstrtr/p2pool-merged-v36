@@ -175,6 +175,94 @@ Configurable alerts for important events:
 
 ---
 
+## P2Pool Service — Node Registry, Explorer & RPC Provider
+
+> **Status:** v1.0 implemented in [`service/`](../service/) (commit v36-0.13-alpha).
+> Standalone aiohttp Python 3 service, deployable on GCP.
+
+### Architecture
+
+```
+p2pool node ──► p2pool-service (GCP) ──┬──► Registry   (in-memory, TTL-based)
+                                       ├──► Explorer   (upstream cache proxy)
+                                       └──► RPC Proxy  (daemon relay + whitelist)
+```
+
+### Implemented (v1.0)
+
+| Module | Endpoints | Description |
+|--------|-----------|-------------|
+| **Node Registry** | `POST /registry/announce`, `GET /registry/nodes/{chain}`, `GET /registry/stats` | TTL-based peer discovery — nodes announce periodically, stale ones pruned. Replaces hardcoded `BOOTSTRAP_ADDRS`. |
+| **Explorer Proxy** | `GET /explorer/{chain}/block\|address\|tx/{id}`, `GET /explorer/chains` | Cached multi-chain proxy to blockchair, chainz, blockchain.info. LRU cache with per-type TTLs (24h blocks, 1min addresses). |
+| **RPC Proxy** | `POST /rpc/{chain}`, `GET /rpc/{chain}/status` | Authenticated JSON-RPC relay to hosted daemons. Method whitelist (~19 read + 3 write). Per-IP rate limiting. |
+| **Twisted Client** | `service/client.py` | In-process client for p2pool nodes — periodic announce, peer fetch, RPC relay. |
+| **GCP Deploy** | `service/Dockerfile`, `service/gcp/` | Docker + Cloud Run + App Engine configs. Health checks at `/health`. |
+
+**Supported chains:** LTC, DOGE, DGB, BTC, BCH, BSV.
+
+### Planned Enhancements
+
+#### 13a. Sharechain-Based Donation Auth
+**Difficulty:** Hard | **Impact:** Critical
+
+Nodes prove service eligibility by including a donation commitment in their
+coinbase transactions. The service reads the p2pool sharechain to verify
+donation outputs, granting API access proportional to contributed hashrate.
+
+- No API keys needed — trustless, on-chain auth
+- Incentivizes running public nodes that contribute to pool decentralization
+- Donation address configurable per deployment
+
+#### 13b. Custom Blockchain Indexer (MongoDB + Go + gRPC)
+**Difficulty:** Hard | **Impact:** High
+
+Replace upstream explorer APIs (blockchair, etc.) with a dedicated indexer
+optimized for p2pool's specific query patterns:
+
+- **Coinbase transaction parsing** — correctly decode merged mining markers,
+  OP_RETURN data, multi-output PPLNS payouts
+- **Block reward tracking** — trace subsidy + fees for pool accounting
+- **Address balance snapshots** — point-in-time balances for payout verification
+- **Merged mining cross-references** — parent → aux block linkage via `fabe6d6d`
+
+**Stack:** Go indexer daemon + MongoDB storage + gRPC API + REST gateway.
+Runs alongside full nodes on the same GCE VMs.
+
+#### 13c. Persistent Node Registry (MongoDB)
+**Difficulty:** Medium | **Impact:** Medium
+
+Migrate from in-memory registry to MongoDB-backed storage:
+
+- Survives service restarts
+- Historical node uptime tracking
+- Geographic distribution analytics
+- Node reputation scoring based on uptime, version, hashrate
+
+#### 13d. DNS Seed Service
+**Difficulty:** Medium | **Impact:** High
+
+Dynamic DNS records from registry data — new p2pool nodes can bootstrap
+via `dig seed.p2pool.example.com` without hardcoded IPs:
+
+```bash
+# Returns A/AAAA records for active p2pool nodes
+dig +short seed-ltc.p2pool.example.com
+20.106.76.227
+5.188.104.245
+102.160.209.121
+```
+
+#### 13e. WebSocket Push for Dashboard
+**Difficulty:** Medium | **Impact:** Medium
+
+Real-time push notifications from the service to connected dashboards:
+- New block found alerts
+- Node join/leave events
+- Network hashrate changes
+- Merged mining block discoveries
+
+---
+
 ## Web UI
 
 ### 13. WebSocket Real-Time Updates
@@ -463,8 +551,10 @@ kept, what was rejected, and why — as guidance for future contributors.
 
 | Phase | Focus | Key Items |
 |-------|-------|-----------|
-| **v36-0.04** | Stratum hardening | CLI safeguards, `mining.ping`, worker banning, graduated boost |
-| **v36-0.05** | Observability | Prometheus metrics, block webhooks, historical stats DB |
-| **v36-0.06** | Security & UX | SSL/TLS stratum, API auth, hybrid redistribute, mobile UI |
+| **v36-0.13** ✅ | Service infrastructure | p2pool-service: node registry, explorer proxy, RPC provider, GCP deploy |
+| **v36-0.14** | Donation auth + indexer | Sharechain-based donation auth, custom Go+MongoDB indexer, persistent registry |
+| **v36-0.15** | Stratum hardening | CLI safeguards, `mining.ping`, worker banning, graduated boost |
+| **v36-0.16** | Observability | Prometheus metrics, block webhooks, historical stats DB, DNS seeds |
+| **v36-0.17** | Security & UX | SSL/TLS stratum, API auth, hybrid redistribute, mobile UI |
 | **v36-1.0** | Stable release | Full test coverage, documentation freeze, production hardening |
 | **c2pool** | C++ migration | Port V36 share format, merged mining, redistribution, stratum enhancements |
