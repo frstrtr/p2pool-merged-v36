@@ -738,8 +738,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             # PHASE B: Store for embedding in Litecoin coinbase
                             # This hash will be embedded in the Litecoin coinbase via mm_data
                             # NOW with actual block hash for merged mining commitment
-                            # target_hex from getblocktemplate is LE hex; unpack as LE to get correct integer.
-                            parsed_target = pack.IntType(256).unpack(target_hex.decode('hex'))
+                            # target_hex from getblocktemplate is BE hex (standard Bitcoin RPC convention).
+                            parsed_target = int(target_hex, 16)
                             pass  # Suppressed: print '[DEBUG] Dogecoin target from template: %064x' % parsed_target
                             
                             # Determine network name from chainid
@@ -925,9 +925,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     new_merged_entry = dict(
                         hash=new_hash,
                         previousblockhash=new_prev,  # Track for change detection
-                        # createauxblock returns target in LE hex; use IntType(256) LE unpack
-                        # to get the correct integer (same result as int(BE_hex, 16))
-                        target='p2pool' if auxblock['target'] == 'p2pool' else pack.IntType(256).unpack(auxblock['target'].decode('hex')),
+                        # createauxblock returns target as BE hex (standard Bitcoin RPC convention).
+                        target='p2pool' if auxblock['target'] == 'p2pool' else int(auxblock['target'], 16),
                         merged_proxy=merged_proxy,
                         multiaddress=False,
                         use_submitauxblock=use_submitauxblock,
