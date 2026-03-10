@@ -33,3 +33,5 @@ claude.md
 # Local node startup scripts with credentials
 scripts/start_p2pool_ltc_doge_mainnet.sh
 scripts/start_p2pool_*_local.sh
+service/.venv/
+service/__pycache__/

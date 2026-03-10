@@ -1,0 +1,53 @@
+# GCP Cloud Build — build and push to Cloud Run
+# Trigger: gcloud builds submit --config service/gcp/cloudbuild.yaml .
+
+steps:
+  # Build container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/p2pool-service:$SHORT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/p2pool-service:latest'
+      - '-f'
+      - 'service/Dockerfile'
+      - '.'
+
+  # Push to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/p2pool-service:$SHORT_SHA']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/p2pool-service:latest']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'p2pool-service'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/p2pool-service:$SHORT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--port'
+      - '8920'
+      - '--allow-unauthenticated'
+      - '--min-instances'
+      - '1'
+      - '--max-instances'
+      - '10'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--set-env-vars'
+      - 'P2POOL_SERVICE_PORT=8920'
+
+images:
+  - 'gcr.io/$PROJECT_ID/p2pool-service:$SHORT_SHA'
+  - 'gcr.io/$PROJECT_ID/p2pool-service:latest'
+
+timeout: '600s'

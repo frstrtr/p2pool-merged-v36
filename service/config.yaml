@@ -1,0 +1,69 @@
+# P2Pool Service — default configuration
+#
+# Copy to config.yaml and customize for your deployment.
+# Environment variables override file values (see config.py).
+
+server:
+  host: 0.0.0.0
+  port: 8920
+  cors_origins:
+    - "*"
+
+# ── Node Registry ────────────────────────────────────────────────────────
+registry:
+  enabled: true
+  node_ttl: 600            # Seconds before node is stale
+  announce_interval: 300    # Clients should re-announce every N seconds
+  max_nodes_per_chain: 500
+  require_api_key: false    # Open for reads, optionally lock writes
+
+# ── Explorer Proxy ───────────────────────────────────────────────────────
+explorer:
+  enabled: true
+  cache_ttl_block: 86400    # Immutable blocks: cache 24 hours
+  cache_ttl_tx: 86400       # Confirmed txs:    cache 24 hours
+  cache_ttl_address: 60     # Address balances:  cache 1 minute
+  cache_max_items: 10000
+  upstream_timeout: 15      # Seconds to wait for upstream API
+  rate_limit_per_min: 120   # Max upstream requests per minute
+  blockchair_api_key: ""    # Get free key at https://blockchair.com/api/plans
+
+# ── RPC Proxy ────────────────────────────────────────────────────────────
+rpc_proxy:
+  enabled: true
+  require_api_key: true     # Always require auth for RPC
+  rate_limit_per_min: 60    # Per-IP rate limit
+
+  # Daemon backends — add your full-node endpoints here
+  daemons:
+    ltc:
+      host: 127.0.0.1
+      port: 9332
+      user: litecoinrpc
+      password: CHANGE_ME
+    doge:
+      host: 127.0.0.1
+      port: 22555
+      user: dogecoinrpc
+      password: CHANGE_ME
+    # dgb:
+    #   host: 127.0.0.1
+    #   port: 14022
+    #   user: digibyterpc
+    #   password: CHANGE_ME
+
+# ── API Keys ─────────────────────────────────────────────────────────────
+# Add keys here or via P2POOL_API_KEYS env var (comma-separated).
+# Append ':w' to a key when making requests for write access (submitblock).
+api_keys: []
+  # - "your-api-key-here"
+  # - "another-key"
+
+# ── Supported chains ─────────────────────────────────────────────────────
+chains:
+  - ltc
+  - doge
+  - dgb
+  - btc
+  - bch
+  - bsv

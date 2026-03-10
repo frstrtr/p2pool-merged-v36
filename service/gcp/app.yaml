@@ -1,0 +1,33 @@
+# GCP App Engine configuration
+# Deploy: gcloud app deploy service/gcp/app.yaml
+
+runtime: python311
+service: p2pool-service
+
+instance_class: F2
+
+automatic_scaling:
+  min_instances: 1
+  max_instances: 10
+  target_cpu_utilization: 0.65
+  min_pending_latency: 100ms
+  max_pending_latency: 500ms
+
+entrypoint: python -m service.main --config service/config.yaml --port $PORT
+
+env_variables:
+  P2POOL_SERVICE_HOST: "0.0.0.0"
+  # P2POOL_API_KEYS: "key1,key2"
+  # P2POOL_RPC_REQUIRE_KEY: "true"
+
+liveness_check:
+  path: "/health"
+  check_interval_sec: 30
+  timeout_sec: 4
+  failure_threshold: 4
+
+readiness_check:
+  path: "/health"
+  check_interval_sec: 5
+  timeout_sec: 4
+  failure_threshold: 2
