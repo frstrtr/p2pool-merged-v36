@@ -2245,13 +2245,15 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
     # chain blocks with their fabe6d6d aux hash commitments.  Works for any
     # V35 or V36 node that finds LTC blocks containing merged mining data,
     # even if the node itself doesn't run the merged chain daemon.
+    @defer.inlineCallbacks
     def get_discovered_merged_blocks():
         """Return parent blocks that contain merged mining aux commitments.
         
         For each parent block in history whose coinbase contains the
         fabe6d6d magic, return the block info enriched with the aux
         chain block hash so dashboards can link to the merged chain
-        explorer.
+        explorer.  If a merged chain daemon is reachable, also resolves
+        the aux hash to block height and reward via RPC getblock.
         """
         result = []
         # First pass: return blocks that already have aux_hash stored
@@ -2280,9 +2282,45 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         except Exception:
             pass
         
+        # Third pass: resolve aux hashes to merged chain block details via RPC.
+        # Uses the merged daemon proxy (same connection as --merged / --merged-coind-*)
+        merged_proxy = None
+        merged_symbol = 'AUX'
+        try:
+            if hasattr(wb, 'merged_work') and wb.merged_work and wb.merged_work.value:
+                for chainid, aux_work in wb.merged_work.value.iteritems():
+                    if aux_work.get('merged_proxy'):
+                        merged_proxy = aux_work['merged_proxy']
+                        merged_symbol = aux_work.get('merged_net_symbol', 'AUX')
+                        break
+        except Exception:
+            pass
+        
+        if merged_proxy:
+            for b in result:
+                if b.get('aux_hash') and not b.get('aux_block_height'):
+                    try:
+                        aux_info = yield merged_proxy.rpc_getblock(b['aux_hash'])
+                        if aux_info:
+                            b['aux_block_height'] = aux_info.get('height')
+                            b['aux_confirmations'] = aux_info.get('confirmations', 0)
+                            b['aux_symbol'] = merged_symbol
+                            # Calculate reward from coinbase tx value
+                            if aux_info.get('tx') and len(aux_info['tx']) > 0:
+                                try:
+                                    cb_txid = aux_info['tx'][0]
+                                    cb_tx = yield merged_proxy.rpc_getrawtransaction(cb_txid, 1)
+                                    if cb_tx and cb_tx.get('vout'):
+                                        reward = sum(v.get('value', 0) for v in cb_tx['vout'])
+                                        b['aux_reward'] = reward
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass  # Daemon unavailable or hash not found
+        
         # Sort newest first
         result.sort(key=lambda x: x.get('ts', 0), reverse=True)
-        return result
+        defer.returnValue(result)
     
     web_root.putChild('discovered_merged_blocks', WebInterface(get_discovered_merged_blocks))
     

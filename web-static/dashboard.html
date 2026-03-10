@@ -1621,7 +1621,9 @@
                             <th>Time</th>
                             <th>Parent Height</th>
                             <th>Parent Block Hash</th>
+                            <th title="Merged chain block height (resolved via daemon RPC)">Aux Height</th>
                             <th>Aux Block Hash</th>
+                            <th title="Merged chain block reward">Reward</th>
                             <th title="Payout address of the miner who found the block">Miner</th>
                             <th title="P2Pool node that relayed the share">Node</th>
                             <th title="Block status">✓</th>
@@ -3216,6 +3218,17 @@
                         .attr('target', '_blank')
                         .attr('title', function(b) { return b.hash; })
                         .text(function(b) { return '...' + b.hash.substr(-8); });
+                    tr.append('td')
+                        .style('color', '#6f42c1')
+                        .style('font-weight', 'bold')
+                        .text(function(b) {
+                            if (b.aux_block_height) return '#' + b.aux_block_height;
+                            return '⏳';
+                        })
+                        .attr('title', function(b) {
+                            if (b.aux_block_height) return (b.aux_symbol || 'AUX') + ' block #' + b.aux_block_height + (b.aux_confirmations ? ' (' + b.aux_confirmations + ' confirmations)' : '');
+                            return 'Pending daemon lookup';
+                        });
                     tr.append('td').append('a')
                         .attr('class', 'hash-link')
                         .style('color', '#6f42c1')
@@ -3223,6 +3236,18 @@
                         .attr('target', '_blank')
                         .attr('title', function(b) { return 'Aux hash: ' + b.aux_hash; })
                         .text(function(b) { return '...' + b.aux_hash.substr(-12); });
+                    tr.append('td')
+                        .style('font-family', 'monospace')
+                        .style('font-size', '11px')
+                        .style('color', function(b) { return b.aux_reward ? 'var(--success)' : 'var(--text-muted)'; })
+                        .text(function(b) {
+                            if (!b.aux_reward) return '-';
+                            return d3.format(',.2f')(b.aux_reward) + ' ' + (b.aux_symbol || 'AUX');
+                        })
+                        .attr('title', function(b) {
+                            if (!b.aux_reward) return 'Reward not yet resolved';
+                            return d3.format(',.8f')(b.aux_reward) + ' ' + (b.aux_symbol || 'AUX');
+                        });
                     tr.append('td')
                         .style('font-family', 'monospace')
                         .style('font-size', '11px')
