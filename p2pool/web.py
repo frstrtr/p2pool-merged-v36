@@ -1933,6 +1933,20 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                             # Backfill peer_addr (source node) if missing
                             if not b.get('peer_addr'):
                                 b['peer_addr'] = '%s:%d' % s.peer_addr if s.peer_addr else 'local'
+                            # Backfill luck if still marked as first_block but a previous block exists
+                            if b.get('luck_method') == 'first_block' and pool_hashrate > 0:
+                                for bh in block_history:
+                                    if bh['ts'] < b['ts']:
+                                        time_to_find = b['ts'] - bh['ts']
+                                        if time_to_find > 0:
+                                            expected_hashes = bitcoin_data.target_to_average_attempts(s.header['bits'].target)
+                                            expected_time = expected_hashes / pool_hashrate
+                                            if expected_time > 0:
+                                                b['time_to_find'] = time_to_find
+                                                b['expected_time'] = expected_time
+                                                b['luck'] = (expected_time / time_to_find) * 100
+                                                b['luck_method'] = 'simple_avg'
+                                        break
                             break
                     continue
                 
@@ -1986,9 +2000,18 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     block_info['expected_time'] = expected_time
                 
                 # Calculate time_to_find based on previous block
+                prev_ts = None
                 if i + 1 < len(tracker_blocks):
-                    prev_block = tracker_blocks[i + 1]
-                    time_to_find = s.timestamp - prev_block.timestamp
+                    prev_ts = tracker_blocks[i + 1].timestamp
+                else:
+                    # Previous block aged out of tracker — fall back to block_history
+                    for bh in block_history:
+                        if bh['ts'] < s.timestamp:
+                            prev_ts = bh['ts']
+                            break
+                
+                if prev_ts is not None:
+                    time_to_find = s.timestamp - prev_ts
                     block_info['time_to_find'] = time_to_find
                     
                     if pool_hashrate > 0 and expected_time > 0 and time_to_find > 0:
