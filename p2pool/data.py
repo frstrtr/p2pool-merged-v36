@@ -260,6 +260,15 @@ def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
     rounding_remainder = miners_reward - total_distributed
     final_donation = donation_amount + rounding_remainder
     
+    # V36 CONSENSUS RULE: Donation/marker output must be >= 1 satoshi.
+    # Ensures the COMBINED_DONATION_SCRIPT output is always nonzero on-chain,
+    # serving as an identifiable P2Pool marker even when donation_weight is 0
+    # and there is only one miner (no rounding dust).
+    if final_donation < 1 and coinbase_value > 0 and output_amounts:
+        largest_script = max(output_amounts, key=output_amounts.get)
+        output_amounts[largest_script] -= 1
+        final_donation += 1
+    
     # Build sorted output list (deterministic ordering by script bytes)
     tx_outs = []
     for s in sorted(output_amounts.keys()):
@@ -895,6 +904,16 @@ class BaseShare(object):
         total_donation = share_data['subsidy'] - sum(amounts.itervalues())
         
         if v36_active:
+            # V36 CONSENSUS RULE: Donation/marker output must be >= 1 satoshi.
+            # This ensures the COMBINED_DONATION_SCRIPT output is always nonzero
+            # on-chain, serving as an identifiable P2Pool marker even when
+            # --give-author is 0 and there is only one miner (no rounding dust).
+            # The 1-satoshi cost is deducted from the largest miner payout.
+            if total_donation < 1 and share_data['subsidy'] > 0:
+                # Find the address with the largest payout to deduct 1 sat from
+                largest_addr = max(amounts, key=amounts.get)
+                amounts[largest_addr] -= 1
+                total_donation = share_data['subsidy'] - sum(amounts.itervalues())
             # V36 (95%+): Single P2SH-wrapped combined donation output (COMBINED_DONATION_SCRIPT)
             # All donation goes to the combined script - either party can spend
             amounts[combined_donation_addr] = amounts.get(combined_donation_addr, 0) + total_donation
@@ -2395,7 +2414,13 @@ def get_expected_payouts(tracker, best_share_hash, block_target, subsidy, net):
         donation_addr = combined_donation_script_to_address(net)
     else:
         donation_addr = donation_script_to_address(net)
-    res[donation_addr] = res.get(donation_addr, 0) + subsidy - sum(res.itervalues())
+    donation_remainder = subsidy - sum(res.itervalues())
+    # V36: Ensure donation/marker is >= 1 satoshi (consensus rule)
+    if best_share.VERSION >= 36 and donation_remainder < 1 and subsidy > 0 and res:
+        largest_addr = max(res, key=res.get)
+        res[largest_addr] -= 1
+        donation_remainder = subsidy - sum(res.itervalues())
+    res[donation_addr] = res.get(donation_addr, 0) + donation_remainder
     return res
 
 def get_desired_version_counts(tracker, best_share_hash, dist):
