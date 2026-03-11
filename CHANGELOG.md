@@ -59,7 +59,7 @@ Comprehensive 5-phase transition test (activation → deactivation → re-activa
 ### Test Infrastructure
 - **force_v35_test mode** — Flag file (`force_v35_test` in datadir) triggers V35 non-voting share production in ACTIVATED or CONFIRMED states, enabling deactivation/reversal testing without V35 nodes.
 - **MINIMUM_PROTOCOL_VERSION reset** — On deactivation (ACTIVATED→VOTING), `MINIMUM_PROTOCOL_VERSION` resets to 3301 so V35 peers can reconnect.
-- **Comprehensive test results** — `docs/V36_TRANSITION_TEST_RESULTS.md` documents all 5 phases with timestamps, log excerpts, and the 4 bug discoveries.
+- **Comprehensive test results** — V36 transition test results document all 5 phases with timestamps, log excerpts, and the 4 bug discoveries.
 
 ---
 
@@ -82,7 +82,7 @@ Comprehensive 5-phase transition test (activation → deactivation → re-activa
 
 ### Documentation
 - **V36 Release Notes** — Comprehensive `docs/V36_RELEASE_NOTES.md` (640+ lines) covering: consensus changes, anti-hopping defense stack, merged mining architecture, miner protection guide, operator guide, migration from V35, V37/c2pool roadmap. Cross-referenced from README, POOL_HOPPING_ATTACKS.md, and FUTURE.md.
-- **V35→V36 Transition Test Results** — Full four-node test documented in `docs/V35_V36_TRANSITION_TEST_RESULTS.md`: V35 (jtoomim) and V36 (frstrtr) nodes tested sharechain consensus, vote signaling, AutoRatchet activation at 95%, and V35 upgrade warnings. Includes ratchet reset procedure for testers.
+- **V35→V36 Transition Test Results** — Full four-node test: V35 (jtoomim) and V36 (frstrtr) nodes tested sharechain consensus, vote signaling, AutoRatchet activation at 95%, and V35 upgrade warnings. Includes ratchet reset procedure for testers.
 - **Ratchet reset documented** — Added Scenario 6 (stale ratchet on fresh sharechain) to V36_TRANSITION_GUIDE.md FAQ, SETUP_GUIDE.md troubleshooting, and V36_RELEASE_NOTES.md cross-references. Testers must delete `v36_ratchet.json` when flushing sharechains.
 
 ### Bug Fixes (Test)

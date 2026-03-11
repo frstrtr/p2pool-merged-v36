@@ -52,7 +52,7 @@ Litecoin and Dogecoin full nodes). Machines already running both daemons
 (which themselves require 4+ GB RAM and 100+ GB disk) typically have
 sufficient headroom.
 
-See [POOL_HOPPING_ATTACKS.md §7.3.10](docs/POOL_HOPPING_ATTACKS.md) for the
+See [V36 Release Notes](docs/V36_RELEASE_NOTES.md) for the
 complete adaptive window design and resource analysis.
 
 ### Required Ports

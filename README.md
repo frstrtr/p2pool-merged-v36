@@ -115,11 +115,7 @@ The installation guide covers:
 | [ASIC_SUPPORT_COMPLETE.md](docs/ASIC_SUPPORT_COMPLETE.md) | BIP320 version-rolling & Scrypt ASIC support details |
 | [SHARE_ARCHIVE_README.md](docs/SHARE_ARCHIVE_README.md) | Share archival and recovery |
 | [V36_TRANSITION_GUIDE.md](docs/V36_TRANSITION_GUIDE.md) | V35→V36 transition stages, AutoRatchet, dashboard legend |
-| [V35_V36_TRANSITION_TEST_RESULTS.md](docs/V35_V36_TRANSITION_TEST_RESULTS.md) | V35→V36 transition test results, ratchet reset procedure for testers |
 | [WINDOWS_DEPLOYMENT.md](docs/WINDOWS_DEPLOYMENT.md) | Windows 10/11 deployment (WSL2, Docker, Native) — tested end-to-end |
-| [SECURITY_AUDIT_2026_02.md](docs/SECURITY_AUDIT_2026_02.md) | Security audit report — 41 findings, origin classification, fix status |
-| [POOL_HOPPING_ATTACKS.md](docs/POOL_HOPPING_ATTACKS.md) | Pool hopping threat model, anti-hopping defense stack, per-miner impact analysis |
-| [FUTURE.md](docs/FUTURE.md) | Roadmap — V37 adaptive windows, c2pool C++ migration, stratum enhancements |
 
 ---
 
@@ -494,8 +490,8 @@ dogecoin-cli getnewaddress "" legacy         # P2PKH:  D...
 > At the current pool size (~50 GH/s), overhead is ~370 MB. At peak hashrate
 > (~295 GH/s), only ~62 MB. Operators should provision **8–16 GB RAM** total
 > (including Litecoin + Dogecoin full nodes). See
-> [POOL_HOPPING_ATTACKS.md §7.3.10](docs/POOL_HOPPING_ATTACKS.md) for the
-> full adaptive design and live data analysis.
+> [V36 Release Notes](docs/V36_RELEASE_NOTES.md) for the
+> full adaptive design and anti-hopping defense stack.
 
 ### Features
 
