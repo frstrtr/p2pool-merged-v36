@@ -29,6 +29,7 @@ mm-adapter/config_mainnet.yaml
 monitor_sync.sh
 claude.md
 .ai-memory.md
+docs/private
 
 # Local node startup scripts with credentials
 scripts/start_p2pool_ltc_doge_mainnet.sh
