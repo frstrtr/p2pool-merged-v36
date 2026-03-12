@@ -1528,6 +1528,24 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 ),
             )
         
+        # Compute median share difficulty % from full sharechain window
+        try:
+            tip = node.best_share_var.value
+            if tip is not None:
+                height = node.tracker.get_height(tip)
+                window = min(height, node.net.REAL_CHAIN_LENGTH)
+                if window > 0:
+                    diffs = sorted(bitcoin_data.target_to_difficulty(s.target)
+                                   for s in node.tracker.get_chain(tip, window))
+                    n = len(diffs)
+                    median_diff = (diffs[n // 2] if n % 2 == 1
+                                   else (diffs[n // 2 - 1] + diffs[n // 2]) / 2.0)
+                    result['median_pct'] = pct_of_block(median_diff, network_difficulty)
+                    if merged_difficulty > 0:
+                        result['median_merged_pct'] = pct_of_block(median_diff, merged_difficulty)
+        except Exception:
+            pass
+        
         return result
     web_root.putChild('best_share', WebInterface(get_best_share))
     

@@ -1399,7 +1399,7 @@
                         <h3><span class="icon">🎯</span> Best Share</h3>
                         <div class="stat-value" style="display: flex; align-items: baseline; justify-content: flex-start; gap: 4px;"><span id="best_share_round_pct_fancy" style="color: var(--primary);">-</span><span id="best_share_merged_round_part" style="display: none;"> / <span id="best_share_merged_pct_fancy" style="color: #c3a634;">-</span></span></div>
                         <div class="stat-sub" style="font-size: 0.85em;"><span id="best_share_round_diff" style="color: var(--primary);">-</span> / <span id="best_share_net_diff" style="opacity: 0.55;">-</span><span id="best_share_merged_diff_part" style="display: none;"> &nbsp;·&nbsp; <span id="best_share_merged_round_diff" style="color: #c3a634;">-</span> / <span id="best_share_merged_net_diff" style="opacity: 0.55;">-</span></span></div>
-                        <div class="stat-detail">🏆 <span style="color: var(--primary);"><span id="best_share_alltime_pct_fancy">-</span></span><span id="best_share_merged_record_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_alltime_pct_fancy">-</span></span></span></div>
+                        <div class="stat-detail">🏆 <span style="color: var(--primary);"><span id="best_share_alltime_pct_fancy">-</span></span><span id="best_share_merged_record_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_alltime_pct_fancy">-</span></span></span><span id="best_share_median_part" style="display: none;"> &nbsp;· x̃ <span style="color: var(--primary);"><span id="best_share_median_pct_fancy">-</span></span><span id="best_share_merged_median_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_median_pct_fancy">-</span></span></span></span></div>
                     </div>
                 </div>
                 
@@ -2894,6 +2894,15 @@
                             d3.select('#best_share_merged_diff_part').style('display', 'inline');
                             d3.select('#best_share_merged_round_diff').text(format_difficulty(bs.merged.round.difficulty));
                             d3.select('#best_share_merged_net_diff').text(format_difficulty(bs.merged.network_difficulty));
+                        }
+                        // Median share % of full window
+                        if (bs.median_pct != null) {
+                            d3.select('#best_share_median_part').style('display', 'inline');
+                            d3.select('#best_share_median_pct_fancy').html(format_pct_fancy(bs.median_pct));
+                            if (bs.median_merged_pct != null) {
+                                d3.select('#best_share_merged_median_part').style('display', 'inline');
+                                d3.select('#best_share_merged_median_pct_fancy').html(format_pct_fancy(bs.median_merged_pct));
+                            }
                         }
                     });
                 });
