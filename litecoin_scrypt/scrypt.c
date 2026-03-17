@@ -61,7 +61,7 @@ be32enc(void *pp, uint32_t x)
 	p[3] = x & 0xff;
 	p[2] = (x >> 8) & 0xff;
 	p[1] = (x >> 16) & 0xff;
-	p[0] = (x >> 24) & 0xff;
+	p[0] = (uint8_t)((x >> 24) & 0xff);
 }
 
 static SCRYPT_INLINE uint32_t
@@ -81,7 +81,7 @@ le32enc(void *pp, uint32_t x)
 	p[0] = x & 0xff;
 	p[1] = (x >> 8) & 0xff;
 	p[2] = (x >> 16) & 0xff;
-	p[3] = (x >> 24) & 0xff;
+	p[3] = (uint8_t)((x >> 24) & 0xff);
 }
 
 
@@ -243,7 +243,7 @@ SHA256_Transform(uint32_t * state, const unsigned char block[64])
 	t0 = t1 = 0;
 }
 
-static unsigned char PAD[64] = {
+static const unsigned char PAD[64] = {
 	0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -474,18 +474,18 @@ PBKDF2_SHA256(const uint8_t * passwd, size_t passwdlen, const uint8_t * salt,
 }
 
 
-static void blkcpy(void *, void *, size_t);
-static void blkxor(void *, void *, size_t);
+static void blkcpy(void *, const void *, size_t);
+static void blkxor(void *, const void *, size_t);
 static void salsa20_8(uint32_t[16]);
 static void blockmix_salsa8(uint32_t *, uint32_t *, uint32_t *, size_t);
-static uint64_t integerify(void *, size_t);
+static uint64_t integerify(const void *, size_t);
 static void smix(uint8_t *, size_t, uint64_t, uint32_t *, uint32_t *);
 
 static void
-blkcpy(void * dest, void * src, size_t len)
+blkcpy(void * dest, const void * src, size_t len)
 {
 	size_t * D = dest;
-	size_t * S = src;
+	const size_t * S = src;
 	size_t L = len / sizeof(size_t);
 	size_t i;
 
@@ -494,10 +494,10 @@ blkcpy(void * dest, void * src, size_t len)
 }
 
 static void
-blkxor(void * dest, void * src, size_t len)
+blkxor(void * dest, const void * src, size_t len)
 {
 	size_t * D = dest;
-	size_t * S = src;
+	const size_t * S = src;
 	size_t L = len / sizeof(size_t);
 	size_t i;
 
@@ -588,9 +588,9 @@ blockmix_salsa8(uint32_t * Bin, uint32_t * Bout, uint32_t * X, size_t r)
  * Return the result of parsing B_{2r-1} as a little-endian integer.
  */
 static uint64_t
-integerify(void * B, size_t r)
+integerify(const void * B, size_t r)
 {
-	uint32_t * X = (void *)((uintptr_t)(B) + (2 * r - 1) * 64);
+	const uint32_t * X = (const void *)((uintptr_t)(B) + (2 * r - 1) * 64);
 
 	return (((uint64_t)(X[1]) << 32) + X[0]);
 }

@@ -4,6 +4,13 @@ All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
 ## [v36-0.13-alpha] - 2026-03-10
 
+### Scrypt C Module — Warning-Free Compilation & Test Vectors
+- **scrypt.c** — Fixed implicit `uint32_t`→`uint8_t` conversion warnings in `be32enc`/`le32enc` (explicit casts). Added `const` qualifiers to `blkcpy`, `blkxor`, `integerify` parameters and made `PAD` array `const`. Compiles clean with `-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wcast-qual -Wwrite-strings -Wstrict-prototypes -Wmissing-prototypes`.
+- **scryptmodule.c** — Fixed `-Wunused-parameter` (self) and `-Wmissing-prototypes` (initltc_scrypt) warnings. Added `NULL` check on `PyMem_Malloc` return.
+- **scryptmodule_py3.c** — Fixed `-Wunused-parameter`, `-Wmissing-field-initializers` (PyModuleDef m_slots), and `-Wmissing-prototypes` warnings.
+- **test_scrypt.py** — Replaced smoke test (only checked 32-byte output length) with 4 cross-validated test vectors: Litecoin genesis block, block #1, all-zero, and all-0xff inputs. Expected hashes independently verified against `py-scrypt` package. Made Python 2.7/PyPy compatible (no f-strings, no `bytes.fromhex`).
+- **build.sh** — Simplified for Python 2.7/PyPy target (p2pool runtime).
+
 ### Discovered Merged Blocks — Dashboard Feature (NEW)
 - **`extract_aux_hash_from_coinbase()` helper** — Scans coinbase scriptSig for the `fabe6d6d` merged mining magic marker and extracts the 32-byte aux chain block hash. Returns raw LE hex matching dogecoind's block hash indexing.
 - **`/discovered_merged_blocks` API endpoint** — Returns parent blocks that contain merged mining aux commitments, enriched with block info (timestamp, height, hash, miner, peer_addr, status). Scans both stored block_history and the live share tracker for backfill.

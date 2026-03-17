@@ -7,16 +7,17 @@ static PyObject *scrypt_getpowhash(PyObject *self, PyObject *args)
     char *output;
     PyObject *value;
     Py_buffer input;
-    
+    (void)self;  /* required by Python C API convention */
+
     if (!PyArg_ParseTuple(args, "y*", &input))
         return NULL;
-    
+
     if (input.len != 80) {
         PyBuffer_Release(&input);
         PyErr_SetString(PyExc_ValueError, "Input must be exactly 80 bytes");
         return NULL;
     }
-    
+
     output = PyMem_Malloc(32);
     if (output == NULL) {
         PyBuffer_Release(&input);
@@ -25,7 +26,7 @@ static PyObject *scrypt_getpowhash(PyObject *self, PyObject *args)
 
     scrypt_1024_1_1_256((char *)input.buf, output);
     PyBuffer_Release(&input);
-    
+
     value = Py_BuildValue("y#", output, 32);
     PyMem_Free(output);
     return value;
@@ -41,9 +42,11 @@ static struct PyModuleDef scryptmodule = {
     "ltc_scrypt",
     "Scrypt proof of work hash for Litecoin",
     -1,
-    ScryptMethods
+    ScryptMethods,
+    NULL, NULL, NULL, NULL
 };
 
+PyMODINIT_FUNC PyInit_ltc_scrypt(void);
 PyMODINIT_FUNC PyInit_ltc_scrypt(void) {
     return PyModule_Create(&scryptmodule);
 }
