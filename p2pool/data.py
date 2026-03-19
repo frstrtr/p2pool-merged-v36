@@ -857,8 +857,13 @@ class BaseShare(object):
         _pplns_desired_weight = 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target)
         
         if v36_active:
+            # V36: exponential decay naturally limits old shares' contribution,
+            # making the desired_weight cap redundant. On low-difficulty networks
+            # (testnet) where block_att < share_att, the cap truncates the PPLNS
+            # window to ~2 shares instead of REAL_CHAIN_LENGTH, causing blocks to
+            # pay only 1 miner. Remove the cap for V36 decayed PPLNS.
             weights, total_weight, donation_weight = get_decayed_cumulative_weights(
-                tracker, _pplns_start, _pplns_max_shares, _pplns_desired_weight, net)
+                tracker, _pplns_start, _pplns_max_shares, 2**288 - 1, net)
         else:
             weights, total_weight, donation_weight = tracker.get_cumulative_weights(
                 _pplns_start, _pplns_max_shares, _pplns_desired_weight)
@@ -2400,8 +2405,9 @@ def get_expected_payouts(tracker, best_share_hash, block_target, subsidy, net):
     
     # Phase 2a: Use decayed PPLNS weights when V36 is active
     if best_share.VERSION >= 36:
+        # V36: remove desired_weight cap — exponential decay handles windowing
         weights, total_weight, donation_weight = get_decayed_cumulative_weights(
-            tracker, best_share_hash, _max_shares, _desired_weight, net)
+            tracker, best_share_hash, _max_shares, 2**288 - 1, net)
     else:
         weights, total_weight, donation_weight = tracker.get_cumulative_weights(
             best_share_hash, _max_shares, _desired_weight)
