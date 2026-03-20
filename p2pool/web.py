@@ -941,7 +941,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     node.tracker,
                     best,
                     max(0, min(share_height, node.net.REAL_CHAIN_LENGTH)),
-                    65535 * node.net.SPREAD * bitcoin_data.target_to_average_attempts(parent_block_target),
+                    2**288 - 1,  # V36: unlimited — decay handles windowing
                     chain_id=chain['chainid'],
                 )
             except Exception:
@@ -2998,7 +2998,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     weights, total_weight, donation_weight = p2pool_data.get_v36_merged_weights(
                         node.tracker, best,
                         max(0, min(share_height, node.net.REAL_CHAIN_LENGTH)),
-                        65535 * node.net.SPREAD * bitcoin_data.target_to_average_attempts(parent_block_target),
+                        2**288 - 1,  # V36: unlimited — decay handles windowing
                         chain_id)
                     explicit_count = sum(1 for k in weights if k.startswith('MERGED:'))
                     fallback_count = sum(1 for k in weights if not k.startswith('MERGED:'))

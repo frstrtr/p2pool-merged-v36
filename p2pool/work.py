@@ -2146,7 +2146,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         from p2pool.data import get_v36_merged_weights
 
         height = tracker.get_height(best_share_hash) if best_share_hash is not None else 0
-        max_weight = 65535 * self.node.net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
+        max_weight = 2**288 - 1  # V36: unlimited — decay handles windowing
         chain_length = min(height, self.node.net.REAL_CHAIN_LENGTH) if height > 0 else 0
 
         if chain_length <= 0 or best_share_hash is None:
