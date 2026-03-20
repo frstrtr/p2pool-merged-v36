@@ -1288,7 +1288,11 @@ class BaseShare(object):
         if self.target > net.MAX_TARGET:
             from p2pool import p2p
             raise p2p.PeerMisbehavingError('share target invalid')
-        
+
+        if self.target > self.max_target:
+            from p2pool import p2p
+            raise p2p.PeerMisbehavingError('share target %064x exceeds max_target %064x — too easy' % (self.target, self.max_target))
+
         if self.pow_hash > self.target:
             from p2pool import p2p
             raise p2p.PeerMisbehavingError('share PoW invalid')
@@ -2590,7 +2594,15 @@ def compute_merged_payout_hash(tracker, previous_share_hash, block_target, net):
     parts.append('D:%d' % donation_weight)
     
     payload = '|'.join(parts)
-    return bitcoin_data.hash256(payload)
+    result = bitcoin_data.hash256(payload)
+    import sys
+    _ctr = getattr(compute_merged_payout_hash, '_log_ctr', 0)
+    if _ctr < 5:
+        compute_merged_payout_hash._log_ctr = _ctr + 1
+        print >>sys.stderr, '[MERGED-HASH] chain_len=%d weights=%d payload(%d)=%s' % (
+            chain_length, len(weights), len(payload), payload[:200])
+        print >>sys.stderr, '[MERGED-HASH] hash=%064x' % result
+    return result
 
 
 def get_warnings(tracker, best_share, net, bitcoind_getinfo, bitcoind_work_value, merged_work=None, auto_ratchet=None):
