@@ -880,24 +880,30 @@ class BaseShare(object):
             print >>sys.stderr, '[PPLNS-AMT] subsidy=%d total_weight=%d don_weight=%d addrs=%d prev=%s' % (
                 share_data['subsidy'], total_weight, donation_weight, len(weights),
                 '%064x' % (share_data['previous_share_hash'],) if share_data['previous_share_hash'] else 'None')
-            for addr, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
+            for key, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
                 a = share_data['subsidy'] * w // total_weight if v36_active else share_data['subsidy'] * 199 * w // (200 * total_weight)
-                print >>sys.stderr, '[PPLNS-AMT]   %s weight=%d amount=%d' % (addr[:20], w, a)
+                # V36: key is raw script bytes; Pre-V36: key is address string
+                key_repr = key.encode('hex')[:40] if v36_active else key[:20]
+                print >>sys.stderr, '[PPLNS-AMT]   %s weight=%d amount=%d' % (key_repr, w, a)
         
         # Phase 2c: V36 removes 199/200 haircut — full subsidy to PPLNS
+        # V36: weights dict keys are raw script bytes (from get_decayed_cumulative_weights)
+        # Pre-V36: weights dict keys are address strings (from WeightsSkipList)
         if v36_active:
             amounts = dict((script, share_data['subsidy']*weight//total_weight) for script, weight in weights.iteritems())
         else:
             amounts = dict((script, share_data['subsidy']*(199*weight)//(200*total_weight)) for script, weight in weights.iteritems()) # 99.5% goes according to weights prior to this share
-        if 'address' not in share_data:
-            # V36: Use pubkey_type to derive native address (bech32, P2SH, or P2PKH)
-            _pt = share_data.get('pubkey_type', PUBKEY_TYPE_P2PKH)
-            _ver, _witver = pubkey_type_to_version_witver(_pt, net.PARENT)
-            this_address = bitcoin_data.pubkey_hash_to_address(
-                    share_data['pubkey_hash'], _ver, _witver, net.PARENT)
-        else:
-            this_address = share_data['address']
-        
+
+        # Pre-V36 path: derive this_address for finder fee and share_data fixups
+        if not v36_active:
+            if 'address' not in share_data:
+                _pt = share_data.get('pubkey_type', PUBKEY_TYPE_P2PKH)
+                _ver, _witver = pubkey_type_to_version_witver(_pt, net.PARENT)
+                this_address = bitcoin_data.pubkey_hash_to_address(
+                        share_data['pubkey_hash'], _ver, _witver, net.PARENT)
+            else:
+                this_address = share_data['address']
+
         # V36 Donation System:
         # =====================
         # Pre-V36: DONATION_SCRIPT only (P2PK, original author Forrest Voight)
@@ -905,13 +911,7 @@ class BaseShare(object):
         #   - Single output replaces two separate donation outputs
         #   - Saves 30 bytes per share coinbase (110 -> 80 bytes)
         #   - COMBINED_DONATION_SCRIPT MUST be LAST (before OP_RETURN) for V36 gentx_before_refhash
-        #
-        # Primary donation (pre-V36) goes to original author (DONATION_SCRIPT)
-        primary_donation_address = donation_script_to_address(net)
-        
-        # Combined donation (V36+) goes to P2SH-wrapped combined script (COMBINED_DONATION_SCRIPT)
-        combined_donation_addr = combined_donation_script_to_address(net)
-        
+
         # Phase 2c: V36 removes finder fee — pure PPLNS accounting
         if not v36_active:
             # Pre-V36: 0.5% goes to block finder
@@ -920,49 +920,55 @@ class BaseShare(object):
         # all that's left over is the donation weight and some extra
         # satoshis due to rounding
         total_donation = share_data['subsidy'] - sum(amounts.itervalues())
-        
+
         if v36_active:
             # V36 CONSENSUS RULE: Donation/marker output must be >= 1 satoshi.
-            # This ensures the COMBINED_DONATION_SCRIPT output is always nonzero
-            # on-chain, serving as an identifiable P2Pool marker even when
-            # --give-author is 0 and there is only one miner (no rounding dust).
-            # The 1-satoshi cost is deducted from the largest miner payout.
             if total_donation < 1 and share_data['subsidy'] > 0:
-                # Find the address with the largest payout to deduct 1 sat from
-                largest_addr = max(amounts, key=amounts.get)
-                amounts[largest_addr] -= 1
+                # Deterministic tiebreak: (amount, script) so equal amounts pick largest script
+                largest_key = max(amounts, key=lambda k: (amounts[k], k))
+                amounts[largest_key] -= 1
                 total_donation = share_data['subsidy'] - sum(amounts.itervalues())
-            # V36 (95%+): Single P2SH-wrapped combined donation output (COMBINED_DONATION_SCRIPT)
-            # All donation goes to the combined script - either party can spend
-            amounts[combined_donation_addr] = amounts.get(combined_donation_addr, 0) + total_donation
+            # V36: key by raw COMBINED_DONATION_SCRIPT bytes (matches script-keyed weights)
+            amounts[COMBINED_DONATION_SCRIPT] = amounts.get(COMBINED_DONATION_SCRIPT, 0) + total_donation
         else:
-            # Pre-V36: All donation goes to primary (original author P2PK)
+            # Pre-V36: key by address string
+            primary_donation_address = donation_script_to_address(net)
             amounts[primary_donation_address] = amounts.get(primary_donation_address, 0) + total_donation
-            
+
         if cls.VERSION < 34 and 'pubkey_hash' not in share_data:
             share_data['pubkey_hash'], _, _ = bitcoin_data.address_to_pubkey_hash(
                     this_address, net.PARENT)
             del(share_data['address'])
-        
+
         # V36: store pubkey_hash and pubkey_type (saves ~15 bytes vs VarStrType address)
         if cls.VERSION >= 36 and 'pubkey_hash' not in share_data:
-            _ph, _v, _wv = bitcoin_data.address_to_pubkey_hash(
-                    this_address, net.PARENT)
+            _pt = share_data.get('pubkey_type', PUBKEY_TYPE_P2PKH)
+            _ver, _witver = pubkey_type_to_version_witver(_pt, net.PARENT)
+            _ph, _, _ = bitcoin_data.address_to_pubkey_hash(
+                    bitcoin_data.pubkey_hash_to_address(
+                        share_data['pubkey_hash'], _ver, _witver, net.PARENT),
+                    net.PARENT)
             share_data['pubkey_hash'] = _ph
-            share_data['pubkey_type'] = get_pubkey_type(_v, _wv, net.PARENT)
+            share_data['pubkey_type'] = get_pubkey_type(_ver, _witver, net.PARENT)
             if 'address' in share_data:
                 del share_data['address']
-        
+
         if sum(amounts.itervalues()) != share_data['subsidy'] or any(x < 0 for x in amounts.itervalues()):
             raise ValueError()
 
         # block length limit, unlikely to ever be hit
-        # Exclude donation addresses from dests - they are added separately at the end
-        # Pre-V36: primary_donation_address (P2PK)
-        # V36+: combined_donation_addr (derived from P2SH combined donation script)
-        excluded_dests = {primary_donation_address, combined_donation_addr}
-        dests = sorted([addr for addr in amounts.iterkeys() if addr not in excluded_dests], 
-                       key=lambda address: (amounts[address], address))[-4000:]
+        if v36_active:
+            # V36: amounts keyed by raw script bytes — exclude donation script, sort by (amount, script)
+            excluded_scripts = {DONATION_SCRIPT, COMBINED_DONATION_SCRIPT}
+            dests = sorted([s for s in amounts.iterkeys() if s not in excluded_scripts],
+                           key=lambda s: (amounts[s], s))[-4000:]
+        else:
+            # Pre-V36: amounts keyed by address strings — exclude donation addresses
+            primary_donation_address = donation_script_to_address(net)
+            combined_donation_addr = combined_donation_script_to_address(net)
+            excluded_dests = {primary_donation_address, combined_donation_addr}
+            dests = sorted([addr for addr in amounts.iterkeys() if addr not in excluded_dests],
+                           key=lambda address: (amounts[address], address))[-4000:]
         if len(dests) >= 200:
             print "found %i payment dests. Antminer S9s may crash when this is close to 226." % len(dests)
 
@@ -1040,16 +1046,17 @@ class BaseShare(object):
         # Pre-V36: DONATION_SCRIPT (P2PK, 67 bytes) as last output
         # V36+:    COMBINED_DONATION_SCRIPT (P2SH scriptPubKey) as last output
         
-        # Build payouts from dests (donation addresses already excluded from dests above)
-        payouts = [dict(value=amounts[addr],
-                        script=bitcoin_data.address_to_script2(addr, net.PARENT)
-                        ) for addr in dests if amounts[addr]]
-        
+        # Build payouts from dests (donation scripts/addresses already excluded above)
         if v36_active:
-            # V36 (95%+): Single P2SH-wrapped combined donation output (COMBINED_DONATION_SCRIPT)
-            # MUST BE LAST payout output before the OP_RETURN
-            payouts.append({'script': COMBINED_DONATION_SCRIPT, 'value': amounts[combined_donation_addr]})
+            # V36: dests are raw script bytes — no address_to_script2 conversion needed
+            payouts = [dict(value=amounts[s], script=s) for s in dests if amounts[s]]
+            # COMBINED_DONATION_SCRIPT MUST BE LAST payout output before the OP_RETURN
+            payouts.append({'script': COMBINED_DONATION_SCRIPT, 'value': amounts[COMBINED_DONATION_SCRIPT]})
         else:
+            # Pre-V36: dests are address strings — convert to script for output
+            payouts = [dict(value=amounts[addr],
+                            script=bitcoin_data.address_to_script2(addr, net.PARENT)
+                            ) for addr in dests if amounts[addr]]
             # Pre-V36: Only primary donation script (MUST BE LAST!)
             payouts.append({'script': DONATION_SCRIPT, 'value': amounts[primary_donation_address]})
         
@@ -1394,8 +1401,9 @@ class BaseShare(object):
                 len(gentx['tx_outs']),
                 '%064x' % (_pplns_start,) if _pplns_start else 'None')
             print >>sys.stderr, '[GENTX-FAIL] pplns_addrs=%d total_weight=%d don_weight=%d' % (len(weights), total_weight, donation_weight)
-            for addr, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
-                print >>sys.stderr, '[GENTX-FAIL]  pplns %s: weight=%d' % (addr[:20], w)
+            for key, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
+                key_repr = key.encode('hex')[:40] if v36_active else key[:20]
+                print >>sys.stderr, '[GENTX-FAIL]  pplns %s: weight=%d' % (key_repr, w)
             for i, txout in enumerate(gentx['tx_outs'][:6]):
                 print >>sys.stderr, '[GENTX-FAIL]  out[%d] value=%d script=%s' % (
                     i, txout['value'], txout['script'].encode('hex')[:60])
@@ -1925,7 +1933,10 @@ def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weig
                 don_w  = don_w * remaining // this_total
             this_total = remaining
         
-        weights[share.address] = weights.get(share.address, 0) + addr_w
+        # V36 consensus: key by raw script bytes (canonical, no address encoding ambiguity)
+        # Pre-V36 shares still use share.address (string) via WeightsSkipList
+        script_key = share.new_script
+        weights[script_key] = weights.get(script_key, 0) + addr_w
         total_weight += this_total
         donation_weight += don_w
         share_count += 1
@@ -2450,18 +2461,22 @@ def get_expected_payouts(tracker, best_share_hash, block_target, subsidy, net):
         weights, total_weight, donation_weight = tracker.get_cumulative_weights(
             best_share_hash, _max_shares, _desired_weight)
     
-    res = dict((script, subsidy*weight//total_weight) for script, weight in weights.iteritems())
-    # Use correct donation address based on whether V36 is active:
-    # V36+: COMBINED_DONATION_SCRIPT (P2SH) → combined_donation_script_to_address()
-    # Pre-V36: DONATION_SCRIPT (P2PK) → donation_script_to_address()
     if best_share.VERSION >= 36:
+        # V36: weights keyed by raw script bytes — convert to address strings for web API
+        res = {}
+        for script, weight in weights.iteritems():
+            addr = bitcoin_data.script2_to_address(script, net.PARENT)
+            res[addr] = res.get(addr, 0) + subsidy*weight//total_weight
         donation_addr = combined_donation_script_to_address(net)
     else:
+        # Pre-V36: weights keyed by address strings
+        res = dict((addr, subsidy*weight//total_weight) for addr, weight in weights.iteritems())
         donation_addr = donation_script_to_address(net)
     donation_remainder = subsidy - sum(res.itervalues())
     # V36: Ensure donation/marker is >= 1 satoshi (consensus rule)
     if best_share.VERSION >= 36 and donation_remainder < 1 and subsidy > 0 and res:
-        largest_addr = max(res, key=res.get)
+        # Deterministic tiebreak: (amount, key) so equal amounts pick largest key
+        largest_addr = max(res, key=lambda k: (res[k], k))
         res[largest_addr] -= 1
         donation_remainder = subsidy - sum(res.itervalues())
     res[donation_addr] = res.get(donation_addr, 0) + donation_remainder
@@ -2559,8 +2574,9 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
                         break
         
         if address_key is None:
-            address_key = share.address
-        
+            # V36: use raw script bytes as key (matches get_decayed_cumulative_weights)
+            address_key = share.new_script
+
         weights[address_key] = weights.get(address_key, 0) + share_weight
         total_weight += share_weight
         donation_weight += share_donation
@@ -2619,11 +2635,17 @@ def compute_merged_payout_hash(tracker, previous_share_hash, block_target, net):
     if not weights or total_weight == 0:
         return None  # No V36 shares in window
     
-    # Deterministic serialization: sorted by address key
-    # Format: "addr1:weight1|addr2:weight2|...|T:total|D:donation"
+    # Deterministic serialization: sorted by script hex (V36 consensus)
+    # Format: "script_hex1:weight1|script_hex2:weight2|...|T:total|D:donation"
+    # Keys are raw script bytes (from get_v36_merged_weights) or 'MERGED:hex' strings.
     parts = []
-    for addr_key in sorted(weights.keys()):
-        parts.append('%s:%d' % (addr_key, weights[addr_key]))
+    for key in sorted(weights.keys()):
+        # Normalize key to hex string for serialization
+        if isinstance(key, str) and key.startswith('MERGED:'):
+            key_hex = key  # Already a string-encoded key
+        else:
+            key_hex = key.encode('hex')
+        parts.append('%s:%d' % (key_hex, weights[key]))
     parts.append('T:%d' % total_weight)
     parts.append('D:%d' % donation_weight)
     
