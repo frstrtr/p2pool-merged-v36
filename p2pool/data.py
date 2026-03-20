@@ -379,24 +379,24 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
         return  # Insufficient chain depth for reliable PPLNS verification
     
     block_target = share.header['bits'].target
-    max_weight = 65535 * net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
     chain_length = min(height, net.REAL_CHAIN_LENGTH)
-    
+
     for info in merged_info_list:
         chain_id = info['chain_id']
         coinbase_value = info['coinbase_value']
         block_height = info['block_height']
         header_bytes = info['block_header_bytes']
         cb_merkle_link = info['coinbase_merkle_link']
-        
+
         # Determine merged chain network
         merged_addr_net = _get_merged_chain_net(chain_id, net)
         if merged_addr_net is None:
             continue  # Unknown chain — can't verify (permissive for forward compat)
-        
+
         # Step 1: Get PPLNS weights for this merged chain
+        # V36: unlimited desired_weight — exponential decay handles windowing
         weights, total_weight, donation_weight = get_v36_merged_weights(
-            tracker, prev_hash, chain_length, max_weight, chain_id=chain_id)
+            tracker, prev_hash, chain_length, 2**288 - 1, chain_id=chain_id)
         
         if not weights or total_weight == 0:
             continue  # No V36 shares in window — nothing to verify
@@ -2571,11 +2571,12 @@ def compute_merged_payout_hash(tracker, previous_share_hash, block_target, net):
     if height == 0:
         return None
     
-    max_weight = 65535 * net.SPREAD * bitcoin_data.target_to_average_attempts(block_target)
+    # V36: unlimited desired_weight — exponential decay handles windowing.
+    # Must match get_expected_payouts / generate_transaction.
     chain_length = min(height, net.REAL_CHAIN_LENGTH)
-    
+
     weights, total_weight, donation_weight = get_v36_merged_weights(
-        tracker, previous_share_hash, chain_length, max_weight)
+        tracker, previous_share_hash, chain_length, 2**288 - 1)
     
     if not weights or total_weight == 0:
         return None  # No V36 shares in window
