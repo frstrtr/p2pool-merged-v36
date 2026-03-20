@@ -2,6 +2,26 @@
 
 All notable changes to P2Pool Merged Mining V36 are documented in this file.
 
+## [v36-0.14-alpha] - 2026-03-20
+
+### Security: Share Target Validation (CRITICAL)
+- **fix: Enforce `target <= max_target` in share verification** — Added missing validation that rejects shares where `target > max_target` (too easy). This check was absent in ALL p2pool versions (forrestv original, jtoomim, merged-v36) since inception. Honest `generate_transaction()` always produces `bits.target <= max_bits.target` by construction (clipping), so legitimate shares are never rejected. The guard catches malicious peers sending malformed shares that bypass the difficulty floor, which could flood the PPLNS window with low-weight shares. The V36 exponential decay amplifies the impact of such flooding. See `SHARE_TARGET_VALIDATION.md` in frstrtr/the for full safety proof.
+
+### Security: Bootstrap Share Target (CRITICAL)
+- **fix: Use hardest chain bits during bootstrap** — When `height < TARGET_LOOKBEHIND` (200 shares), the pool previously fell back to `MAX_TARGET` (easiest possible difficulty). This is correct for genesis bootstrapping (first node, no peers) but dangerous for joining nodes: a node joining an existing network would create shares thousands of times easier than the network's established difficulty, flooding the chain. Fix: walk the available chain to find the hardest (lowest target) share and use that as the bootstrap target. Genesis nodes (no shares in chain) still use `MAX_TARGET` and ramp up naturally.
+
+### Bug Fix: V36 PPLNS desired_weight Cap
+- **fix: Unlimited desired_weight for V36 exponential decay** — The `desired_weight = 65535 * SPREAD * target_to_average_attempts(block_target)` cap truncated the PPLNS window to ~2 shares on testnet (where block difficulty ≈ share difficulty). With V36 exponential decay, this caused blocks to pay only 1 miner instead of all miners in the window. Fix: set `desired_weight = 2^288 - 1` (unlimited) for V36 — the decay naturally limits old shares' contribution. Applied to `generate_transaction()`, `get_expected_payouts()`, `compute_merged_payout_hash()`, and `get_v36_merged_weights()`. Mainnet is NOT affected at current pool sizes (millions of shares fit in the cap).
+
+### Bug Fix: merged_payout_hash Consensus
+- **fix: Debug logging for compute_merged_payout_hash** — Added payload/hash logging to trace consensus divergence between p2pool and c2pool during interop testing.
+
+### Documentation
+- **DESIRED_WEIGHT_CAP_BUG.md** — Full analysis: root cause, impact by network, security assessment, reproduction steps, and 7 anti-flooding hardening measures for V36/V37.
+- **SHARE_TARGET_VALIDATION.md** — Safety proof for the `target <= max_target` guard across all edge cases (pseudoshares, miner joining, genesis, emergency easing, V36 decay).
+- **SHARE_PERIOD_AND_TINY_MINERS.md** — Genesis share period analysis and tiny miner economics (DUST mechanism, minimum viable hashrate, variable difficulty shares).
+- **TINY_MINER_ECONOMICS.md** — Minimum viable hashrate tables, DUST threshold mechanism, c2pool implementation gaps.
+
 ## [v36-0.13-alpha] - 2026-03-10
 
 ### Scrypt C Module — Warning-Free Compilation & Test Vectors
