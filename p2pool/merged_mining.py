@@ -327,7 +327,7 @@ def build_merged_coinbase(template, shareholders, net, donation_percentage=1.0, 
         'tx_ins': [{
             'previous_output': None,  # Will be encoded as dict(hash=0, index=2**32-1)
             'sequence': None,  # Will be encoded as 0xffffffff
-            'script': build_coinbase_input_script(height, '/P2Pool/'),
+            'script': build_coinbase_input_script(height, '/P2Pool v36/'),
         }],
         'tx_outs': tx_outs,
         'lock_time': 0,

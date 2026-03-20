@@ -168,7 +168,7 @@ COMBINED_DONATION_DOGE_TESTNET = '2N63WXLw22FXFdLBNqWZLsDX7WQJTPXus7f'
 # This enables consensus-level enforcement of merged mining reward distribution.
 
 CANONICAL_MERGED_COINBASE_TEXT = 'P2Pool merged mining'   # OP_RETURN text (fixed)
-CANONICAL_MERGED_COINBASE_EXTRA = '/P2Pool/'              # Coinbase input script extra
+CANONICAL_MERGED_COINBASE_EXTRA = '/P2Pool v36/'          # Coinbase input script extra (V36)
 CANONICAL_MERGED_FINDER_FEE_PER_MILLE = 0                  # V36: no finder fee (was 5 = 0.5%)
 
 def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
