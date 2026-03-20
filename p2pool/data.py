@@ -734,17 +734,7 @@ class BaseShare(object):
         if not (height >= net.REAL_CHAIN_LENGTH or last is None):
             raise ValueError('share chain not long enough (height=%d, need %d)' % (height, net.REAL_CHAIN_LENGTH))
         if height < net.TARGET_LOOKBEHIND:
-            # Bootstrap: not enough shares for proper hashrate estimation.
-            # Two modes:
-            #   Genesis (no peers): MAX_TARGET, ramps up naturally.
-            #   Joining (peers exist): use hardest bits from chain to match
-            #     network difficulty immediately, preventing easy-share flooding.
-            best_target = net.MAX_TARGET
-            if previous_share is not None:
-                for s in tracker.get_chain(share_data['previous_share_hash'], height):
-                    if s.target < best_target:
-                        best_target = s.target
-            pre_target3 = best_target
+            pre_target3 = net.MAX_TARGET
         else:
             attempts_per_second = get_pool_attempts_per_second(tracker, share_data['previous_share_hash'], net.TARGET_LOOKBEHIND, min_work=True, integer=True)
             pre_target = 2**256//(net.SHARE_PERIOD*attempts_per_second) - 1 if attempts_per_second else 2**256-1
@@ -880,6 +870,19 @@ class BaseShare(object):
         
         if total_weight != sum(weights.itervalues()) + donation_weight:
             raise ValueError('PPLNS weight mismatch: total_weight=%d, sum+donation=%d' % (total_weight, sum(weights.itervalues()) + donation_weight))
+
+        # Periodic PPLNS weight dump for cross-impl comparison
+        import time as _t2
+        _lt = getattr(cls, '_pplns_dump_t', 0)
+        if _t2.time() - _lt > 30 and len(weights) >= 2:
+            cls._pplns_dump_t = _t2.time()
+            import sys
+            print >>sys.stderr, '[PPLNS-AMT] subsidy=%d total_weight=%d don_weight=%d addrs=%d prev=%s' % (
+                share_data['subsidy'], total_weight, donation_weight, len(weights),
+                '%064x' % (share_data['previous_share_hash'],) if share_data['previous_share_hash'] else 'None')
+            for addr, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
+                a = share_data['subsidy'] * w // total_weight if v36_active else share_data['subsidy'] * 199 * w // (200 * total_weight)
+                print >>sys.stderr, '[PPLNS-AMT]   %s weight=%d amount=%d' % (addr[:20], w, a)
         
         # Phase 2c: V36 removes 199/200 haircut — full subsidy to PPLNS
         if v36_active:
@@ -1305,6 +1308,9 @@ class BaseShare(object):
 
         if self.pow_hash > self.target:
             from p2pool import p2p
+            import sys
+            print >>sys.stderr, '[POW-INVALID] bits=0x%08x target=%064x pow=%064x max_target=%064x' % (
+                self.share_info['bits'].bits, self.target, self.pow_hash, self.max_target)
             raise p2p.PeerMisbehavingError('share PoW invalid')
         
         if self.VERSION < 34:
@@ -1376,6 +1382,23 @@ class BaseShare(object):
         if other_tx_hashes2 != other_tx_hashes:
             raise ValueError('reconstructed other_tx_hashes do not match expected')
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
+            import sys
+            packed = bitcoin_data.tx_id_type.pack(gentx)
+            print >>sys.stderr, '[GENTX-FAIL] share=%064x ver=%d subsidy=%d donation=%d' % (
+                self.hash, self.VERSION, self.share_data['subsidy'], self.share_data['donation'])
+            print >>sys.stderr, '[GENTX-FAIL] expected_txid=%064x got_txid=%064x' % (
+                self.gentx_hash, bitcoin_data.get_txid(gentx))
+            print >>sys.stderr, '[GENTX-FAIL] packed_len=%d hex=%s' % (
+                len(packed), packed.encode('hex'))
+            print >>sys.stderr, '[GENTX-FAIL] num_txouts=%d pplns_start=%s' % (
+                len(gentx['tx_outs']),
+                '%064x' % (_pplns_start,) if _pplns_start else 'None')
+            print >>sys.stderr, '[GENTX-FAIL] pplns_addrs=%d total_weight=%d don_weight=%d' % (len(weights), total_weight, donation_weight)
+            for addr, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
+                print >>sys.stderr, '[GENTX-FAIL]  pplns %s: weight=%d' % (addr[:20], w)
+            for i, txout in enumerate(gentx['tx_outs'][:6]):
+                print >>sys.stderr, '[GENTX-FAIL]  out[%d] value=%d script=%s' % (
+                    i, txout['value'], txout['script'].encode('hex')[:60])
             raise ValueError('''gentx doesn't match hash_link''')
         
         # V36+: Verify merged coinbase consensus enforcement.
@@ -1887,11 +1910,12 @@ def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weig
         
         # Apply exponential decay in fixed-point
         decayed_att = (att * decay_fp) >> _DECAY_PRECISION
-        
+
         donation = share.share_data['donation']
         addr_w = decayed_att * (65535 - donation)
         don_w  = decayed_att * donation
         this_total = addr_w + don_w  # = decayed_att * 65535
+
         
         # Cap at desired_weight (partial last share, matches SkipList behavior)
         if total_weight + this_total > desired_weight:
@@ -1914,7 +1938,7 @@ def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weig
         
         # Decay for next (older) share
         decay_fp = (decay_fp * decay_per) >> _DECAY_PRECISION
-    
+
     return weights, total_weight, donation_weight
 
 class OkayTracker(forest.Tracker):
