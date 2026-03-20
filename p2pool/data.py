@@ -734,7 +734,17 @@ class BaseShare(object):
         if not (height >= net.REAL_CHAIN_LENGTH or last is None):
             raise ValueError('share chain not long enough (height=%d, need %d)' % (height, net.REAL_CHAIN_LENGTH))
         if height < net.TARGET_LOOKBEHIND:
-            pre_target3 = net.MAX_TARGET
+            # Bootstrap: not enough shares for proper hashrate estimation.
+            # Two modes:
+            #   Genesis (no peers): MAX_TARGET, ramps up naturally.
+            #   Joining (peers exist): use hardest bits from chain to match
+            #     network difficulty immediately, preventing easy-share flooding.
+            best_target = net.MAX_TARGET
+            if previous_share is not None:
+                for s in tracker.get_chain(share_data['previous_share_hash'], height):
+                    if s.target < best_target:
+                        best_target = s.target
+            pre_target3 = best_target
         else:
             attempts_per_second = get_pool_attempts_per_second(tracker, share_data['previous_share_hash'], net.TARGET_LOOKBEHIND, min_work=True, integer=True)
             pre_target = 2**256//(net.SHARE_PERIOD*attempts_per_second) - 1 if attempts_per_second else 2**256-1
