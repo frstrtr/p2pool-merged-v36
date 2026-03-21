@@ -1190,7 +1190,22 @@ class BaseShare(object):
         )
         if cls.VERSION >= 36:
             ref_dict['message_data'] = message_data  # None → PossiblyNoneType packs b''
-        return pack.IntType(256).pack(bitcoin_data.check_merkle_link(bitcoin_data.hash256(cls.get_dynamic_types(net)['ref_type'].pack(ref_dict)), ref_merkle_link))
+        ref_packed = cls.get_dynamic_types(net)['ref_type'].pack(ref_dict)
+        ref_hash_raw = bitcoin_data.hash256(ref_packed)
+        ref_hash_final = bitcoin_data.check_merkle_link(ref_hash_raw, ref_merkle_link)
+        import sys
+        _ref_dump_key = (share_info['share_data'].get('coinbase', b'')[:8], len(ref_packed))
+        if not hasattr(cls, '_ref_dump_seen'):
+            cls._ref_dump_seen = set()
+        if _ref_dump_key not in cls._ref_dump_seen and len(cls._ref_dump_seen) < 10:
+            cls._ref_dump_seen.add(_ref_dump_key)
+            print >>sys.stderr, '[REF-HASH] ref_packed_len=%d ref_hash=%064x' % (len(ref_packed), ref_hash_raw)
+            print >>sys.stderr, '[REF-HASH] ref_packed_hex=%s' % ref_packed[:120].encode('hex')
+            print >>sys.stderr, '[REF-HASH] coinbase_len=%d subsidy=%s donation=%s' % (
+                len(share_info['share_data'].get('coinbase', b'')),
+                share_info['share_data'].get('subsidy', '?'),
+                share_info['share_data'].get('donation', '?'))
+        return pack.IntType(256).pack(ref_hash_final)
     
     __slots__ = 'net peer_addr contents min_header share_info hash_link merkle_link hash share_data max_target target timestamp previous_hash new_script desired_version gentx_hash header pow_hash header_hash new_transaction_hashes time_seen absheight abswork _message_data _parsed_messages _signing_key_info'.split(' ')
     
