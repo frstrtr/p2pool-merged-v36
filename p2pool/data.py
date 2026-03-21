@@ -1852,7 +1852,9 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
             return (1, {}, 0, 0)
         
         # V36-signaling share: determine address key
-        address_key = share.address  # default: parent chain address
+        # Use raw script bytes (new_script) — canonical, no address encoding ambiguity.
+        # compute_merged_payout_hash hex-encodes this → matches c2pool's script_to_hex().
+        address_key = share.new_script  # raw scriptPubKey bytes
         
         if self.chain_id is not None and share.VERSION >= 36:
             merged_addrs = getattr(share, 'merged_addresses', None)
@@ -1863,6 +1865,14 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
                     if entry['chain_id'] == self.chain_id:
                         address_key = 'MERGED:' + entry['script'].encode('hex')
                         break
+            # Debug: log c2pool shares' merged_addresses
+            import sys
+            coinbase = share.share_data.get('coinbase', b'')
+            if '/c2pool/' in coinbase and not getattr(self, '_c2pool_logged', False):
+                self._c2pool_logged = True
+                print >>sys.stderr, '[SKIPLIST-DBG] c2pool share %064x merged_addrs=%r chain_id=%s key=%s' % (
+                    share.hash, merged_addrs, self.chain_id,
+                    address_key.encode('hex') if isinstance(address_key, str) and not address_key.startswith('MERGED:') else address_key)
         
         return (1, {address_key: att*(65535-share.share_data['donation'])},
                 att*65535, att*share.share_data['donation'])
