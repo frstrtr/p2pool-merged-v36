@@ -2296,6 +2296,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         'block_height': block_height_merged,
                         'block_header_bytes': bitcoin_data.block_header_type.pack(doge_header),
                         'coinbase_merkle_link': coinbase_merkle_link,
+                        'coinbase_script': doge_coinbase_tx['tx_ins'][0]['script'],
                     }
 
                 user_merged_work[chainid] = result

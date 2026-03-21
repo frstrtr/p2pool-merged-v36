@@ -414,15 +414,25 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
         finder_script = get_canonical_merged_finder_script(
             canonical_pubkey_hash, merged_addrs, chain_id, merged_addr_net)
         
-        # Step 3: Re-derive canonical coinbase
+        # Step 3: Re-derive canonical OUTPUTS (PPLNS-critical part)
         canonical_coinbase = build_canonical_merged_coinbase(
             weights, total_weight, donation_weight,
             coinbase_value, block_height,
             finder_script, merged_addr_net, parent_net)
-        
-        # Step 4: Compute canonical txid
+
+        # Step 3b: If the share carries its own coinbase_script, use it
+        # instead of the hardcoded canonical scriptSig. This allows
+        # implementations (c2pool, etc.) to use custom tags and THE
+        # state_root while peers still verify PPLNS output correctness.
+        # Security: outputs are independently verified from PPLNS weights,
+        # scriptSig is committed via txid → merkle_root → block_hash chain.
+        share_coinbase_script = info.get('coinbase_script', '')
+        if share_coinbase_script:
+            canonical_coinbase['tx_ins'][0]['script'] = share_coinbase_script
+
+        # Step 4: Compute txid (now includes share's actual scriptSig)
         canonical_txid = bitcoin_data.hash256(bitcoin_data.tx_id_type.pack(canonical_coinbase))
-        
+
         # Step 5: Verify merkle link → header merkle root
         expected_merkle_root = bitcoin_data.check_merkle_link(canonical_txid, cb_merkle_link)
         
@@ -1707,6 +1717,11 @@ class MergedMiningShare(BaseShare):
                         ('branch', pack.ListType(pack.IntType(256))),
                         ('index', pack.IntType(0)),  # always 0 (coinbase is first tx)
                     ])),
+                    # V36 extension: actual coinbase scriptSig used by the share creator.
+                    # Allows implementations to use custom tags (e.g. /c2pool/, THE state_root)
+                    # while peers still verify PPLNS output correctness via merkle proof.
+                    # Replaces hardcoded CANONICAL_MERGED_COINBASE_EXTRA in verification.
+                    ('coinbase_script', pack.VarStrType()),
                 ]))
             )),
             # Consensus commitment for merged mining reward distribution.
