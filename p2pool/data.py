@@ -1397,13 +1397,10 @@ class BaseShare(object):
                 self.gentx_hash, bitcoin_data.get_txid(gentx))
             print >>sys.stderr, '[GENTX-FAIL] packed_len=%d hex=%s' % (
                 len(packed), packed.encode('hex'))
-            print >>sys.stderr, '[GENTX-FAIL] num_txouts=%d pplns_start=%s' % (
-                len(gentx['tx_outs']),
-                '%064x' % (_pplns_start,) if _pplns_start else 'None')
-            print >>sys.stderr, '[GENTX-FAIL] pplns_addrs=%d total_weight=%d don_weight=%d' % (len(weights), total_weight, donation_weight)
-            for key, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
-                key_repr = key.encode('hex')[:40] if v36_active else key[:20]
-                print >>sys.stderr, '[GENTX-FAIL]  pplns %s: weight=%d' % (key_repr, w)
+            print >>sys.stderr, '[GENTX-FAIL] num_txouts=%d coinbase_len=%d' % (
+                len(gentx['tx_outs']), len(self.share_data.get('coinbase', '')))
+            print >>sys.stderr, '[GENTX-FAIL] coinbase_hex=%s' % (
+                self.share_data.get('coinbase', '').encode('hex')[:120],)
             for i, txout in enumerate(gentx['tx_outs'][:6]):
                 print >>sys.stderr, '[GENTX-FAIL]  out[%d] value=%d script=%s' % (
                     i, txout['value'], txout['script'].encode('hex')[:60])
