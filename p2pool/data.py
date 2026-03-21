@@ -2465,7 +2465,7 @@ def get_expected_payouts(tracker, best_share_hash, block_target, subsidy, net):
         # V36: weights keyed by raw script bytes — convert to address strings for web API
         res = {}
         for script, weight in weights.iteritems():
-            addr = bitcoin_data.script2_to_address(script, net.PARENT)
+            addr = bitcoin_data.script2_to_address(script, net.PARENT.ADDRESS_VERSION, net.PARENT.ADDRESS_P2SH_VERSION, net.PARENT)
             res[addr] = res.get(addr, 0) + subsidy*weight//total_weight
         donation_addr = combined_donation_script_to_address(net)
     else:
