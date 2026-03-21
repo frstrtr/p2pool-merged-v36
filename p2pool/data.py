@@ -1391,16 +1391,27 @@ class BaseShare(object):
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
             import sys
             packed = bitcoin_data.tx_id_type.pack(gentx)
+            got_txid = bitcoin_data.get_txid(gentx)
             print >>sys.stderr, '[GENTX-FAIL] share=%064x ver=%d subsidy=%d donation=%d' % (
                 self.hash, self.VERSION, self.share_data['subsidy'], self.share_data['donation'])
             print >>sys.stderr, '[GENTX-FAIL] expected_txid=%064x got_txid=%064x' % (
-                self.gentx_hash, bitcoin_data.get_txid(gentx))
-            print >>sys.stderr, '[GENTX-FAIL] packed_len=%d hex=%s' % (
-                len(packed), packed.encode('hex'))
-            print >>sys.stderr, '[GENTX-FAIL] num_txouts=%d coinbase_len=%d' % (
-                len(gentx['tx_outs']), len(self.share_data.get('coinbase', '')))
-            print >>sys.stderr, '[GENTX-FAIL] coinbase_hex=%s' % (
-                self.share_data.get('coinbase', '').encode('hex')[:120],)
+                self.gentx_hash, got_txid)
+            print >>sys.stderr, '[GENTX-FAIL] packed_len=%d' % len(packed)
+            print >>sys.stderr, '[GENTX-FAIL] reconstructed_hex=%s' % packed.encode('hex')
+            # Also dump the hash_link fields so we can see what c2pool sent
+            print >>sys.stderr, '[GENTX-FAIL] hash_link state=%s' % self.hash_link['state'].encode('hex')
+            print >>sys.stderr, '[GENTX-FAIL] hash_link extra=%s length=%d' % (
+                self.hash_link['extra_data'].encode('hex')[:40], self.hash_link['length'])
+            # Dump coinbase and segwit data
+            print >>sys.stderr, '[GENTX-FAIL] coinbase(%d)=%s' % (
+                len(self.share_data.get('coinbase', '')),
+                self.share_data.get('coinbase', '').encode('hex')[:120])
+            if self.share_info.get('segwit_data'):
+                sd = self.share_info['segwit_data']
+                print >>sys.stderr, '[GENTX-FAIL] wtxid_merkle_root=%064x' % sd['wtxid_merkle_root']
+                print >>sys.stderr, '[GENTX-FAIL] txid_merkle_link branch=%d index=%d' % (
+                    len(sd['txid_merkle_link']['branch']), sd['txid_merkle_link']['index'])
+            print >>sys.stderr, '[GENTX-FAIL] num_txouts=%d' % len(gentx['tx_outs'])
             for i, txout in enumerate(gentx['tx_outs'][:6]):
                 print >>sys.stderr, '[GENTX-FAIL]  out[%d] value=%d script=%s' % (
                     i, txout['value'], txout['script'].encode('hex')[:60])
