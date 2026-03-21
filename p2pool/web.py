@@ -1030,10 +1030,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             miner_reward = chain['reward'] * float(miner_weight) / float(total_weight) if total_weight > 0 else chain['reward']
             donation_reward = chain['reward'] - miner_reward
             
-            # Enforce dust threshold to match actual coinbase builder (merged_mining.py)
-            dust_threshold = getattr(chain['addr_net'], 'DUST_THRESHOLD', int(1e8))
-            if donation_reward < dust_threshold and chain['reward'] > dust_threshold:
-                donation_reward = float(dust_threshold)
+            # V36 consensus: donation/marker must be >= 1 satoshi (not DUST_THRESHOLD)
+            # matches build_canonical_merged_coinbase() which uses 1-satoshi minimum
+            if donation_reward < 1 and chain['reward'] > 0:
+                donation_reward = 1.0
                 miner_reward = chain['reward'] - donation_reward
             
             # Assign merged payouts to parent addresses

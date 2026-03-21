@@ -701,9 +701,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 # Pass parent_net for automatic address conversion (LTC -> DOGE)
                                 # Pass coinbase_text from adapter template (if provided)
                                 # Pass v36_active for donation script selection (pre-V36 vs post-V36)
+                                # Use AutoRatchet state (authoritative) — is_v36_active() requires
+                                # chain_height >= CHAIN_LENGTH which fails on fresh chains with
+                                # preserved ratchet state, causing V35 coinbase on V36 shares.
                                 parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
                                 coinbase_text = template.get('auxpow', {}).get('coinbase_text')  # From MM adapter
-                                v36_active, _ = self.is_v36_active()
+                                v36_active = self.auto_ratchet.state in ('activated', 'confirmed')
                                 pass  # Suppressed: print >>sys.stderr, '[MERGED] Calling build_merged_coinbase with net=%s (ADDRESS_VERSION=%d), parent_net=%s' % (merged_addr_net.SYMBOL, merged_addr_net.ADDRESS_VERSION, parent_net.SYMBOL)
                                 doge_coinbase_tx = merged_mining.build_merged_coinbase(
                                     template, shareholders, merged_addr_net, merged_donation_percentage,
@@ -1370,7 +1373,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                      combined_donation_script_to_address,
                                      donation_script_to_address,
                                      COMBINED_DONATION_PUBKEY_HASH)
-            v36_active, _ = self.is_v36_active()
+            v36_active = self.auto_ratchet.state in ('activated', 'confirmed')
             if v36_active:
                 # Use the combined donation pubkey_hash (P2SH)
                 return COMBINED_DONATION_PUBKEY_HASH, p2pool_data.PUBKEY_TYPE_P2SH
@@ -2172,7 +2175,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         user_merged_work = {}
         parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
-        v36_active, _ = self.is_v36_active()
+        v36_active = self.auto_ratchet.state in ('activated', 'confirmed')
 
         for chainid, aux_work in self.merged_work.value.iteritems():
             # createauxblock/getauxblock path has no prebuilt merged block template details.
