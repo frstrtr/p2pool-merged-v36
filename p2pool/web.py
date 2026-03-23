@@ -929,10 +929,14 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         best = node.best_share_var.value
         parent_net = node.net.PARENT if hasattr(node.net, 'PARENT') else node.net
         
+        import sys as _sys
+        _sys.stderr.write('[MERGED-PAYOUTS-DBG] merged_chains=%d best=%s\n' % (len(merged_chains), best is not None))
         for chain in merged_chains:
+            _sys.stderr.write('[MERGED-PAYOUTS-DBG] chain=%s reward=%s chainid=%s\n' % (chain['symbol'], chain['reward'], chain['chainid']))
             if best is None or chain['reward'] <= 0:
+                _sys.stderr.write('[MERGED-PAYOUTS-DBG] SKIP: best=%s reward=%s\n' % (best is not None, chain['reward']))
                 continue
-            
+
             # Get V36 PPLNS weights for this merged chain
             try:
                 share_height = node.tracker.get_height(best)
@@ -944,9 +948,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     2**288 - 1,  # V36: unlimited — decay handles windowing
                     chain_id=chain['chainid'],
                 )
-            except Exception:
+            except Exception as _e:
+                _sys.stderr.write('[MERGED-PAYOUTS-DBG] get_v36_merged_weights FAILED: %s\n' % _e)
                 continue
-            
+
+            _sys.stderr.write('[MERGED-PAYOUTS-DBG] weights=%d total_weight=%d donation=%d\n' % (len(weights), total_weight, donation_weight))
             if total_weight <= 0:
                 continue
             
@@ -980,7 +986,11 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             key_to_parent = {}  # {merged_address: parent_address}
             accepted_weight = 0
             
+            _dbg_first = not getattr(get_current_merged_payouts, '_key_logged', False)
             for key, weight in weights.iteritems():
+                if _dbg_first:
+                    _sys.stderr.write('[MERGED-PAYOUTS-DBG] key type=%s len=%d repr=%s weight=%d\n' % (
+                        type(key).__name__, len(key), repr(key)[:80], weight))
                 try:
                     if isinstance(key, str) and key.startswith('MERGED:'):
                         # Explicit merged chain script from V36 share
@@ -1054,9 +1064,18 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                             key_to_parent[merged_address] = key
                             accepted_weight += weight
                         # else: unconvertible — weight redistributed via smaller denominator
-                except Exception:
-                    pass
-            
+                except Exception as _e:
+                    if _dbg_first:
+                        _sys.stderr.write('[MERGED-PAYOUTS-DBG] EXCEPTION resolving key: %s\n' % _e)
+
+            if _dbg_first:
+                get_current_merged_payouts._key_logged = True
+                _sys.stderr.write('[MERGED-PAYOUTS-DBG] resolved=%d accepted_weight=%d key_to_parent=%d\n' % (
+                    len(resolved), accepted_weight, len(key_to_parent)))
+                for _ma, _mw in resolved.iteritems():
+                    _pa = key_to_parent.get(_ma, '?')
+                    _sys.stderr.write('[MERGED-PAYOUTS-DBG]   %s -> parent=%s weight=%s\n' % (_ma, _pa, _mw))
+
             if accepted_weight <= 0:
                 continue
             

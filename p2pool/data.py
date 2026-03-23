@@ -1228,15 +1228,16 @@ class BaseShare(object):
         is_c2pool = len(coinbase) == 90 and '/c2pool/' in coinbase
         if not hasattr(cls, '_ref_dump_count'):
             cls._ref_dump_count = 0
-        if is_c2pool and cls._ref_dump_count < 3:
+        is_genesis = share_info.get('absheight', -1) == 0
+        if is_c2pool and (cls._ref_dump_count < 5 or is_genesis):
             cls._ref_dump_count += 1
-            print >>sys.stderr, '[REF-HASH-C2POOL] ref_packed_len=%d ref_hash=%064x' % (len(ref_packed), ref_hash_raw)
+            print >>sys.stderr, '[REF-HASH-C2POOL] ref_packed_len=%d ref_hash=%064x absheight=%s' % (len(ref_packed), ref_hash_raw, share_info.get('absheight', '?'))
             print >>sys.stderr, '[REF-HASH-C2POOL] ref_packed_hex=%s' % ref_packed.encode('hex')
-            print >>sys.stderr, '[REF-HASH-C2POOL] coinbase_len=%d subsidy=%s donation=%s absheight=%s' % (
+            print >>sys.stderr, '[REF-HASH-C2POOL] coinbase_len=%d subsidy=%s donation=%s' % (
                 len(coinbase),
                 share_info['share_data'].get('subsidy', '?'),
-                share_info['share_data'].get('donation', '?'),
-                share_info.get('absheight', '?'))
+                share_info['share_data'].get('donation', '?'))
+            print >>sys.stderr, '[REF-HASH-C2POOL] bits=%s max_bits=%s' % (share_info.get('bits', '?'), share_info.get('max_bits', '?'))
         return pack.IntType(256).pack(ref_hash_final)
     
     __slots__ = 'net peer_addr contents min_header share_info hash_link merkle_link hash share_data max_target target timestamp previous_hash new_script desired_version gentx_hash header pow_hash header_hash new_transaction_hashes time_seen absheight abswork _message_data _parsed_messages _signing_key_info'.split(' ')
@@ -1360,6 +1361,17 @@ class BaseShare(object):
             from p2pool import p2p
             raise p2p.PeerMisbehavingError('share target %064x exceeds max_target %064x — too easy' % (self.target, self.max_target))
 
+        # [C2POOL-DEBUG] Dump header hex for c2pool shares (90-byte coinbase = /c2pool/ tag)
+        coinbase = self.share_data.get('coinbase', b'')
+        if '/c2pool/' in coinbase:
+            import sys
+            header_packed = bitcoin_data.block_header_type.pack(self.header)
+            _hdump = getattr(type(self), '_hdr_dump_count', 0)
+            if _hdump < 5:
+                type(self)._hdr_dump_count = _hdump + 1
+                print >>sys.stderr, '[HDR-DUMP-C2POOL] %s hash=%064x pow=%064x' % (
+                    header_packed.encode('hex'), self.header_hash, self.pow_hash)
+
         if self.pow_hash > self.target:
             from p2pool import p2p
             import sys
@@ -1433,6 +1445,41 @@ class BaseShare(object):
             message_data=self._message_data,
             merged_coinbase_info=self.share_info.get('merged_coinbase_info', None))
 
+        # [C2POOL-DEBUG] Genesis share: field-by-field comparison of share_info
+        _prev = self.share_data.get('previous_share_hash')
+        is_genesis = _prev is None or _prev == 0 or self.absheight == 0
+        if is_genesis:
+            import sys
+            si_new = share_info  # from generate_transaction
+            si_old = self.share_info  # stored in share
+            for key in set(list(si_new.keys()) + list(si_old.keys())):
+                v_new = si_new.get(key)
+                v_old = si_old.get(key)
+                if key == 'share_data':
+                    sd_new = v_new or {}
+                    sd_old = v_old or {}
+                    for sk in set(list(sd_new.keys()) + list(sd_old.keys())):
+                        sv_new = sd_new.get(sk)
+                        sv_old = sd_old.get(sk)
+                        if sv_new != sv_old:
+                            print >>sys.stderr, '[GENESIS-DIFF] share_data.%s: stored=%s recomputed=%s' % (sk, repr(sv_old)[:80], repr(sv_new)[:80])
+                elif key == 'segwit_data':
+                    if v_new is not None and v_old is not None:
+                        for sk in set(list(v_new.keys()) + list(v_old.keys())):
+                            sv_new = v_new.get(sk)
+                            sv_old = v_old.get(sk)
+                            if sv_new != sv_old:
+                                print >>sys.stderr, '[GENESIS-DIFF] segwit_data.%s: stored=%s recomputed=%s' % (sk, repr(sv_old)[:80], repr(sv_new)[:80])
+                    elif v_new != v_old:
+                        print >>sys.stderr, '[GENESIS-DIFF] %s: stored=%s recomputed=%s' % (key, repr(v_old)[:60], repr(v_new)[:60])
+                else:
+                    if v_new != v_old:
+                        print >>sys.stderr, '[GENESIS-DIFF] %s: stored=%s recomputed=%s' % (key, repr(v_old)[:80], repr(v_new)[:80])
+            ref_old = self.get_ref_hash(self.net, si_old, self.contents['ref_merkle_link'], message_data=self._message_data)
+            ref_new = self.get_ref_hash(self.net, si_new, self.contents['ref_merkle_link'], message_data=self._message_data)
+            print >>sys.stderr, '[GENESIS-DIFF] ref_hash stored=%s recomputed=%s match=%s' % (
+                ref_old.encode('hex')[:32], ref_new.encode('hex')[:32], ref_old == ref_new)
+
         if other_tx_hashes2 != other_tx_hashes:
             raise ValueError('reconstructed other_tx_hashes do not match expected')
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
@@ -1462,6 +1509,26 @@ class BaseShare(object):
             for i, txout in enumerate(gentx['tx_outs'][:6]):
                 print >>sys.stderr, '[GENTX-FAIL]  out[%d] value=%d script=%s' % (
                     i, txout['value'], txout['script'].encode('hex')[:60])
+            # [C2POOL-DEBUG] Dump PPLNS walk info for comparison with c2pool
+            try:
+                _prev = self.share_info['share_data']['previous_share_hash']
+                _height = tracker.get_height(_prev) if _prev else 0
+                _max_sh = min(_height, self.net.REAL_CHAIN_LENGTH)
+                _v36 = self.VERSION >= 36
+                if _v36:
+                    _wts, _tw, _dw = get_decayed_cumulative_weights(
+                        tracker, _prev, _max_sh, 2**288 - 1, self.net)
+                else:
+                    _wts, _tw, _dw = {}, 0, 0
+                print >>sys.stderr, '[GENTX-FAIL] pplns_start=%s max_shares=%d height=%d total_weight=%d don_weight=%d n_addrs=%d' % (
+                    '%064x' % (_prev,) if _prev else 'None',
+                    _max_sh, _height, _tw, _dw, len(_wts))
+                for _k, _v in sorted(_wts.items(), key=lambda x: -x[1])[:4]:
+                    _amt = self.share_data['subsidy'] * _v // _tw if _tw > 0 else 0
+                    print >>sys.stderr, '[GENTX-FAIL]  pplns %s weight=%d amount=%d' % (
+                        _k.encode('hex')[:40], _v, _amt)
+            except Exception as _e:
+                print >>sys.stderr, '[GENTX-FAIL] pplns dump error: %s' % _e
             raise ValueError('''gentx doesn't match hash_link''')
         
         # V36+: Verify merged coinbase consensus enforcement.
@@ -1884,6 +1951,14 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
                     if entry['chain_id'] == self.chain_id:
                         address_key = 'MERGED:' + entry['script'].encode('hex')
                         break
+            # [C2POOL-DEBUG] Log c2pool shares' merged_addresses
+            import sys
+            coinbase = share.share_data.get('coinbase', b'')
+            if '/c2pool/' in coinbase and not getattr(self, '_c2pool_logged', False):
+                self._c2pool_logged = True
+                print >>sys.stderr, '[SKIPLIST-DBG] c2pool share %064x merged_addrs=%r chain_id=%s key=%s' % (
+                    share.hash, merged_addrs, self.chain_id,
+                    address_key.encode('hex') if isinstance(address_key, str) and not address_key.startswith('MERGED:') else address_key)
 
         return (1, {address_key: att*(65535-share.share_data['donation'])},
                 att*65535, att*share.share_data['donation'])
