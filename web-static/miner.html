@@ -865,6 +865,13 @@
                                 symbolSpan.style.cssText = 'font-size: 0.75rem; color: #8888a0;';
                                 symbolSpan.textContent = ' (' + (mp.symbol || 'DOGE') + ' merged mining)';
                                 mergedAddrDiv.appendChild(symbolSpan);
+                                if (mp.source === 'auto-convert') {
+                                    var autoSpan = document.createElement('span');
+                                    autoSpan.style.cssText = 'color: #b08800; font-size: 0.65rem; margin-left: 6px;';
+                                    autoSpan.title = 'Auto-converted from parent chain address (same pubkey hash). During V35\u2192V36 transition, all merged addresses are auto-converted.';
+                                    autoSpan.textContent = '\u26a0 auto';
+                                    mergedAddrDiv.appendChild(autoSpan);
+                                }
                                 headerDiv.insertBefore(mergedAddrDiv, headerDiv.querySelector('.miner-status'));
                             }
                         });
@@ -882,6 +889,13 @@
                             var labelDiv = document.createElement('div');
                             labelDiv.className = 'stat-label';
                             labelDiv.textContent = mp.network + ' on next block';
+                            if (mp.source === 'auto-convert') {
+                                var autoLabel = document.createElement('span');
+                                autoLabel.style.cssText = 'color: #b08800; font-size: 0.6rem; margin-left: 4px;';
+                                autoLabel.title = 'Auto-converted from parent chain address. Set explicit DOGE address in stratum login for safety.';
+                                autoLabel.textContent = '\u26a0 auto';
+                                labelDiv.appendChild(autoLabel);
+                            }
                             card.appendChild(labelDiv);
                             var addrLabelDiv = document.createElement('div');
                             addrLabelDiv.className = 'stat-label';

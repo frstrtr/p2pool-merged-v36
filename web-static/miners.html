@@ -884,9 +884,9 @@
                         .text(miner.mergedAddress);
                     if (miner.mergedAutoConverted) {
                         mergedDiv.append('span')
-                            .attr('style', 'color: #888; font-size: 0.65rem; margin-left: 4px;')
-                            .attr('title', 'Auto-converted from parent address (same pubkey hash)')
-                            .text('(auto)');
+                            .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
+                            .attr('title', 'Auto-converted from parent chain address (same pubkey hash). During V35\u2192V36 transition, all merged addresses are auto-converted since V35 shares cannot carry explicit merged addresses.')
+                            .text('\u26a0 auto');
                     }
                     mergedDiv.append('a')
                         .attr('href', 'https://blockchair.com/dogecoin/address/' + encodeURIComponent(miner.mergedAddress))

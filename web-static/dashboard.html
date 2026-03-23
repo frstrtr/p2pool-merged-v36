@@ -3415,7 +3415,21 @@
                             .attr('target', '_blank')
                             .attr('title', merged.address)
                             .text(merged.address);
-                        
+                        if (merged.source === 'auto-convert') {
+                            addrCell.append('span')
+                                .style('color', '#b08800')
+                                .style('font-size', '0.6rem')
+                                .style('margin-left', '4px')
+                                .attr('title', 'Auto-converted from parent chain address (same pubkey hash). During V35\u2192V36 transition, all merged addresses are auto-converted since V35 shares cannot carry explicit merged addresses.')
+                                .text('\u26a0 auto');
+                        } else if (merged.source === 'donation') {
+                            addrCell.append('span')
+                                .style('color', '#888')
+                                .style('font-size', '0.6rem')
+                                .style('margin-left', '4px')
+                                .text('donation');
+                        }
+
                         subRow.append('td')
                             .style('text-align', 'right')
                             .style('color', '#6f42c1')
