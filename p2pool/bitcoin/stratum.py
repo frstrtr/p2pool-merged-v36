@@ -28,14 +28,17 @@ class PoolStatistics(object):
     - Connection history for monitoring
     """
     
-    # Class-level singleton instance
-    _instance = None
-    
+    # Process-wide singleton stored in builtins to survive duplicate module imports
+    # (e.g. p2pool.bitcoin.stratum vs p2pool.p2pool.bitcoin.stratum)
+
     @classmethod
     def get_instance(cls):
-        if cls._instance is None:
-            cls._instance = PoolStatistics()
-        return cls._instance
+        import __builtin__
+        inst = getattr(__builtin__, '_pool_stats_instance', None)
+        if inst is None:
+            inst = PoolStatistics()
+            __builtin__._pool_stats_instance = inst
+        return inst
     
     def __init__(self):
         # Connection tracking - regular dict, cleaned up in unregister_connection
