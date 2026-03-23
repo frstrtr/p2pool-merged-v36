@@ -606,7 +606,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                     continue
 
                                                 # Node operator override for raw script keys
-                                                if parent_address and parent_address == self.args.address and self.merged_operator_address:
+                                                # Compare pubkey_hash directly — self.args.address may be None
+                                                # when address was auto-detected from bitcoind
+                                                if self.my_pubkey_hash is not None and pubkey_hash == self.my_pubkey_hash and self.merged_operator_address:
                                                     override_addr = self._get_validated_merged_operator_address(merged_addr_net, chainid)
                                                     if override_addr is not None:
                                                         merged_address = override_addr
@@ -634,7 +636,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                 # Node operator override: if --merged-operator-address is set,
                                                 # use it for the operator's own share of merged chain payout
                                                 # instead of auto-converting from parent chain address.
-                                                if parent_address == self.args.address and self.merged_operator_address:
+                                                is_own_address = (self.args.address is not None and parent_address == self.args.address) or \
+                                                    (self.my_pubkey_hash is not None and pubkey_hash is not None and pubkey_hash == self.my_pubkey_hash)
+                                                if is_own_address and self.merged_operator_address:
                                                     override_addr = self._get_validated_merged_operator_address(merged_addr_net, chainid)
                                                     if override_addr is not None:
                                                         merged_address = override_addr
