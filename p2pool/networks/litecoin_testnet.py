@@ -23,10 +23,11 @@ MAX_TARGET = 2**256//20 - 1  # Match jtoomim canonical (2**256//20) for cross-ve
 #   - Node must connect to peers and sync existing sharechain before mining
 #   - Prevents accidental network splits in production
 # Set to False for: testnet, regtest, solo mining, or starting a new isolated pool
-PERSIST = False
+PERSIST = True
 
 WORKER_PORT = 19327  # Stratum port for miners to connect (stratum+tcp://IP:19327)
 BOOTSTRAP_ADDRS = [
+    '192.168.86.191',  # c2pool - genesis bootstrap node
     '192.168.86.29',  # node29 - v36 testnet node
     '192.168.86.31',  # node31 - v36 testnet node
 ]
