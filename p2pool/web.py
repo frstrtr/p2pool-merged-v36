@@ -972,16 +972,17 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 pass
             
             # Resolve weight keys to merged chain addresses.
-            # Two key types from get_v36_merged_weights():
+            # Three key types from get_v36_merged_weights():
             #   'MERGED:<hex_script>' = explicit merged chain script
-            #   parent_address_string = needs auto-conversion
+            #   raw scriptPubKey bytes = needs script-based auto-conversion (post-53994de3)
+            #   parent_address_string = needs address-based auto-conversion (legacy)
             resolved = {}       # {merged_address: weight}
             key_to_parent = {}  # {merged_address: parent_address}
             accepted_weight = 0
             
             for key, weight in weights.iteritems():
                 try:
-                    if key.startswith('MERGED:'):
+                    if isinstance(key, str) and key.startswith('MERGED:'):
                         # Explicit merged chain script from V36 share
                         merged_script = key[7:].decode('hex')
                         try:
@@ -1000,8 +1001,40 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         if parent_addr:
                             key_to_parent[merged_address] = parent_addr
                         accepted_weight += weight
+                    elif isinstance(key, str) and len(key) >= 22 and not key[0].isalnum():
+                        # Raw scriptPubKey bytes (from share.new_script after 53994de3).
+                        # Extract hash from script, build merged address directly.
+                        merged_address = None
+                        parent_address = None
+                        if len(key) == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac':
+                            # P2PKH script — extract 20-byte pubkey_hash
+                            pubkey_hash = pack.IntType(160).unpack(key[3:23])
+                            merged_address = bitcoin_data.pubkey_hash_to_address(
+                                pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
+                            parent_address = bitcoin_data.script2_to_address(
+                                key, parent_net.ADDRESS_VERSION, -1, parent_net)
+                        elif len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87':
+                            # P2SH script — extract 20-byte script_hash
+                            pubkey_hash = pack.IntType(160).unpack(key[2:22])
+                            merged_address = bitcoin_data.pubkey_hash_to_address(
+                                pubkey_hash, chain['addr_net'].ADDRESS_P2SH_VERSION, -1, chain['addr_net'])
+                            parent_address = bitcoin_data.script2_to_address(
+                                key, parent_net.ADDRESS_VERSION, -1, parent_net)
+                        elif len(key) == 22 and key[:2] == '\x00\x14':
+                            # P2WPKH script — 20-byte witness program = pubkey_hash
+                            pubkey_hash = pack.IntType(160).unpack(key[2:22])
+                            merged_address = bitcoin_data.pubkey_hash_to_address(
+                                pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
+                            parent_address = bitcoin_data.script2_to_address(
+                                key, parent_net.ADDRESS_VERSION, -1, parent_net)
+                        # else: P2WSH/P2TR — unconvertible, skip
+                        if merged_address is not None:
+                            resolved[merged_address] = resolved.get(merged_address, 0) + weight
+                            if parent_address:
+                                key_to_parent[merged_address] = parent_address
+                            accepted_weight += weight
                     else:
-                        # Parent chain address — try auto-conversion
+                        # Legacy path: base58/bech32 address string
                         addr_result = is_pubkey_hash_address(key, parent_net)
                         is_convertible = addr_result[0]
                         pubkey_hash = addr_result[1]

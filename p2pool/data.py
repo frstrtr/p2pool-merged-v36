@@ -221,10 +221,26 @@ def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
     
     for key, weight in weights.iteritems():
         merged_script = None
-        if key.startswith('MERGED:'):
+        if isinstance(key, str) and key.startswith('MERGED:'):
             merged_script = key[7:].decode('hex')
+        elif isinstance(key, str) and len(key) >= 22 and not key[0].isalnum():
+            # Raw scriptPubKey bytes (from share.new_script after 53994de3).
+            # Extract pubkey_hash/script_hash directly from the script format.
+            if len(key) == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac':
+                # P2PKH: OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
+                hash_bytes = key[3:23]
+                merged_script = '\x76\xa9\x14' + hash_bytes + '\x88\xac'
+            elif len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87':
+                # P2SH: OP_HASH160 <20 bytes> OP_EQUAL
+                hash_bytes = key[2:22]
+                merged_script = '\xa9\x14' + hash_bytes + '\x87'
+            elif len(key) == 22 and key[:2] == '\x00\x14':
+                # P2WPKH: witness v0, 20-byte program (same pubkey_hash)
+                hash_bytes = key[2:22]
+                merged_script = '\x76\xa9\x14' + hash_bytes + '\x88\xac'
+            # else: P2WSH (34 bytes), P2TR (34 bytes), etc. — unconvertible, skip
         else:
-            # Auto-convert: extract pubkey_hash from parent address
+            # Legacy path: base58/bech32 address string (pre-53994de3 callers)
             try:
                 pubkey_hash, version, witver = bitcoin_data.address_to_pubkey_hash(key, parent_net)
                 if version == parent_net.ADDRESS_VERSION:
@@ -1413,7 +1429,7 @@ class BaseShare(object):
             merged_addresses=self.share_info.get('merged_addresses', None),
             message_data=self._message_data,
             merged_coinbase_info=self.share_info.get('merged_coinbase_info', None))
-        
+
         if other_tx_hashes2 != other_tx_hashes:
             raise ValueError('reconstructed other_tx_hashes do not match expected')
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:

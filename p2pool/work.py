@@ -563,23 +563,59 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     accepted_total_weight = 0
                                     for key, weight in weights.iteritems():
                                         try:
-                                            if key.startswith('MERGED:'):
+                                            if isinstance(key, str) and key.startswith('MERGED:'):
                                                 # Explicit merged chain script from V36 share's merged_addresses.
                                                 # Pass through as-is — build_merged_coinbase() handles MERGED: prefix
                                                 # by decoding the hex script directly (no address round-trip needed).
                                                 accepted_weights[key] = accepted_weights.get(key, 0) + weight
                                                 accepted_total_weight += weight
                                                 continue
-                                            
-                                            # Parent chain address — check if convertible to merged chain
-                                            key_is_address = len(key) >= 25 and len(key) <= 100 and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' for c in key)
-                                            
-                                            if key_is_address:
+
+                                            # Check if key is raw scriptPubKey bytes (post-53994de3)
+                                            # or a base58/bech32 address string (legacy).
+                                            key_is_raw_script = isinstance(key, str) and len(key) >= 22 and not key[0].isalnum()
+                                            key_is_address = not key_is_raw_script and len(key) >= 25 and len(key) <= 100 and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' for c in key)
+
+                                            if key_is_raw_script:
+                                                # Raw scriptPubKey bytes from share.new_script.
+                                                # Extract pubkey_hash directly from script format.
+                                                merged_address = None
+                                                parent_address = None
+                                                p_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
+                                                if len(key) == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac':
+                                                    # P2PKH script
+                                                    pubkey_hash = pack.IntType(160).unpack(key[3:23])
+                                                    parent_address = bitcoin_data.pubkey_hash_to_address(
+                                                        pubkey_hash, p_net.ADDRESS_VERSION, -1, p_net)
+                                                    merged_address = bitcoin_data.pubkey_hash_to_address(
+                                                        pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                                elif len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87':
+                                                    # P2SH script
+                                                    pubkey_hash = pack.IntType(160).unpack(key[2:22])
+                                                    merged_address = bitcoin_data.pubkey_hash_to_address(
+                                                        pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
+                                                elif len(key) == 22 and key[:2] == '\x00\x14':
+                                                    # P2WPKH script — 20-byte witness program = pubkey_hash
+                                                    pubkey_hash = pack.IntType(160).unpack(key[2:22])
+                                                    merged_address = bitcoin_data.pubkey_hash_to_address(
+                                                        pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                                # else: P2WSH/P2TR — unconvertible, skip
+
+                                                if merged_address is None:
+                                                    skipped_addresses.append((key.encode('hex')[:20] + '...', 'unconvertible script type'))
+                                                    continue
+
+                                                # Node operator override for raw script keys
+                                                if parent_address and parent_address == self.args.address and self.merged_operator_address:
+                                                    override_addr = self._get_validated_merged_operator_address(merged_addr_net, chainid)
+                                                    if override_addr is not None:
+                                                        merged_address = override_addr
+                                            elif key_is_address:
                                                 # VERSION >= 34: key is already a parent chain address string
                                                 # Need to convert to merged chain address
                                                 parent_address = key
                                                 parent_net = self.node.net.PARENT if hasattr(self.node.net, 'PARENT') else self.node.net
-                                                
+
                                                 # Validate that address can be converted to merged chain
                                                 # P2PKH and P2WPKH: auto-convert to merged P2PKH
                                                 # P2SH: auto-convert to merged P2SH
@@ -589,12 +625,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                 pubkey_hash = addr_result[1]
                                                 error_msg = addr_result[2]
                                                 addr_type = addr_result[3] if len(addr_result) > 3 else 'p2pkh'
-                                                
+
                                                 if not is_convertible:
                                                     # Cannot convert this address - skip it with warning
                                                     skipped_addresses.append((parent_address[:20] + '...', error_msg))
                                                     continue
-                                                
+
                                                 # Node operator override: if --merged-operator-address is set,
                                                 # use it for the operator's own share of merged chain payout
                                                 # instead of auto-converting from parent chain address.
