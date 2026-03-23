@@ -1885,18 +1885,25 @@
                 return difficulty * DUMB_SCRYPT_DIFF / VARDIFF_TARGET_SECONDS;
             }
             
-            // Fetch stratum_stats to get ONLY real connected miners (not donation/fee addresses)
+            // Fetch stratum_stats and v36_status to get real connected miners and transition state
             d3.json('../stratum_stats', function(stratum_stats) {
+            d3.json('../v36_status', function(v36_status) {
                 var minerGroups = {};
-                
+
+                // Detect V35->V36 transition: no V36 shares means all merged addresses are auto-converted
+                var inTransition = true;  // default to transition if v36_status unavailable
+                if (v36_status && v36_status.share_chain) {
+                    inTransition = (v36_status.share_chain.v36_shares === 0);
+                }
+
                 // Use stratum_stats.workers as the source of real miners
                 var stratumWorkers = (stratum_stats && stratum_stats.workers) || {};
-                
+
                 for (var workerName in stratumWorkers) {
                     var workerData = stratumWorkers[workerName];
                     var baseAddress = extractAddress(workerName);
                     var mergedAddr = extractMergedAddress(workerName);
-                    
+
                     // If no explicit merged address in worker name, check API merged_addresses
                     var mergedAutoConverted = false;
                     var mergedRedistributed = false;
@@ -1907,6 +1914,17 @@
                     }
                     mergedRedistributed = workerData.merged_redistributed || false;
                     mergedReverseConverted = workerData.merged_reverse_converted || false;
+
+                    // During V35->V36 transition, V35 shares cannot carry explicit merged_addresses.
+                    // Replace explicitly set DOGE address with the actual auto-converted address
+                    // from the API to prevent miners thinking they'll be paid to their explicit address.
+                    if (inTransition && workerData.merged_addresses) {
+                        var autoAddr = workerData.merged_addresses['dogecoin'] || null;
+                        if (autoAddr && mergedAddr && autoAddr !== mergedAddr) {
+                            mergedAddr = autoAddr;
+                        }
+                        mergedAutoConverted = true;
+                    }
                     
                     // Get difficulty from connection_difficulties array (use first/current difficulty)
                     var difficulty = 0;
@@ -2240,12 +2258,13 @@
                 
                 // Initial render — show only currently connected (active) miners
                 renderMinersTable(false);
-                
+
                 // Wire checkbox to toggle historical miners visibility
                 d3.select('#show_historical_miners').on('change', function() {
                     renderMinersTable(this.checked);
                 });
-            });
+            }); // end v36_status
+            }); // end stratum_stats
         }
         
         var currency_info = {};

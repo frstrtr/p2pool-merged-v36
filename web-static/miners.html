@@ -679,8 +679,9 @@
                 
                 var attempts_to_share = local_stats.attempts_to_share || 0;
                 
-                // Fetch stratum_stats to get ONLY real connected miners
+                // Fetch stratum_stats and v36_status to get real connected miners and transition state
                 d3.json('../stratum_stats', function(stratum_stats) {
+                d3.json('../v36_status', function(v36_status) {
                     // Extract base address helper
                     // Split on comma first (merged mining: PARENT_ADDR,DOGE_ADDR.worker)
                     function extractAddress(workerName) {
@@ -693,21 +694,36 @@
                         if (parts.length < 2) return null;
                         return parts[1].split('.')[0].split('+')[0].split('/')[0];
                     }
-                    
+
+                    // Detect V35->V36 transition
+                    var inTransition = true;
+                    if (v36_status && v36_status.share_chain) {
+                        inTransition = (v36_status.share_chain.v36_shares === 0);
+                    }
+
                     // Group workers by base address - use stratum_stats as source
                     var minerGroups = {};
                     var stratumWorkers = (stratum_stats && stratum_stats.workers) || {};
-                    
+
                     for (var workerName in stratumWorkers) {
                         var workerData = stratumWorkers[workerName];
                         var baseAddress = extractAddress(workerName);
                         var mergedAddr = extractMergedAddress(workerName);
-                        
+
                         // If no explicit merged address in worker name, check API merged_addresses
                         var mergedAutoConverted = false;
                         if (!mergedAddr && workerData.merged_addresses) {
                             mergedAddr = workerData.merged_addresses['dogecoin'] || null;
                             mergedAutoConverted = workerData.merged_auto_converted || false;
+                        }
+
+                        // During transition, replace explicit DOGE with auto-converted address
+                        if (inTransition && workerData.merged_addresses) {
+                            var autoAddr = workerData.merged_addresses['dogecoin'] || null;
+                            if (autoAddr && mergedAddr && autoAddr !== mergedAddr) {
+                                mergedAddr = autoAddr;
+                            }
+                            mergedAutoConverted = true;
                         }
                         
                         // Get difficulty from connection_difficulties
@@ -837,7 +853,8 @@
                             });
                         });
                     });
-                });
+                }); // end v36_status
+                }); // end stratum_stats
             });
         }
         
