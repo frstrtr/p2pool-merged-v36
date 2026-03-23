@@ -38,8 +38,8 @@ class PoolStatistics(object):
         return cls._instance
     
     def __init__(self):
-        # Connection tracking (weak refs to auto-cleanup disconnected workers)
-        self.connections = weakref.WeakValueDictionary()
+        # Connection tracking — regular dict, explicitly cleaned up in unregister_connection
+        self.connections = {}
         self.connection_count = 0
         
         # Per-worker statistics {worker_name: {shares, hash_rate, last_seen, ...}}
@@ -194,6 +194,10 @@ class PoolStatistics(object):
         for conn_id, conn in self.connections.items():
             if hasattr(conn, 'username') and conn.username:
                 worker_name = conn.username
+            elif hasattr(conn, 'user') and conn.user:
+                worker_name = conn.user
+            else:
+                continue
                 if worker_name not in workers:
                     # Extract display merged addresses (exclude internal keys)
                     merged_display = {}
@@ -240,7 +244,7 @@ class PoolStatistics(object):
         connected_workers = self.get_connected_workers()
         
         return {
-            'connections': self.connection_count,
+            'connections': len(self.connections),
             'workers': len(connected_workers),
             'unique_addresses': len(self.get_unique_connected_addresses()),
             'total_accepted': self.total_shares_accepted,
