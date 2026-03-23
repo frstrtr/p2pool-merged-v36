@@ -38,7 +38,7 @@ class PoolStatistics(object):
         return cls._instance
     
     def __init__(self):
-        # Connection tracking — regular dict, explicitly cleaned up in unregister_connection
+        # Connection tracking - regular dict, cleaned up in unregister_connection
         self.connections = {}
         self.connection_count = 0
         
