@@ -223,7 +223,10 @@ def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
         merged_script = None
         if isinstance(key, str) and key.startswith('MERGED:'):
             merged_script = key[7:].decode('hex')
-        elif isinstance(key, str) and len(key) >= 22 and not key[0].isalnum():
+        elif isinstance(key, str) and (
+            (len(key) == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac') or
+            (len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87') or
+            (len(key) == 22 and key[:2] == '\x00\x14')):
             # Raw scriptPubKey bytes (from share.new_script after 53994de3).
             # Extract pubkey_hash/script_hash directly from the script format.
             if len(key) == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac':

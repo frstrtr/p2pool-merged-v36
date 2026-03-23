@@ -573,7 +573,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
                                             # Check if key is raw scriptPubKey bytes (post-53994de3)
                                             # or a base58/bech32 address string (legacy).
-                                            key_is_raw_script = isinstance(key, str) and len(key) >= 22 and not key[0].isalnum()
+                                            key_is_raw_script = isinstance(key, str) and (
+                                                (len(key) == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac') or
+                                                (len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87') or
+                                                (len(key) == 22 and key[:2] == '\x00\x14'))
                                             key_is_address = not key_is_raw_script and len(key) >= 25 and len(key) <= 100 and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' for c in key)
 
                                             if key_is_raw_script:

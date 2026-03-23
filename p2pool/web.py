@@ -1001,7 +1001,10 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         if parent_addr:
                             key_to_parent[merged_address] = parent_addr
                         accepted_weight += weight
-                    elif isinstance(key, str) and len(key) >= 22 and not key[0].isalnum():
+                    elif isinstance(key, str) and (
+                        (len(key) == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac') or
+                        (len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87') or
+                        (len(key) == 22 and key[:2] == '\x00\x14')):
                         # Raw scriptPubKey bytes (from share.new_script after 53994de3).
                         # Extract pubkey_hash from script, build merged address directly.
                         merged_address = None
