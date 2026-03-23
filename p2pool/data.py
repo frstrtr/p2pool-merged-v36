@@ -1881,15 +1881,7 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
                     if entry['chain_id'] == self.chain_id:
                         address_key = 'MERGED:' + entry['script'].encode('hex')
                         break
-            # Debug: log c2pool shares' merged_addresses
-            import sys
-            coinbase = share.share_data.get('coinbase', b'')
-            if '/c2pool/' in coinbase and not getattr(self, '_c2pool_logged', False):
-                self._c2pool_logged = True
-                print >>sys.stderr, '[SKIPLIST-DBG] c2pool share %064x merged_addrs=%r chain_id=%s key=%s' % (
-                    share.hash, merged_addrs, self.chain_id,
-                    address_key.encode('hex') if isinstance(address_key, str) and not address_key.startswith('MERGED:') else address_key)
-        
+
         return (1, {address_key: att*(65535-share.share_data['donation'])},
                 att*65535, att*share.share_data['donation'])
     

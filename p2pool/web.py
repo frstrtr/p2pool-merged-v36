@@ -1003,32 +1003,33 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                         accepted_weight += weight
                     elif isinstance(key, str) and len(key) >= 22 and not key[0].isalnum():
                         # Raw scriptPubKey bytes (from share.new_script after 53994de3).
-                        # Extract hash from script, build merged address directly.
+                        # Extract pubkey_hash from script, build merged address directly.
                         merged_address = None
                         parent_address = None
+                        pubkey_hash = None
                         if len(key) == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac':
-                            # P2PKH script — extract 20-byte pubkey_hash
+                            # P2PKH script
                             pubkey_hash = pack.IntType(160).unpack(key[3:23])
                             merged_address = bitcoin_data.pubkey_hash_to_address(
                                 pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
-                            parent_address = bitcoin_data.script2_to_address(
-                                key, parent_net.ADDRESS_VERSION, -1, parent_net)
                         elif len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87':
-                            # P2SH script — extract 20-byte script_hash
+                            # P2SH script
                             pubkey_hash = pack.IntType(160).unpack(key[2:22])
                             merged_address = bitcoin_data.pubkey_hash_to_address(
                                 pubkey_hash, chain['addr_net'].ADDRESS_P2SH_VERSION, -1, chain['addr_net'])
-                            parent_address = bitcoin_data.script2_to_address(
-                                key, parent_net.ADDRESS_VERSION, -1, parent_net)
                         elif len(key) == 22 and key[:2] == '\x00\x14':
-                            # P2WPKH script — 20-byte witness program = pubkey_hash
+                            # P2WPKH script — witness program = pubkey_hash
                             pubkey_hash = pack.IntType(160).unpack(key[2:22])
                             merged_address = bitcoin_data.pubkey_hash_to_address(
                                 pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
-                            parent_address = bitcoin_data.script2_to_address(
-                                key, parent_net.ADDRESS_VERSION, -1, parent_net)
                         # else: P2WSH/P2TR — unconvertible, skip
                         if merged_address is not None:
+                            # Resolve parent address separately — must not kill merged_address
+                            try:
+                                parent_address = bitcoin_data.pubkey_hash_to_address(
+                                    pubkey_hash, parent_net.ADDRESS_VERSION, -1, parent_net)
+                            except Exception:
+                                parent_address = None
                             resolved[merged_address] = resolved.get(merged_address, 0) + weight
                             if parent_address:
                                 key_to_parent[merged_address] = parent_address
