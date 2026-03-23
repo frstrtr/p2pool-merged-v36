@@ -3133,17 +3133,17 @@
                         .attr('class', 'hash-link')
                         .attr('href', function(b) {
                             var explorer_config = merged_explorers[b.chainid];
-                            if (explorer_config && b.pow_hash) {
-                                return explorer_config.testnet + b.pow_hash;
+                            if (explorer_config && b.hash) {
+                                return explorer_config.mainnet + b.hash;
                             }
                             return '#';
                         })
                         .attr('target', '_blank')
                         .attr('title', function(b) {
-                            return 'POW Hash: ' + (b.pow_hash || 'N/A');
+                            return 'Block Hash: ' + (b.hash || 'N/A') + '\nPoW Hash: ' + (b.pow_hash || 'N/A');
                         })
                         .text(function(b) {
-                            var hash = b.pow_hash || '-';
+                            var hash = b.hash || '-';
                             return '...' + hash.substr(-12);
                         });
                     tr.append('td')
