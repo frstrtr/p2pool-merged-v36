@@ -1950,8 +1950,11 @@
                     }
                     
                     // Get hashrate: first try actual measured rate, then estimate from difficulty
-                    var hashrate = workerData.hash_rate || 0;
-                    if (hashrate === 0 && local_stats.miner_hash_rates && local_stats.miner_hash_rates[workerName]) {
+                    // Ignore stale hash_rate from workers not seen in last 10 minutes
+                    var workerLastSeen = workerData.last_seen || 0;
+                    var workerStale = workerLastSeen > 0 && (Date.now() / 1000 - workerLastSeen) > 600;
+                    var hashrate = (!workerStale && workerData.hash_rate) ? workerData.hash_rate : 0;
+                    if (hashrate === 0 && !workerStale && local_stats.miner_hash_rates && local_stats.miner_hash_rates[workerName]) {
                         hashrate = local_stats.miner_hash_rates[workerName];
                     }
                     // If still no hashrate, estimate from difficulty
