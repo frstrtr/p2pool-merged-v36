@@ -1920,10 +1920,17 @@
                     // from the API to prevent miners thinking they'll be paid to their explicit address.
                     if (inTransition && workerData.merged_addresses) {
                         var autoAddr = workerData.merged_addresses['dogecoin'] || null;
+                        var hadExplicit = !!extractMergedAddress(workerName);
                         if (autoAddr && mergedAddr && autoAddr !== mergedAddr) {
+                            // Explicit address differs from auto-converted — show auto-converted
                             mergedAddr = autoAddr;
+                            mergedAutoConverted = true;
+                        } else if (!hadExplicit) {
+                            // No explicit address — this is purely auto-converted
+                            mergedAutoConverted = true;
                         }
-                        mergedAutoConverted = true;
+                        // If miner set explicit address and it matches auto-converted,
+                        // keep mergedAutoConverted from the API flag (line 1913)
                     }
                     
                     // Get difficulty from connection_difficulties array (use first/current difficulty)
