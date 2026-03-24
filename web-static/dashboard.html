@@ -2107,7 +2107,14 @@
                         .text(miner.address);
                     // Parent address status indicators
                     var _sym = (currency_info && currency_info.symbol) || 'parent';
-                    if (miner.mergedReverseConverted) {
+                    if (miner.mergedReverseConverted && miner.mergedAutoConverted) {
+                        // Case 5: DOGE address used as parent — LTC auto-derived from DOGE key
+                        addressCell.append('span')
+                            .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                            .attr('title', 'DOGE address detected in ' + _sym + ' field — ' + _sym + ' address auto-derived from same pubkey hash. Set correct ' + _sym + ' address for safety.')
+                            .text('⚠ auto');
+                    } else if (miner.mergedReverseConverted) {
+                        // Case 4: Invalid LTC + valid explicit DOGE — LTC reverse-derived from DOGE key
                         addressCell.append('span')
                             .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
                             .attr('title', _sym + ' address reverse-derived from DOGE key (original was invalid)')
@@ -2128,7 +2135,13 @@
                             .attr('onclick', 'event.stopPropagation()')
                             .attr('style', 'color: #c3a634; text-decoration: none;')
                             .text(miner.mergedAddress);
-                        if (miner.mergedReverseConverted) {
+                        if (miner.mergedReverseConverted && miner.mergedAutoConverted) {
+                            // Case 5: DOGE address used as parent — both auto-derived from same key
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
+                                .attr('title', 'DOGE address detected in ' + _sym + ' field — auto-converted from same pubkey hash. Set ' + _sym + '_ADDR,DOGE_ADDR format for explicit control.')
+                                .text('⚠ auto');
+                        } else if (miner.mergedReverseConverted) {
                             // Case 4: Invalid parent but valid DOGE — DOGE preserved, parent reverse-derived
                             mergedDiv.append('span')
                                 .attr('style', 'color: #e8a900; font-size: 0.7rem; margin-left: 4px; font-weight: bold;')

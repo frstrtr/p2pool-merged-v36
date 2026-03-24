@@ -712,10 +712,12 @@
 
                         // If no explicit merged address in worker name, check API merged_addresses
                         var mergedAutoConverted = false;
+                        var mergedReverseConverted = false;
                         if (!mergedAddr && workerData.merged_addresses) {
                             mergedAddr = workerData.merged_addresses['dogecoin'] || null;
                             mergedAutoConverted = workerData.merged_auto_converted || false;
                         }
+                        mergedReverseConverted = workerData.merged_reverse_converted || false;
 
                         // During transition, replace explicit DOGE with auto-converted address
                         var mergedExplicitPending = null;
@@ -755,6 +757,7 @@
                                 address: baseAddress,
                                 mergedAddress: null,
                                 mergedAutoConverted: false,
+                                mergedReverseConverted: false,
                                 mergedExplicitPending: null,
                                 workers: [],
                                 totalHashrate: 0,
@@ -767,6 +770,7 @@
                         if (mergedAddr && !minerGroups[baseAddress].mergedAddress) {
                             minerGroups[baseAddress].mergedAddress = mergedAddr;
                             minerGroups[baseAddress].mergedAutoConverted = mergedAutoConverted;
+                            minerGroups[baseAddress].mergedReverseConverted = mergedReverseConverted;
                             minerGroups[baseAddress].mergedExplicitPending = mergedExplicitPending;
                         }
                         
@@ -895,7 +899,22 @@
                     .attr('target', '_blank')
                     .attr('style', 'margin-left: 10px; font-size: 0.8rem;')
                     .text('↗');
-                
+                // Parent address status indicators
+                var _sym = (currency_info && currency_info.symbol) || 'parent';
+                if (miner.mergedReverseConverted && miner.mergedAutoConverted) {
+                    // Case 5: DOGE address used as parent — LTC auto-derived from DOGE key
+                    addr_div.append('span')
+                        .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                        .attr('title', 'DOGE address detected in ' + _sym + ' field \u2014 ' + _sym + ' address auto-derived from same pubkey hash. Set correct ' + _sym + ' address for safety.')
+                        .text('\u26a0 auto');
+                } else if (miner.mergedReverseConverted) {
+                    // Case 4: Invalid LTC + valid explicit DOGE
+                    addr_div.append('span')
+                        .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                        .attr('title', _sym + ' address reverse-derived from DOGE key (original was invalid)')
+                        .text('\u26a0 from DOGE');
+                }
+
                 // Show merged mining (DOGE) address if present
                 if (miner.mergedAddress) {
                     var mergedDiv = header.append('div')
@@ -906,7 +925,13 @@
                         .attr('target', '_blank')
                         .attr('style', 'color: #c3a634; text-decoration: none;')
                         .text(miner.mergedAddress);
-                    if (miner.mergedAutoConverted && miner.mergedExplicitPending) {
+                    if (miner.mergedReverseConverted && miner.mergedAutoConverted) {
+                        // Case 5: DOGE address used as parent — DOGE auto-derived from same key
+                        mergedDiv.append('span')
+                            .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
+                            .attr('title', 'DOGE address detected in ' + _sym + ' field \u2014 auto-converted from same pubkey hash. Set ' + _sym + '_ADDR,DOGE_ADDR format for explicit control.')
+                            .text('\u26a0 auto');
+                    } else if (miner.mergedAutoConverted && miner.mergedExplicitPending) {
                         mergedDiv.append('span')
                             .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
                             .attr('title', 'V35\u2192V36 transition: your explicit DOGE address ' + miner.mergedExplicitPending + ' is recognized but not active yet. Until V36 shares appear on the chain, payouts go to this auto-converted address (derived from your parent pubkey). Once transition completes, your explicit address will be used automatically.')
