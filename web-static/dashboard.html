@@ -1918,14 +1918,17 @@
                     // During V35->V36 transition, V35 shares cannot carry explicit merged_addresses.
                     // Replace explicitly set DOGE address with the actual auto-converted address
                     // from the API to prevent miners thinking they'll be paid to their explicit address.
+                    var mergedExplicitPending = null;
                     if (inTransition && workerData.merged_addresses) {
                         var autoAddr = workerData.merged_addresses['dogecoin'] || null;
-                        var hadExplicit = !!extractMergedAddress(workerName);
-                        if (autoAddr && mergedAddr && autoAddr !== mergedAddr) {
+                        var explicitAddr = extractMergedAddress(workerName);
+                        if (autoAddr && explicitAddr && autoAddr !== explicitAddr) {
                             // Explicit address differs from auto-converted — show auto-converted
+                            // but remember the explicit one so the tooltip can reference it
+                            mergedExplicitPending = explicitAddr;
                             mergedAddr = autoAddr;
                             mergedAutoConverted = true;
-                        } else if (!hadExplicit) {
+                        } else if (!explicitAddr) {
                             // No explicit address — this is purely auto-converted
                             mergedAutoConverted = true;
                         }
@@ -1961,6 +1964,7 @@
                             mergedRedistributed: false,
                             mergedReverseConverted: false,
                             mergedConflict: false,
+                            mergedExplicitPending: null,
                             workers: [],
                             totalHashrate: 0,
                             totalEstimatedHashrate: 0,
@@ -1976,6 +1980,7 @@
                         minerGroups[baseAddress].mergedAutoConverted = mergedAutoConverted;
                         minerGroups[baseAddress].mergedRedistributed = mergedRedistributed;
                         minerGroups[baseAddress].mergedReverseConverted = mergedReverseConverted;
+                        minerGroups[baseAddress].mergedExplicitPending = mergedExplicitPending;
                     }
                     // Track if workers have conflicting merged addresses
                     if (mergedAddr && minerGroups[baseAddress].mergedAddress && mergedAddr !== minerGroups[baseAddress].mergedAddress) {
@@ -2128,6 +2133,16 @@
                                 .attr('style', 'color: #e04040; font-size: 0.7rem; margin-left: 4px; font-weight: bold;')
                                 .attr('title', 'Both ' + _sym + ' and DOGE addresses invalid — rewards redistributed to PPLNS miners')
                                 .text('❗ redistributed');
+                        } else if (miner.mergedAutoConverted && miner.mergedExplicitPending) {
+                            // Transition: miner set explicit DOGE but V35 shares use auto-converted
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                                .attr('title', 'V35\u2192V36 transition: your explicit DOGE address ' + miner.mergedExplicitPending + ' is recognized but not active yet. Until V36 shares appear on the chain, payouts go to this auto-converted address (derived from your ' + _sym + ' pubkey). Once transition completes, your explicit address will be used automatically.')
+                                .text('⚠ transition');
+                            mergedDiv.append('div')
+                                .attr('style', 'font-size: 0.6rem; color: #888; margin-left: 4px; margin-top: 1px;')
+                                .attr('title', 'Your explicit DOGE address — will activate after V36 transition completes')
+                                .text('pending: ' + miner.mergedExplicitPending);
                         } else if (miner.mergedAutoConverted) {
                             // Case 2: Valid parent, no explicit DOGE — auto-derived from parent key
                             mergedDiv.append('span')
