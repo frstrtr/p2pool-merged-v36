@@ -718,12 +718,17 @@
                         }
 
                         // During transition, replace explicit DOGE with auto-converted address
+                        var mergedExplicitPending = null;
                         if (inTransition && workerData.merged_addresses) {
                             var autoAddr = workerData.merged_addresses['dogecoin'] || null;
-                            if (autoAddr && mergedAddr && autoAddr !== mergedAddr) {
+                            var explicitAddr = extractMergedAddress(workerName);
+                            if (autoAddr && explicitAddr && autoAddr !== explicitAddr) {
+                                mergedExplicitPending = explicitAddr;
                                 mergedAddr = autoAddr;
+                                mergedAutoConverted = true;
+                            } else if (!explicitAddr) {
+                                mergedAutoConverted = true;
                             }
-                            mergedAutoConverted = true;
                         }
                         
                         // Get difficulty from connection_difficulties
@@ -750,6 +755,7 @@
                                 address: baseAddress,
                                 mergedAddress: null,
                                 mergedAutoConverted: false,
+                                mergedExplicitPending: null,
                                 workers: [],
                                 totalHashrate: 0,
                                 totalDoa: 0,
@@ -761,6 +767,7 @@
                         if (mergedAddr && !minerGroups[baseAddress].mergedAddress) {
                             minerGroups[baseAddress].mergedAddress = mergedAddr;
                             minerGroups[baseAddress].mergedAutoConverted = mergedAutoConverted;
+                            minerGroups[baseAddress].mergedExplicitPending = mergedExplicitPending;
                         }
                         
                         minerGroups[baseAddress].workers.push({
@@ -899,10 +906,19 @@
                         .attr('target', '_blank')
                         .attr('style', 'color: #c3a634; text-decoration: none;')
                         .text(miner.mergedAddress);
-                    if (miner.mergedAutoConverted) {
+                    if (miner.mergedAutoConverted && miner.mergedExplicitPending) {
+                        mergedDiv.append('span')
+                            .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                            .attr('title', 'V35\u2192V36 transition: your explicit DOGE address ' + miner.mergedExplicitPending + ' is recognized but not active yet. Until V36 shares appear on the chain, payouts go to this auto-converted address (derived from your parent pubkey). Once transition completes, your explicit address will be used automatically.')
+                            .text('\u26a0 transition');
+                        mergedDiv.append('div')
+                            .attr('style', 'font-size: 0.65rem; color: #888; margin-left: 4px; margin-top: 1px;')
+                            .attr('title', 'Your explicit DOGE address \u2014 will activate after V36 transition completes')
+                            .text('pending: ' + miner.mergedExplicitPending);
+                    } else if (miner.mergedAutoConverted) {
                         mergedDiv.append('span')
                             .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
-                            .attr('title', 'Auto-converted from parent chain address (same pubkey hash). During V35\u2192V36 transition, all merged addresses are auto-converted since V35 shares cannot carry explicit merged addresses.')
+                            .attr('title', 'Auto-converted from parent chain address (same pubkey hash) \u2014 set explicit DOGE address for safety')
                             .text('\u26a0 auto');
                     }
                     mergedDiv.append('a')

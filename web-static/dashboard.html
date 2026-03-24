@@ -1895,14 +1895,21 @@
                 if (v36_status && v36_status.share_chain) {
                     inTransition = (v36_status.share_chain.v36_shares === 0);
                 }
+                window.inV36Transition = inTransition;
+                window.minersWithExplicitMerged = minersWithExplicitMerged;
 
                 // Use stratum_stats.workers as the source of real miners
                 var stratumWorkers = (stratum_stats && stratum_stats.workers) || {};
+                // Track miners with explicit merged addresses (for Current Payouts cross-reference)
+                var minersWithExplicitMerged = {};
 
                 for (var workerName in stratumWorkers) {
                     var workerData = stratumWorkers[workerName];
                     var baseAddress = extractAddress(workerName);
                     var mergedAddr = extractMergedAddress(workerName);
+                    if (mergedAddr) {
+                        minersWithExplicitMerged[baseAddress] = mergedAddr;
+                    }
 
                     // If no explicit merged address in worker name, check API merged_addresses
                     var mergedAutoConverted = false;
@@ -3488,12 +3495,31 @@
                             .attr('title', merged.address)
                             .text(merged.address);
                         if (merged.source === 'auto-convert') {
-                            addrCell.append('span')
-                                .style('color', '#b08800')
-                                .style('font-size', '0.6rem')
-                                .style('margin-left', '4px')
-                                .attr('title', 'Auto-converted from parent chain address (same pubkey hash). During V35\u2192V36 transition, all merged addresses are auto-converted since V35 shares cannot carry explicit merged addresses.')
-                                .text('\u26a0 auto');
+                            // Check if this miner actually set an explicit merged address
+                            var explicitPending = window.inV36Transition && window.minersWithExplicitMerged && window.minersWithExplicitMerged[addr];
+                            if (explicitPending) {
+                                addrCell.append('span')
+                                    .style('color', '#e8a900')
+                                    .style('font-size', '0.6rem')
+                                    .style('font-weight', 'bold')
+                                    .style('margin-left', '4px')
+                                    .attr('title', 'V35\u2192V36 transition: your explicit DOGE address ' + explicitPending + ' is recognized but not active yet. Until V36 shares appear, payouts go to this auto-converted address. Your explicit address will activate automatically after transition.')
+                                    .text('\u26a0 transition');
+                                addrCell.append('div')
+                                    .style('font-size', '0.55rem')
+                                    .style('color', '#888')
+                                    .style('margin-left', '4px')
+                                    .style('margin-top', '1px')
+                                    .attr('title', 'Your explicit DOGE address \u2014 will activate after V36 transition completes')
+                                    .text('pending: ' + explicitPending);
+                            } else {
+                                addrCell.append('span')
+                                    .style('color', '#b08800')
+                                    .style('font-size', '0.6rem')
+                                    .style('margin-left', '4px')
+                                    .attr('title', 'Auto-converted from parent chain address (same pubkey hash) \u2014 set explicit DOGE address for safety')
+                                    .text('\u26a0 auto');
+                            }
                         } else if (merged.source === 'donation') {
                             addrCell.append('span')
                                 .style('color', '#888')
