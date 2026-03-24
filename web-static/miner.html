@@ -1017,8 +1017,8 @@
                     hashLink.className = 'hash-link';
                     hashLink.href = block.explorer_url || '#';
                     hashLink.target = '_blank';
-                    var hash = block.pow_hash || block.block_hash || '-';
-                    hashLink.title = 'POW Hash: ' + hash;
+                    var hash = block.block_hash || block.pow_hash || '-';
+                    hashLink.title = 'Block Hash: ' + (block.block_hash || 'N/A') + '\nPoW Hash: ' + (block.pow_hash || 'N/A');
                     hashLink.textContent = hash.substring(0, 16) + '...';
                     tdHash.appendChild(hashLink);
                     tr.appendChild(tdHash);

@@ -1804,8 +1804,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 explorer_url = ''
                 if explorer:
                     base_url = explorer.get('testnet' if is_testnet else 'mainnet', '')
-                    pow_hash = b.get('pow_hash', block_hash)
-                    explorer_url = base_url + pow_hash if base_url else ''
+                    explorer_url = base_url + block_hash if base_url else ''
                 
                 block_entry = {
                     'timestamp': b.get('ts', 0),

@@ -1238,14 +1238,14 @@
                     var hashLink = document.createElement('a');
                     hashLink.className = 'hash-link';
                     var explorer = merged_explorers[block.chainid];
-                    if (explorer && block.pow_hash) {
-                        hashLink.href = (block.is_testnet ? explorer.testnet : explorer.mainnet) + block.pow_hash;
+                    if (explorer && block.hash) {
+                        hashLink.href = (block.is_testnet ? explorer.testnet : explorer.mainnet) + block.hash;
                     } else {
                         hashLink.href = '#';
                     }
                     hashLink.target = '_blank';
-                    hashLink.title = 'POW Hash: ' + (block.pow_hash || 'N/A');
-                    var hash = block.pow_hash || block.hash || '-';
+                    hashLink.title = 'Block Hash: ' + (block.hash || 'N/A') + '\nPoW Hash: ' + (block.pow_hash || 'N/A');
+                    var hash = block.hash || block.pow_hash || '-';
                     hashLink.textContent = hash.substring(0, 16) + '...';
                     tdHash.appendChild(hashLink);
                     tr.appendChild(tdHash);
