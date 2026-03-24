@@ -1953,6 +1953,7 @@
                             mergedAutoConverted: false,
                             mergedRedistributed: false,
                             mergedReverseConverted: false,
+                            mergedConflict: false,
                             workers: [],
                             totalHashrate: 0,
                             totalEstimatedHashrate: 0,
@@ -1969,7 +1970,11 @@
                         minerGroups[baseAddress].mergedRedistributed = mergedRedistributed;
                         minerGroups[baseAddress].mergedReverseConverted = mergedReverseConverted;
                     }
-                    
+                    // Track if workers have conflicting merged addresses
+                    if (mergedAddr && minerGroups[baseAddress].mergedAddress && mergedAddr !== minerGroups[baseAddress].mergedAddress) {
+                        minerGroups[baseAddress].mergedConflict = true;
+                    }
+
                     minerGroups[baseAddress].workers.push({
                         name: workerName,
                         hashrate: hashrate,
@@ -1980,7 +1985,9 @@
                         accepted: workerData.accepted || 0,
                         rejected: workerData.rejected || 0,
                         connections: workerData.connections || 0,
-                        last_seen: workerData.last_seen || 0
+                        last_seen: workerData.last_seen || 0,
+                        mergedAddress: mergedAddr,
+                        mergedAutoConverted: mergedAutoConverted
                     });
                     minerGroups[baseAddress].totalHashrate += hashrate;
                     if (isEstimated) {
@@ -2121,6 +2128,12 @@
                                 .attr('title', 'Auto-converted from ' + _sym + ' address (same pubkey hash) — set explicit DOGE address for safety')
                                 .text('⚠ auto');
                         }
+                        if (miner.mergedConflict) {
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #ff6b35; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                                .attr('title', 'Workers have different DOGE addresses — each worker pays to its own address. Expand to see per-worker addresses.')
+                                .text('⚠ split');
+                        }
                     } else if (miner.mergedRedistributed) {
                         // No DOGE address at all and redistributed — show warning
                         var mergedDiv = addressCell.append('div')
@@ -2204,8 +2217,26 @@
                             .attr('class', 'worker-row hidden')
                             .attr('data-parent', minerId);
                         
-                        workerRow.append('td').text('↳ ' + worker.name);
-                        
+                        var workerNameCell = workerRow.append('td');
+                        workerNameCell.append('span').text('↳ ' + worker.name);
+                        // Show per-worker merged address when workers have conflicting addresses
+                        if (miner.mergedConflict && worker.mergedAddress) {
+                            var wMergedDiv = workerNameCell.append('div')
+                                .attr('style', 'font-size: 0.65rem; color: #c3a634; margin-left: 20px;');
+                            wMergedDiv.append('span').text('🐕 ');
+                            wMergedDiv.append('a')
+                                .attr('href', 'https://blockchair.com/dogecoin/address/' + encodeURIComponent(worker.mergedAddress))
+                                .attr('target', '_blank')
+                                .attr('onclick', 'event.stopPropagation()')
+                                .attr('style', 'color: #c3a634; text-decoration: none;')
+                                .text(worker.mergedAddress);
+                            if (worker.mergedAutoConverted) {
+                                wMergedDiv.append('span')
+                                    .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
+                                    .text('⚠ auto');
+                            }
+                        }
+
                         // Worker hashrate with estimated indicator
                         var workerHashrateCell = workerRow.append('td');
                         if (worker.hashrate > 0) {

@@ -3203,11 +3203,22 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 traceback.print_exc()        
         # Track connected miners and worker counts
         try:
-            connected_miners_count = len(miner_hash_rates)
-            unique_miners = set(miner_hash_rates.keys())
-            hd.datastreams['connected_miners'].add_datum(t, connected_miners_count)
-            hd.datastreams['unique_miner_count'].add_datum(t, len(unique_miners))
-            hd.datastreams['worker_count'].add_datum(t, connected_miners_count)
+            # worker_count = number of unique worker entries (address.worker combos)
+            hd.datastreams['worker_count'].add_datum(t, len(miner_hash_rates))
+            # unique_miner_count = unique base addresses (strip worker/diff suffixes)
+            unique_addrs = set()
+            for user in miner_hash_rates:
+                base = user.split(',')[0]  # take LTC address part
+                base = base.split('+')[0].split('/')[0].split('.')[0].split('_')[0]
+                unique_addrs.add(base)
+            hd.datastreams['unique_miner_count'].add_datum(t, len(unique_addrs))
+            # connected_miners = actual stratum connection count
+            try:
+                from p2pool.bitcoin.stratum import pool_stats
+                stratum_connections = len(pool_stats.connections) if pool_stats else len(miner_hash_rates)
+            except:
+                stratum_connections = len(miner_hash_rates)
+            hd.datastreams['connected_miners'].add_datum(t, stratum_connections)
         except:
             if p2pool.DEBUG:
                 traceback.print_exc()
