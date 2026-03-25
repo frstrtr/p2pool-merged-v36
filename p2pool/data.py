@@ -791,6 +791,14 @@ class BaseShare(object):
             pre_target3 = math.clip(pre_target2, (net.MIN_TARGET, net.MAX_TARGET))
         max_bits = bitcoin_data.FloatingInteger.from_target_upper_bound(pre_target3)
         bits = bitcoin_data.FloatingInteger.from_target_upper_bound(math.clip(desired_target, (pre_target3//30, pre_target3)))
+        # BITS-PARITY diagnostic: log desired_target, pre_target3, clamp result
+        if not hasattr(cls, '_bits_log_counter'):
+            cls._bits_log_counter = 0
+        cls._bits_log_counter += 1
+        if cls._bits_log_counter % 20 == 1:
+            _clipped = math.clip(desired_target, (pre_target3//30, pre_target3))
+            print >>sys.stderr, '[BITS-PARITY] bits=0x%08x max_bits=0x%08x desired_target=%064x pre_target3=%064x clamp_lo=%064x clipped=%064x' % (
+                bits.bits, max_bits.bits, desired_target, pre_target3, pre_target3//30, _clipped)
         
         new_transaction_hashes = []
         new_transaction_size = 0 # including witnesses
@@ -1529,6 +1537,19 @@ class BaseShare(object):
                         _k.encode('hex')[:40], _v, _amt)
             except Exception as _e:
                 print >>sys.stderr, '[GENTX-FAIL] pplns dump error: %s' % _e
+            # Compare recomputed max_bits/bits with share's values
+            print >>sys.stderr, '[GENTX-FAIL] share_max_bits=%s recomputed_max_bits=%s MATCH=%s' % (
+                self.share_info['max_bits'], share_info['max_bits'],
+                'YES' if self.share_info['max_bits'] == share_info['max_bits'] else 'NO')
+            print >>sys.stderr, '[GENTX-FAIL] share_bits=%s recomputed_bits=%s MATCH=%s' % (
+                self.share_info['bits'], share_info['bits'],
+                'YES' if self.share_info['bits'] == share_info['bits'] else 'NO')
+            # Also compare ref_hash
+            share_ref_hash = self.get_ref_hash(net, self.share_info, contents['ref_merkle_link'], message_data=self._message_data)
+            recomp_ref_hash = self.get_ref_hash(net, share_info, contents['ref_merkle_link'], message_data=self._message_data)
+            print >>sys.stderr, '[GENTX-FAIL] share_ref_hash=%s' % share_ref_hash.encode('hex')
+            print >>sys.stderr, '[GENTX-FAIL] recomp_ref_hash=%s' % recomp_ref_hash.encode('hex')
+            print >>sys.stderr, '[GENTX-FAIL] ref_hash_MATCH=%s' % ('YES' if share_ref_hash == recomp_ref_hash else 'NO')
             raise ValueError('''gentx doesn't match hash_link''')
         
         # V36+: Verify merged coinbase consensus enforcement.
@@ -2036,11 +2057,16 @@ def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weig
         WeightsSkipList, for drop-in replacement.
     """
     half_life = max(net.CHAIN_LENGTH // 4, 1)
-    
+
     # Per-share decay multiplier in fixed-point:
     #   2^(-1/H) ≈ 1 - ln(2)/H
     #   In fixed-point: SCALE - SCALE × 693147 / (10^6 × H)
     decay_per = _DECAY_SCALE - (_DECAY_SCALE * _LN2_MICRO) // (1000000 * half_life)
+
+    _height = tracker.get_height(start_hash) if start_hash is not None else 0
+    import sys
+    print >>sys.stderr, '[PPLNS-WALK] start=%s max_shares=%d height=%d half_life=%d decay_per=%d' % (
+        ('%064x' % start_hash)[:16] if start_hash else 'None', max_shares, _height, half_life, decay_per)
     
     weights = {}
     total_weight = 0
