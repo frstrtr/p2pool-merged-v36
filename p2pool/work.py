@@ -235,12 +235,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
             'all_time': 0,           # Never resets (absolute record)
             'all_time_user': None,   # Who achieved it
             'all_time_ts': 0,        # When
+            'all_time_net_diff': 0,  # Network difficulty at the time
             'session': 0,            # Resets on restart
             'session_user': None,
             'session_ts': 0,
+            'session_net_diff': 0,
             'round': 0,              # Resets when pool finds a block
             'round_user': None,
             'round_ts': 0,
+            'round_net_diff': 0,
             'round_start': time.time(),
         }
         # Merged chain (DOGE) best difficulty tracking
@@ -248,9 +251,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
             'all_time': 0,
             'all_time_user': None,
             'all_time_ts': 0,
+            'all_time_net_diff': 0,
+            'all_time_merged_net_diff': 0,
             'round': 0,              # Resets when pool finds a DOGE block
             'round_user': None,
             'round_ts': 0,
+            'round_net_diff': 0,
+            'round_merged_net_diff': 0,
             'round_start': time.time(),
         }
 
@@ -1992,6 +1999,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
     def update_best_difficulty(self, user, difficulty):
         """Track best difficulty for a miner and node-wide (parent + merged)"""
         now = time.time()
+
+        # Get current network difficulties at this moment
+        try:
+            net_diff = bitcoin_data.target_to_difficulty(self.node.bitcoind_work.value['bits'].target)
+        except Exception:
+            net_diff = 0
+        merged_net_diff = 0
+        try:
+            for chainid, aux_work in self.merged_work.value.iteritems():
+                merged_target = aux_work.get('target', 0)
+                if merged_target and merged_target > 0:
+                    merged_net_diff = bitcoin_data.target_to_difficulty(merged_target)
+                    break
+        except Exception:
+            pass
+
         if user not in self.miner_best_difficulty:
             self.miner_best_difficulty[user] = {
                 'all_time': 0,
@@ -1999,7 +2022,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 'round': 0,
                 'session_start': self.session_start_time
             }
-        
+
         rec = self.miner_best_difficulty[user]
         if difficulty > rec['all_time']:
             rec['all_time'] = difficulty
@@ -2007,32 +2030,39 @@ class WorkerBridge(worker_interface.WorkerBridge):
             rec['session'] = difficulty
         if difficulty > rec['round']:
             rec['round'] = difficulty
-        
+
         # Node-wide tracking (parent chain)
         nb = self.node_best_difficulty
         if difficulty > nb['all_time']:
             nb['all_time'] = difficulty
             nb['all_time_user'] = user
             nb['all_time_ts'] = now
+            nb['all_time_net_diff'] = net_diff
         if difficulty > nb['session']:
             nb['session'] = difficulty
             nb['session_user'] = user
             nb['session_ts'] = now
+            nb['session_net_diff'] = net_diff
         if difficulty > nb['round']:
             nb['round'] = difficulty
             nb['round_user'] = user
             nb['round_ts'] = now
-        
+            nb['round_net_diff'] = net_diff
+
         # Merged chain (DOGE) tracking — same PoW hash, different target
         mb = self.merged_best_difficulty
         if difficulty > mb['all_time']:
             mb['all_time'] = difficulty
             mb['all_time_user'] = user
             mb['all_time_ts'] = now
+            mb['all_time_net_diff'] = net_diff
+            mb['all_time_merged_net_diff'] = merged_net_diff
         if difficulty > mb['round']:
             mb['round'] = difficulty
             mb['round_user'] = user
             mb['round_ts'] = now
+            mb['round_net_diff'] = net_diff
+            mb['round_merged_net_diff'] = merged_net_diff
 
     def reset_round_best_difficulty(self):
         """Reset round-level best difficulty (called when pool finds a block)"""
@@ -2044,6 +2074,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.node_best_difficulty['round'] = 0
         self.node_best_difficulty['round_user'] = None
         self.node_best_difficulty['round_ts'] = 0
+        self.node_best_difficulty['round_net_diff'] = 0
         self.node_best_difficulty['round_start'] = now
         print >>sys.stderr, 'Best difficulty round stats reset (new round started)'
 
@@ -2053,6 +2084,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.merged_best_difficulty['round'] = 0
         self.merged_best_difficulty['round_user'] = None
         self.merged_best_difficulty['round_ts'] = 0
+        self.merged_best_difficulty['round_net_diff'] = 0
+        self.merged_best_difficulty['round_merged_net_diff'] = 0
         self.merged_best_difficulty['round_start'] = now
         print >>sys.stderr, 'Merged best difficulty round stats reset (DOGE block found)'
 

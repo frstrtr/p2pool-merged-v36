@@ -1504,34 +1504,37 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         """Return node-wide best share stats: all-time, session, and current round"""
         nb = wb.node_best_difficulty
         network_difficulty = bitcoin_data.target_to_difficulty(node.bitcoind_work.value['bits'].target)
-        
+
         def pct_of_block(diff, net_diff):
             return (diff / net_diff * 100) if net_diff > 0 and diff > 0 else 0
-        
+
         result = dict(
             network_difficulty=network_difficulty,
             all_time=dict(
                 difficulty=nb['all_time'],
-                pct_of_block=pct_of_block(nb['all_time'], network_difficulty),
+                pct_of_block=pct_of_block(nb['all_time'], nb['all_time_net_diff'] or network_difficulty),
+                net_diff_at_time=nb['all_time_net_diff'],
                 miner=nb['all_time_user'],
                 timestamp=nb['all_time_ts'],
             ),
             session=dict(
                 difficulty=nb['session'],
-                pct_of_block=pct_of_block(nb['session'], network_difficulty),
+                pct_of_block=pct_of_block(nb['session'], nb['session_net_diff'] or network_difficulty),
+                net_diff_at_time=nb['session_net_diff'],
                 miner=nb['session_user'],
                 timestamp=nb['session_ts'],
                 started=wb.session_start_time,
             ),
             round=dict(
                 difficulty=nb['round'],
-                pct_of_block=pct_of_block(nb['round'], network_difficulty),
+                pct_of_block=pct_of_block(nb['round'], nb['round_net_diff'] or network_difficulty),
+                net_diff_at_time=nb['round_net_diff'],
                 miner=nb['round_user'],
                 timestamp=nb['round_ts'],
                 started=nb['round_start'],
             ),
         )
-        
+
         # Add merged chain (DOGE) best share stats
         mb = wb.merged_best_difficulty
         merged_difficulty = 0
@@ -1545,20 +1548,24 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     break
         except Exception:
             pass
-        
+
         if merged_difficulty > 0 or mb['all_time'] > 0:
             result['merged'] = dict(
                 network_difficulty=merged_difficulty,
                 symbol=merged_symbol or 'DOGE',
                 all_time=dict(
                     difficulty=mb['all_time'],
-                    pct_of_block=pct_of_block(mb['all_time'], merged_difficulty),
+                    pct_of_block=pct_of_block(mb['all_time'], mb['all_time_merged_net_diff'] or merged_difficulty),
+                    net_diff_at_time=mb['all_time_net_diff'],
+                    merged_net_diff_at_time=mb['all_time_merged_net_diff'],
                     miner=mb['all_time_user'],
                     timestamp=mb['all_time_ts'],
                 ),
                 round=dict(
                     difficulty=mb['round'],
-                    pct_of_block=pct_of_block(mb['round'], merged_difficulty),
+                    pct_of_block=pct_of_block(mb['round'], mb['round_merged_net_diff'] or merged_difficulty),
+                    net_diff_at_time=mb['round_net_diff'],
+                    merged_net_diff_at_time=mb['round_merged_net_diff'],
                     miner=mb['round_user'],
                     timestamp=mb['round_ts'],
                     started=mb['round_start'],

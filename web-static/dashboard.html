@@ -1398,7 +1398,7 @@
                     <div class="stat-card">
                         <h3><span class="icon">🎯</span> Best Share</h3>
                         <div class="stat-value" style="display: flex; align-items: baseline; justify-content: flex-start; gap: 4px;"><span id="best_share_round_pct_fancy" style="color: var(--primary);">-</span><span id="best_share_merged_round_part" style="display: none;"> / <span id="best_share_merged_pct_fancy" style="color: #c3a634;">-</span></span></div>
-                        <div class="stat-sub" style="font-size: 0.85em;"><span id="best_share_round_diff" style="color: var(--primary);">-</span> / <span id="best_share_net_diff" style="opacity: 0.55;">-</span><span id="best_share_merged_diff_part" style="display: none;"> &nbsp;·&nbsp; <span id="best_share_merged_round_diff" style="color: #c3a634;">-</span> / <span id="best_share_merged_net_diff" style="opacity: 0.55;">-</span></span></div>
+                        <div class="stat-sub" style="font-size: 0.85em;"><span id="best_share_round_diff" style="color: var(--primary);">-</span> / <span id="best_share_net_diff" style="opacity: 0.55;">-</span><span id="best_share_net_diff_now" style="display: none; opacity: 0.4; font-size: 0.9em;"></span><span id="best_share_merged_diff_part" style="display: none;"> &nbsp;·&nbsp; <span id="best_share_merged_round_diff" style="color: #c3a634;">-</span> / <span id="best_share_merged_net_diff" style="opacity: 0.55;">-</span><span id="best_share_merged_net_diff_now" style="display: none; opacity: 0.4; font-size: 0.9em;"></span></span></div>
                         <div class="stat-detail">🏆 <span style="color: var(--primary);"><span id="best_share_alltime_pct_fancy">-</span></span><span id="best_share_merged_record_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_alltime_pct_fancy">-</span></span></span><span id="best_share_median_part" style="display: none;"> &nbsp;· x̃ <span style="color: var(--primary);"><span id="best_share_median_pct_fancy">-</span></span><span id="best_share_merged_median_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_median_pct_fancy">-</span></span></span></span></div>
                     </div>
                 </div>
@@ -2974,9 +2974,17 @@
                         if (!bs) return;
                         // Current round — fancy percentage as hero value
                         d3.select('#best_share_round_pct_fancy').html(format_pct_fancy(bs.round.pct_of_block));
-                        // Share diff vs network diff subtitle
+                        // Share diff vs network diff at the time of the best share
                         d3.select('#best_share_round_diff').text(format_difficulty(bs.round.difficulty));
-                        d3.select('#best_share_net_diff').text(format_difficulty(bs.network_difficulty));
+                        var roundNetDiff = bs.round.net_diff_at_time || bs.network_difficulty;
+                        d3.select('#best_share_net_diff').text(format_difficulty(roundNetDiff));
+                        // Show current net diff if it differs from when best share was found
+                        if (bs.round.net_diff_at_time && bs.round.net_diff_at_time > 0 &&
+                            format_difficulty(bs.round.net_diff_at_time) !== format_difficulty(bs.network_difficulty)) {
+                            d3.select('#best_share_net_diff_now').style('display', 'inline').text(' (now ' + format_difficulty(bs.network_difficulty) + ')');
+                        } else {
+                            d3.select('#best_share_net_diff_now').style('display', 'none');
+                        }
                         // All-time record — percentage only (no redundant difficulty)
                         d3.select('#best_share_alltime_pct_fancy').html(format_pct_fancy(bs.all_time.pct_of_block));
                         // Merged chain (DOGE) stats - inline
@@ -2985,10 +2993,17 @@
                             d3.select('#best_share_merged_pct_fancy').html(format_pct_fancy(bs.merged.round.pct_of_block));
                             d3.select('#best_share_merged_record_part').style('display', 'inline');
                             d3.select('#best_share_merged_alltime_pct_fancy').html(format_pct_fancy(bs.merged.all_time.pct_of_block));
-                            // Merged diff subtitle
+                            // Merged diff subtitle — use net diff at the time of best share
                             d3.select('#best_share_merged_diff_part').style('display', 'inline');
                             d3.select('#best_share_merged_round_diff').text(format_difficulty(bs.merged.round.difficulty));
-                            d3.select('#best_share_merged_net_diff').text(format_difficulty(bs.merged.network_difficulty));
+                            var mergedNetDiff = bs.merged.round.merged_net_diff_at_time || bs.merged.network_difficulty;
+                            d3.select('#best_share_merged_net_diff').text(format_difficulty(mergedNetDiff));
+                            if (bs.merged.round.merged_net_diff_at_time && bs.merged.round.merged_net_diff_at_time > 0 &&
+                                format_difficulty(bs.merged.round.merged_net_diff_at_time) !== format_difficulty(bs.merged.network_difficulty)) {
+                                d3.select('#best_share_merged_net_diff_now').style('display', 'inline').text(' (now ' + format_difficulty(bs.merged.network_difficulty) + ')');
+                            } else {
+                                d3.select('#best_share_merged_net_diff_now').style('display', 'none');
+                            }
                         }
                         // Median share % of full window
                         if (bs.median_pct != null) {
