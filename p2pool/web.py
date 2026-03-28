@@ -1027,10 +1027,21 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                                 pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
                         # else: P2WSH/P2TR — unconvertible, skip
                         if merged_address is not None:
-                            # Resolve parent address separately — must not kill merged_address
+                            # Resolve parent address — must match the encoding used in
+                            # result dict (from get_expected_payouts → script2_to_address).
                             try:
-                                parent_address = bitcoin_data.pubkey_hash_to_address(
-                                    pubkey_hash, parent_net.ADDRESS_VERSION, -1, parent_net)
+                                if len(key) == 22 and key[:2] == '\x00\x14':
+                                    # P2WPKH: parent must be bech32 (not P2PKH)
+                                    parent_address = bitcoin_data.pubkey_hash_to_address(
+                                        pubkey_hash, -1, 0, parent_net)
+                                elif len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87':
+                                    # P2SH: parent must be P2SH
+                                    parent_address = bitcoin_data.pubkey_hash_to_address(
+                                        pubkey_hash, parent_net.ADDRESS_P2SH_VERSION, -1, parent_net)
+                                else:
+                                    # P2PKH
+                                    parent_address = bitcoin_data.pubkey_hash_to_address(
+                                        pubkey_hash, parent_net.ADDRESS_VERSION, -1, parent_net)
                             except Exception:
                                 parent_address = None
                             resolved[merged_address] = resolved.get(merged_address, 0) + weight
