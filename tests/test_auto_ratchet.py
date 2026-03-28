@@ -192,14 +192,15 @@ class TestAutoRatchetActivated(unittest.TestCase):
         r._state = AutoRatchet.STATE_ACTIVATED
         r._activated_at = 1000000
         r._activated_height = 10  # Activated at height 10
+        r._last_seen_height = 10  # Must be set for delta tracking
         r._save()
-        
+
         # Confirmation window = 2 * 10 = 20
         # Current height needs to be >= 10 + 20 = 30
         # And 95% of shares need to be actual V36 format
         shares = [MockShare(36, 36) for _ in range(30)]
         tracker = MockTracker(shares)
-        # Height = 30, activated_height = 10, shares_since = 20 >= 20 (confirmation_window)
+        # Height = 30, last_seen = 10, delta = 20 >= 20 (confirmation_window)
         share_type, desired = r.get_share_version(tracker, 'hash', self.net)
         self.assertEqual(r.state, AutoRatchet.STATE_CONFIRMED)
         self.assertEqual(share_type, MergedMiningShare)
@@ -315,6 +316,84 @@ class TestAutoRatchetMainnetWindow(unittest.TestCase):
         share_type, desired = r.get_share_version(tracker, 'hash', self.net)
         self.assertEqual(r.state, AutoRatchet.STATE_ACTIVATED)  # Not confirmed yet
         self.assertEqual(share_type, MergedMiningShare)  # But still creates V36
+
+
+class TestAutoRatchetTailGuard(unittest.TestCase):
+    """Test 10% tail guard prevents premature activation."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.net = MockNet(real_chain_length=100)  # Tail = oldest 10 shares
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def test_staggered_adoption_blocks_activation(self):
+        """95% full window but <60% oldest 10% -> stays VOTING."""
+        r = AutoRatchet(self.tmpdir)
+        # 100 shares: newest 90 vote V36, oldest 10 are all V35
+        # Full window: 90/100 = 90% < 95% -> doesn't even reach the tail check
+        # Need 96/100 to pass 95%: newest 96 vote V36, oldest 4 are V35
+        # But oldest 10: 6 V36 + 4 V35 = 60% -> just at threshold
+        # Use 95 V36 + 5 V35 (in tail): full = 95%, tail = 5/10 = 50% < 60%
+        shares = [MockShare(35, 36) for _ in range(95)] + [MockShare(35, 35) for _ in range(5)]
+        tracker = MockTracker(shares)
+        share_type, desired = r.get_share_version(tracker, 'hash', self.net)
+        self.assertEqual(r.state, AutoRatchet.STATE_VOTING)
+        self.assertEqual(share_type, PaddingBugfixShare)
+
+    def test_tail_at_60pct_allows_activation(self):
+        """95% full window AND 60% oldest 10% -> ACTIVATED."""
+        r = AutoRatchet(self.tmpdir)
+        # 100 shares: newest 90 all V36, oldest 10 = 6 V36 + 4 V35
+        # Full window: 96/100 = 96% >= 95%, tail: 6/10 = 60% >= 60%
+        shares = ([MockShare(35, 36) for _ in range(90)] +
+                  [MockShare(35, 36) for _ in range(6)] +
+                  [MockShare(35, 35) for _ in range(4)])
+        tracker = MockTracker(shares)
+        share_type, desired = r.get_share_version(tracker, 'hash', self.net)
+        self.assertEqual(r.state, AutoRatchet.STATE_ACTIVATED)
+        self.assertEqual(share_type, MergedMiningShare)
+
+    def test_tail_at_59pct_blocks_activation(self):
+        """95% full window but 59% oldest 10% -> stays VOTING (just under)."""
+        r = AutoRatchet(self.tmpdir)
+        # Oldest 10: 5 V36 + 5 V35 = 50% < 60%
+        # Full: 95/100 = 95%
+        shares = ([MockShare(35, 36) for _ in range(90)] +
+                  [MockShare(35, 36) for _ in range(5)] +
+                  [MockShare(35, 35) for _ in range(5)])
+        tracker = MockTracker(shares)
+        share_type, desired = r.get_share_version(tracker, 'hash', self.net)
+        self.assertEqual(r.state, AutoRatchet.STATE_VOTING)
+        self.assertEqual(share_type, PaddingBugfixShare)
+
+    def test_uniform_100pct_activates(self):
+        """100% signaling across full window -> ACTIVATED (tail guard passes)."""
+        r = AutoRatchet(self.tmpdir)
+        shares = [MockShare(35, 36) for _ in range(100)]
+        tracker = MockTracker(shares)
+        share_type, desired = r.get_share_version(tracker, 'hash', self.net)
+        self.assertEqual(r.state, AutoRatchet.STATE_ACTIVATED)
+        self.assertEqual(share_type, MergedMiningShare)
+
+    def test_tail_guard_clears_after_catchup(self):
+        """After oldest 10% catches up, activation proceeds."""
+        r = AutoRatchet(self.tmpdir)
+        # First call: tail blocked (4 V35 in oldest 10)
+        shares_blocked = ([MockShare(35, 36) for _ in range(90)] +
+                          [MockShare(35, 36) for _ in range(5)] +
+                          [MockShare(35, 35) for _ in range(5)])
+        tracker = MockTracker(shares_blocked)
+        r.get_share_version(tracker, 'hash', self.net)
+        self.assertEqual(r.state, AutoRatchet.STATE_VOTING)
+
+        # Second call: oldest V35 shares have aged out, now all V36
+        shares_ready = [MockShare(35, 36) for _ in range(100)]
+        tracker = MockTracker(shares_ready)
+        share_type, desired = r.get_share_version(tracker, 'hash', self.net)
+        self.assertEqual(r.state, AutoRatchet.STATE_ACTIVATED)
+        self.assertEqual(share_type, MergedMiningShare)
 
 
 class TestAutoRatchetDesiredVersion(unittest.TestCase):
