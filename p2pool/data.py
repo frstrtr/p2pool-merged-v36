@@ -1889,8 +1889,14 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
             # activation-boundary shares with empty merged_addresses)
             if address_key == share.new_script:
                 lookup = getattr(self.tracker, '_miner_merged_addr', {}).get(self.chain_id, {})
-                if share.new_script in lookup:
-                    address_key = 'MERGED:' + lookup[share.new_script].encode('hex')
+                merged_script = lookup.get(share.new_script)
+                if merged_script is None:
+                    # Try normalized P2PKH form (P2WPKH shares → P2PKH key)
+                    norm = OkayTracker._normalize_script_for_merged(share.new_script)
+                    if norm:
+                        merged_script = lookup.get(norm)
+                if merged_script is not None:
+                    address_key = 'MERGED:' + merged_script.encode('hex')
 
         return (1, {address_key: att*(65535-share.share_data['donation'])},
                 att*65535, att*share.share_data['donation'])
@@ -2035,6 +2041,28 @@ class OkayTracker(forest.Tracker):
         self._merged_weights_skip_lists = {}  # chain_id -> MergedWeightsSkipList
         self._miner_merged_addr = {}  # chain_id -> {new_script: merged_script}
     
+    @staticmethod
+    def _normalize_script_for_merged(script):
+        """Normalize parent chain script to merged chain form.
+
+        Matches build_canonical_merged_coinbase() conversion logic:
+          P2PKH (25 bytes) -> P2PKH (identity)
+          P2WPKH (22 bytes) -> P2PKH (same hash)
+          P2SH (23 bytes) -> P2SH (identity)
+          Other -> empty string (unconvertible)
+
+        Used to register and look up merged addresses regardless of
+        whether the parent share used bech32 or legacy encoding.
+        """
+        if len(script) == 25 and script[:3] == '\x76\xa9\x14' and script[23:] == '\x88\xac':
+            return script  # P2PKH — identity
+        if len(script) == 22 and script[:2] == '\x00\x14':
+            # P2WPKH -> P2PKH (same pubkey hash)
+            return '\x76\xa9\x14' + script[2:22] + '\x88\xac'
+        if len(script) == 23 and script[:2] == '\xa9\x14' and script[22:] == '\x87':
+            return script  # P2SH — identity
+        return ''  # unconvertible
+
     def add(self, item):
         forest.Tracker.add(self, item)
         # Register explicit merged addresses for retroactive lookup.
@@ -2052,12 +2080,19 @@ class OkayTracker(forest.Tracker):
                     if chain_id not in self._miner_merged_addr:
                         self._miner_merged_addr[chain_id] = {}
                     lookup = self._miner_merged_addr[chain_id]
+                    invalidate = False
                     if item.new_script not in lookup:
                         lookup[item.new_script] = script
-                        # New mapping — invalidate skip list so affected
-                        # shares get recomputed with the explicit address
-                        if chain_id in self._merged_weights_skip_lists:
-                            del self._merged_weights_skip_lists[chain_id]
+                        invalidate = True
+                    # Also register under normalized P2PKH form so
+                    # Tier 1.5 catches shares with different script
+                    # encoding (P2WPKH vs P2PKH) for the same miner.
+                    normalized = self._normalize_script_for_merged(item.new_script)
+                    if normalized and normalized != item.new_script and normalized not in lookup:
+                        lookup[normalized] = script
+                        invalidate = True
+                    if invalidate and chain_id in self._merged_weights_skip_lists:
+                        del self._merged_weights_skip_lists[chain_id]
 
     def get_v36_merged_cumulative_weights(self, chain_id, start_hash, chain_length, max_weight):
         """O(log n) merged mining weight computation via skip list."""
@@ -2709,8 +2744,13 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
         # activation-boundary shares with empty merged_addresses)
         if address_key is None and chain_id is not None and share.VERSION >= 36:
             lookup = getattr(tracker, '_miner_merged_addr', {}).get(chain_id, {})
-            if share.new_script in lookup:
-                address_key = 'MERGED:' + lookup[share.new_script].encode('hex')
+            merged_script = lookup.get(share.new_script)
+            if merged_script is None:
+                norm = OkayTracker._normalize_script_for_merged(share.new_script)
+                if norm:
+                    merged_script = lookup.get(norm)
+            if merged_script is not None:
+                address_key = 'MERGED:' + merged_script.encode('hex')
                 explicit_count += 1
 
         if address_key is None:
