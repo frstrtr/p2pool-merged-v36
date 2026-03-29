@@ -1981,6 +1981,17 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
                     share.hash, merged_addrs, self.chain_id,
                     address_key.encode('hex') if isinstance(address_key, str) and not address_key.startswith('MERGED:') else address_key)
 
+            # Tier 1.5: retroactive lookup (p2pool v0.14.5 phantom fix)
+            if address_key == share.new_script:
+                lookup = getattr(self.tracker, '_miner_merged_addr', {}).get(self.chain_id, {})
+                merged_script = lookup.get(share.new_script)
+                if merged_script is None:
+                    norm = OkayTracker._normalize_script_for_merged(share.new_script)
+                    if norm:
+                        merged_script = lookup.get(norm)
+                if merged_script is not None:
+                    address_key = 'MERGED:' + merged_script.encode('hex')
+
         return (1, {address_key: att*(65535-share.share_data['donation'])},
                 att*65535, att*share.share_data['donation'])
     
@@ -2127,7 +2138,43 @@ class OkayTracker(forest.Tracker):
         )), subset_of=self)
         self.get_cumulative_weights = WeightsSkipList(self)
         self._merged_weights_skip_lists = {}  # chain_id -> MergedWeightsSkipList
+        self._miner_merged_addr = {}  # chain_id -> {new_script: merged_script}
     
+    @staticmethod
+    def _normalize_script_for_merged(script):
+        """Normalize parent chain script to merged chain form (p2pool v0.14.5)."""
+        if len(script) == 25 and script[:3] == '\x76\xa9\x14' and script[23:] == '\x88\xac':
+            return script
+        if len(script) == 22 and script[:2] == '\x00\x14':
+            return '\x76\xa9\x14' + script[2:22] + '\x88\xac'
+        if len(script) == 23 and script[:2] == '\xa9\x14' and script[22:] == '\x87':
+            return script
+        return ''
+
+    def add(self, item):
+        forest.Tracker.add(self, item)
+        if getattr(item, 'VERSION', 0) >= 36:
+            merged_addrs = getattr(item, 'merged_addresses', None)
+            if merged_addrs:
+                for entry in merged_addrs:
+                    chain_id = entry['chain_id']
+                    script = entry['script']
+                    if not script:
+                        continue
+                    if chain_id not in self._miner_merged_addr:
+                        self._miner_merged_addr[chain_id] = {}
+                    lookup = self._miner_merged_addr[chain_id]
+                    invalidate = False
+                    if item.new_script not in lookup:
+                        lookup[item.new_script] = script
+                        invalidate = True
+                    normalized = self._normalize_script_for_merged(item.new_script)
+                    if normalized and normalized != item.new_script and normalized not in lookup:
+                        lookup[normalized] = script
+                        invalidate = True
+                    if invalidate and chain_id in self._merged_weights_skip_lists:
+                        del self._merged_weights_skip_lists[chain_id]
+
     def get_v36_merged_cumulative_weights(self, chain_id, start_hash, chain_length, max_weight):
         """O(log n) merged mining weight computation via skip list."""
         if chain_id not in self._merged_weights_skip_lists:
