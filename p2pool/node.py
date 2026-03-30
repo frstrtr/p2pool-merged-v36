@@ -400,3 +400,16 @@ class Node(object):
             #print "removed! %i %f" % (len(to_remove), (end - start)/len(to_remove))
         
         self.set_best_share()
+
+        # [C2POOL-DEBUG] Log tracker topology every clean_tracker cycle
+        import sys
+        n_heads = len(self.tracker.heads)
+        n_tails = len(self.tracker.tails)
+        n_vheads = len(self.tracker.verified.heads)
+        n_vtails = len(self.tracker.verified.tails)
+        n_items = len(self.tracker.items)
+        n_vitems = len(self.tracker.verified.items)
+        best = self.best_share_var.value
+        best_h = self.tracker.get_height(best) if best is not None else 0
+        print >>sys.stderr, '[P2POOL-TOPO] heads=%d tails=%d v_heads=%d v_tails=%d items=%d v_items=%d best_h=%d' % (
+            n_heads, n_tails, n_vheads, n_vtails, n_items, n_vitems, best_h)
