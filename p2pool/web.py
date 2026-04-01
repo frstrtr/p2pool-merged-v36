@@ -1037,12 +1037,22 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                                 pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
                         # else: P2WSH/P2TR — unconvertible, skip
                         if merged_address is not None:
-                            # Resolve parent address separately — must not kill merged_address
+                            # Resolve parent address — try P2PKH (base58), then bech32 (P2WPKH)
+                            parent_address = None
                             try:
                                 parent_address = bitcoin_data.pubkey_hash_to_address(
                                     pubkey_hash, parent_net.ADDRESS_VERSION, -1, parent_net)
                             except Exception:
-                                parent_address = None
+                                pass
+                            if parent_address not in result:
+                                # Bech32 miner: P2PKH base58 not in result, try P2WPKH bech32
+                                try:
+                                    bech32_addr = bitcoin_data.pubkey_hash_to_address(
+                                        pubkey_hash, -1, 0, parent_net)
+                                    if bech32_addr in result:
+                                        parent_address = bech32_addr
+                                except Exception:
+                                    pass
                             resolved[merged_address] = resolved.get(merged_address, 0) + weight
                             if parent_address:
                                 key_to_parent[merged_address] = parent_address
