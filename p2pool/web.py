@@ -984,6 +984,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             #   parent_address_string = needs address-based auto-conversion (legacy)
             resolved = {}       # {merged_address: weight}
             key_to_parent = {}  # {merged_address: parent_address}
+            explicit_addrs = set()  # merged_addresses resolved from MERGED: keys
             accepted_weight = 0
             
             _dbg_first = not getattr(get_current_merged_payouts, '_key_logged', False)
@@ -1006,6 +1007,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                             except Exception:
                                 merged_address = 'script:' + key[7:]  # Fallback for truly unknown scripts
                         resolved[merged_address] = resolved.get(merged_address, 0) + weight
+                        explicit_addrs.add(merged_address)
                         # Use the share chain mapping to find the parent LTC address
                         parent_addr = merged_key_to_parent.get(key, None)
                         if parent_addr:
@@ -1108,11 +1110,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 merged_amount = miner_reward * fraction / 1e8
                 
                 parent_addr = key_to_parent.get(merged_address, None)
-                source = 'auto-convert' if parent_addr and merged_address not in merged_key_to_parent.values() else 'explicit'
-                # Determine source: if merged_address came from a MERGED: key, it's explicit
-                has_explicit_key = any(merged_key_to_parent.get(k) == parent_addr 
-                                       for k in weights if k.startswith('MERGED:')) if parent_addr else False
-                if has_explicit_key:
+                if merged_address in explicit_addrs:
                     source = 'explicit'
                 elif parent_addr:
                     source = 'auto-convert'
