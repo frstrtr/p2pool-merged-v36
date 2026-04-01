@@ -411,5 +411,7 @@ class Node(object):
         n_vitems = len(self.tracker.verified.items)
         best = self.best_share_var.value
         best_h = self.tracker.get_height(best) if best is not None else 0
-        print >>sys.stderr, '[P2POOL-TOPO] heads=%d tails=%d v_heads=%d v_tails=%d items=%d v_items=%d best_h=%d' % (
-            n_heads, n_tails, n_vheads, n_vtails, n_items, n_vitems, best_h)
+        v_best_h = self.tracker.verified.get_height(best) if best is not None and best in self.tracker.verified.items else -1
+        best_hex = ('%064x' % best)[:16] if best is not None else 'null'
+        print >>sys.stderr, '[P2POOL-TOPO] heads=%d tails=%d v_heads=%d v_tails=%d items=%d v_items=%d best_h=%d v_best_h=%d best=%s' % (
+            n_heads, n_tails, n_vheads, n_vtails, n_items, n_vitems, best_h, v_best_h, best_hex)

@@ -792,6 +792,7 @@ class BaseShare(object):
         max_bits = bitcoin_data.FloatingInteger.from_target_upper_bound(pre_target3)
         bits = bitcoin_data.FloatingInteger.from_target_upper_bound(math.clip(desired_target, (pre_target3//30, pre_target3)))
         # BITS-PARITY diagnostic: log desired_target, pre_target3, clamp result
+        import sys
         if not hasattr(cls, '_bits_log_counter'):
             cls._bits_log_counter = 0
         cls._bits_log_counter += 1
@@ -1545,8 +1546,8 @@ class BaseShare(object):
                 self.share_info['bits'], share_info['bits'],
                 'YES' if self.share_info['bits'] == share_info['bits'] else 'NO')
             # Also compare ref_hash
-            share_ref_hash = self.get_ref_hash(net, self.share_info, contents['ref_merkle_link'], message_data=self._message_data)
-            recomp_ref_hash = self.get_ref_hash(net, share_info, contents['ref_merkle_link'], message_data=self._message_data)
+            share_ref_hash = self.get_ref_hash(self.net, self.share_info, self.contents['ref_merkle_link'], message_data=self._message_data)
+            recomp_ref_hash = self.get_ref_hash(self.net, share_info, self.contents['ref_merkle_link'], message_data=self._message_data)
             print >>sys.stderr, '[GENTX-FAIL] share_ref_hash=%s' % share_ref_hash.encode('hex')
             print >>sys.stderr, '[GENTX-FAIL] recomp_ref_hash=%s' % recomp_ref_hash.encode('hex')
             print >>sys.stderr, '[GENTX-FAIL] ref_hash_MATCH=%s' % ('YES' if share_ref_hash == recomp_ref_hash else 'NO')
@@ -1992,6 +1993,13 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
                 if merged_script is not None:
                     address_key = 'MERGED:' + merged_script.encode('hex')
 
+        # Normalize raw script for merged-chain compatibility (P2WPKH→P2PKH, skip P2WSH/P2TR)
+        if not address_key.startswith('MERGED:'):
+            address_key = OkayTracker._normalize_script_for_merged(address_key)
+            if not address_key:
+                # P2WSH/P2TR — unconvertible to merged chain, skip entirely
+                return (1, {}, 0, 0)
+
         return (1, {address_key: att*(65535-share.share_data['donation'])},
                 att*65535, att*share.share_data['donation'])
     
@@ -2123,6 +2131,18 @@ def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weig
         
         # Decay for next (older) share
         decay_fp = (decay_fp * decay_per) >> _DECAY_PRECISION
+
+    # Per-address parent PPLNS breakdown — log once per new chain height
+    # for death valley comparison between p2pool and c2pool.
+    _last_pplns_h = getattr(get_decayed_cumulative_weights, '_last_pplns_height', -1)
+    if _height != _last_pplns_h:
+        get_decayed_cumulative_weights._last_pplns_height = _height
+        print >>sys.stderr, '[PARENT-PPLNS] height=%d shares=%d addrs=%d total_w=%d don_w=%d' % (
+            _height, share_count, len(weights), total_weight, donation_weight)
+        for key in sorted(weights.keys()):
+            key_disp = key.encode('hex')[:40]
+            pct = 100.0 * weights[key] / total_weight if total_weight > 0 else 0
+            print >>sys.stderr, '[PARENT-PPLNS]   %s w=%d pct=%.2f%%' % (key_disp, weights[key], pct)
 
     return weights, total_weight, donation_weight
 
@@ -2741,17 +2761,52 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
     if chain_length <= 0 or best_share_hash is None:
         return {}, 0, 0
     
+    def _classify_key(key):
+        """Classify a weight key for diagnostic logging."""
+        if isinstance(key, str) and key.startswith('MERGED:'):
+            return 'MERGED'
+        if not isinstance(key, str):
+            return 'UNKNOWN'
+        n = len(key)
+        if n == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac':
+            return 'P2PKH'
+        if n == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87':
+            return 'P2SH'
+        if n == 22 and key[:2] == '\x00\x14':
+            return 'P2WPKH-RAW'
+        if n == 34 and key[:2] == '\x00\x20':
+            return 'P2WSH-RAW'
+        if n == 34 and key[:2] == '\x51\x20':
+            return 'P2TR-RAW'
+        return 'OTHER'
+
+    def _log_doge_pplns(weights, total_weight, donation_weight, height, chain_id, tag):
+        """Log per-address DOGE PPLNS breakdown once per new height."""
+        import sys
+        _last_h = getattr(_log_doge_pplns, '_last_height', -1)
+        if height == _last_h:
+            return
+        _log_doge_pplns._last_height = height
+        miner_total = total_weight - donation_weight if total_weight > donation_weight else 0
+        _start_hex = ('%064x' % best_share_hash)[:16] if best_share_hash is not None else 'null'
+        print >>sys.stderr, '[DOGE-PPLNS] chain_id=%s height=%d max_shares=%d addrs=%d total_w=%d don_w=%d start=%s (%s)' % (
+            chain_id, height, chain_length, len(weights), total_weight, donation_weight, _start_hex, tag)
+        for key in sorted(weights.keys()):
+            cls = _classify_key(key)
+            if isinstance(key, str) and key.startswith('MERGED:'):
+                key_disp = key[:40]
+            else:
+                key_disp = key.encode('hex')[:40]
+            pct = 100.0 * weights[key] / miner_total if miner_total > 0 else 0
+            print >>sys.stderr, '[DOGE-PPLNS]   %s %s w=%d pct=%.2f%%' % (cls, key_disp, weights[key], pct)
+
     # Fast path: O(log n) via MergedWeightsSkipList
     if hasattr(tracker, 'get_v36_merged_cumulative_weights'):
         weights, total_weight, donation_weight = tracker.get_v36_merged_cumulative_weights(
             chain_id, best_share_hash, chain_length, max_weight)
-        import time as _time
-        _now = _time.time()
-        _last_t = getattr(get_v36_merged_weights, '_last_log_time', 0)
-        if _now - _last_t >= 60:
-            get_v36_merged_weights._last_log_time = _now
-            print 'Merged mining weights: %d addresses (weight=%d, donation=%d) via skip list' % (
-                len(weights), total_weight, donation_weight)
+        if chain_id is not None:
+            _height = tracker.get_height(best_share_hash) if best_share_hash is not None else 0
+            _log_doge_pplns(weights, total_weight, donation_weight, _height, chain_id, 'skiplist')
         return weights, total_weight, donation_weight
     
     # Fallback: O(n) linear walk for trackers without SkipList support
@@ -2799,8 +2854,13 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
                         break
         
         if address_key is None:
-            # V36: use raw script bytes as key (matches get_decayed_cumulative_weights)
-            address_key = share.new_script
+            # Normalize raw script for merged-chain compatibility (P2WPKH→P2PKH, skip P2WSH/P2TR)
+            address_key = OkayTracker._normalize_script_for_merged(share.new_script)
+            if not address_key:
+                # P2WSH/P2TR — unconvertible, skip entirely (like pre-V36)
+                if total_weight + donation_weight + share_weight + share_donation > max_weight:
+                    break
+                continue
 
         weights[address_key] = weights.get(address_key, 0) + share_weight
         total_weight += share_weight
@@ -2818,7 +2878,11 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
         if explicit_count > 0:
             msg += ', %d with explicit merged addresses' % explicit_count
         print msg
-    
+
+    if chain_id is not None:
+        _height = tracker.get_height(best_share_hash) if best_share_hash is not None else 0
+        _log_doge_pplns(weights, grand_total, donation_weight, _height, chain_id, 'linear')
+
     return weights, grand_total, donation_weight
 
 def compute_merged_payout_hash(tracker, previous_share_hash, block_target, net):
@@ -2876,13 +2940,40 @@ def compute_merged_payout_hash(tracker, previous_share_hash, block_target, net):
     
     payload = '|'.join(parts)
     result = bitcoin_data.hash256(payload)
+
+    # Per-address merged PPLNS breakdown — log once per new chain height
+    # for death valley comparison between p2pool and c2pool.
     import sys
-    _ctr = getattr(compute_merged_payout_hash, '_log_ctr', 0)
-    if _ctr < 5:
-        compute_merged_payout_hash._log_ctr = _ctr + 1
-        print >>sys.stderr, '[MERGED-HASH] chain_len=%d weights=%d payload(%d)=%s' % (
-            chain_length, len(weights), len(payload), payload[:200])
-        print >>sys.stderr, '[MERGED-HASH] hash=%064x' % result
+    _last_h = getattr(compute_merged_payout_hash, '_last_log_height', -1)
+    if height != _last_h:
+        compute_merged_payout_hash._last_log_height = height
+        # 1) Hash weights (chain_id=None, raw LTC scripts)
+        print >>sys.stderr, '[MERGED-PPLNS] height=%d chain_len=%d addrs=%d total_w=%d don_w=%d' % (
+            height, chain_length, len(weights), total_weight, donation_weight)
+        for key in sorted(weights.keys()):
+            if isinstance(key, str) and key.startswith('MERGED:'):
+                key_disp = key[:40]
+            else:
+                key_disp = key.encode('hex')[:40]
+            pct = 100.0 * weights[key] / total_weight if total_weight > 0 else 0
+            print >>sys.stderr, '[MERGED-PPLNS]   %s w=%d pct=%.2f%%' % (key_disp, weights[key], pct)
+        print >>sys.stderr, '[MERGED-PPLNS]   hash=%064x' % result
+
+        # 2) DOGE payout weights (chain_id=98, with Tier 1/1.5/2 address resolution)
+        # This is what actually determines DOGE coinbase outputs.
+        # During death valley, compare address count and keys vs [MERGED-PPLNS].
+        doge_w, doge_tw, doge_dw = get_v36_merged_weights(
+            tracker, previous_share_hash, chain_length, 2**288 - 1, chain_id=98)
+        doge_miner_w = doge_tw - doge_dw if doge_tw > doge_dw else 0
+        print >>sys.stderr, '[DOGE-PAYOUT] height=%d addrs=%d total_w=%d don_w=%d' % (
+            height, len(doge_w), doge_tw, doge_dw)
+        for key in sorted(doge_w.keys()):
+            if isinstance(key, str) and key.startswith('MERGED:'):
+                key_disp = key[:50]
+            else:
+                key_disp = key.encode('hex')[:40]
+            pct = 100.0 * doge_w[key] / doge_miner_w if doge_miner_w > 0 else 0
+            print >>sys.stderr, '[DOGE-PAYOUT]   %s w=%d pct=%.2f%%' % (key_disp, doge_w[key], pct)
     return result
 
 
