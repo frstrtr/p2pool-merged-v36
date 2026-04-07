@@ -1973,32 +1973,19 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
                     if entry['chain_id'] == self.chain_id:
                         address_key = 'MERGED:' + entry['script'].encode('hex')
                         break
-            # [C2POOL-DEBUG] Log c2pool shares' merged_addresses
-            import sys
-            coinbase = share.share_data.get('coinbase', b'')
-            if '/c2pool/' in coinbase and not getattr(self, '_c2pool_logged', False):
-                self._c2pool_logged = True
-                print >>sys.stderr, '[SKIPLIST-DBG] c2pool share %064x merged_addrs=%r chain_id=%s key=%s' % (
-                    share.hash, merged_addrs, self.chain_id,
-                    address_key.encode('hex') if isinstance(address_key, str) and not address_key.startswith('MERGED:') else address_key)
-
-            # Tier 1.5: retroactive lookup (p2pool v0.14.5 phantom fix)
+            # Tier 1.5: retroactive lookup — same miner's explicit merged
+            # address from their other shares (prevents phantom entries from
+            # activation-boundary shares with empty merged_addresses)
             if address_key == share.new_script:
                 lookup = getattr(self.tracker, '_miner_merged_addr', {}).get(self.chain_id, {})
                 merged_script = lookup.get(share.new_script)
                 if merged_script is None:
+                    # Try normalized P2PKH form (P2WPKH shares → P2PKH key)
                     norm = OkayTracker._normalize_script_for_merged(share.new_script)
                     if norm:
                         merged_script = lookup.get(norm)
                 if merged_script is not None:
                     address_key = 'MERGED:' + merged_script.encode('hex')
-
-        # Normalize raw script for merged-chain compatibility (P2WPKH→P2PKH, skip P2WSH/P2TR)
-        if not address_key.startswith('MERGED:'):
-            address_key = OkayTracker._normalize_script_for_merged(address_key)
-            if not address_key:
-                # P2WSH/P2TR — unconvertible to merged chain, skip entirely
-                return (1, {}, 0, 0)
 
         return (1, {address_key: att*(65535-share.share_data['donation'])},
                 att*65535, att*share.share_data['donation'])
@@ -2162,17 +2149,32 @@ class OkayTracker(forest.Tracker):
     
     @staticmethod
     def _normalize_script_for_merged(script):
-        """Normalize parent chain script to merged chain form (p2pool v0.14.5)."""
+        """Normalize parent chain script to merged chain form.
+
+        Matches build_canonical_merged_coinbase() conversion logic:
+          P2PKH (25 bytes) -> P2PKH (identity)
+          P2WPKH (22 bytes) -> P2PKH (same hash)
+          P2SH (23 bytes) -> P2SH (identity)
+          Other -> empty string (unconvertible)
+
+        Used to register and look up merged addresses regardless of
+        whether the parent share used bech32 or legacy encoding.
+        """
         if len(script) == 25 and script[:3] == '\x76\xa9\x14' and script[23:] == '\x88\xac':
-            return script
+            return script  # P2PKH — identity
         if len(script) == 22 and script[:2] == '\x00\x14':
+            # P2WPKH -> P2PKH (same pubkey hash)
             return '\x76\xa9\x14' + script[2:22] + '\x88\xac'
         if len(script) == 23 and script[:2] == '\xa9\x14' and script[22:] == '\x87':
-            return script
-        return ''
+            return script  # P2SH — identity
+        return ''  # unconvertible
 
     def add(self, item):
         forest.Tracker.add(self, item)
+        # Register explicit merged addresses for retroactive lookup.
+        # When a V36 share has empty merged_addresses (activation boundary),
+        # the same miner's explicit address from other shares is used instead
+        # of auto-converting the parent script (which produces a phantom entry).
         if getattr(item, 'VERSION', 0) >= 36:
             merged_addrs = getattr(item, 'merged_addresses', None)
             if merged_addrs:
@@ -2188,6 +2190,9 @@ class OkayTracker(forest.Tracker):
                     if item.new_script not in lookup:
                         lookup[item.new_script] = script
                         invalidate = True
+                    # Also register under normalized P2PKH form so
+                    # Tier 1.5 catches shares with different script
+                    # encoding (P2WPKH vs P2PKH) for the same miner.
                     normalized = self._normalize_script_for_merged(item.new_script)
                     if normalized and normalized != item.new_script and normalized not in lookup:
                         lookup[normalized] = script
@@ -2510,7 +2515,13 @@ class AutoRatchet(object):
         v36_votes = 0
         v36_shares = 0  # actual V36 format shares (not just votes)
         total = 0
-        
+        # Tail guard: collect vote counts for the oldest 10% of the window.
+        # check() (line 1398-1405) rejects V36 shares when the oldest 10%
+        # has <60% signaling, so we must not activate before that clears.
+        tail_start = net.CHAIN_LENGTH * 9 // 10  # position where tail begins
+        tail_v36_votes = 0
+        tail_total = 0
+
         for share in tracker.get_chain(best_share_hash, sample):
             total += 1
             desired_ver = getattr(share, 'desired_version', share.VERSION)
@@ -2518,6 +2529,11 @@ class AutoRatchet(object):
                 v36_votes += 1
             if share.VERSION >= 36:
                 v36_shares += 1
+            # Shares are newest-first; positions >= tail_start are the oldest 10%
+            if total > tail_start:
+                tail_total += 1
+                if desired_ver >= 36:
+                    tail_v36_votes += 1
         
         if total == 0:
             if self._state == self.STATE_CONFIRMED:
@@ -2542,10 +2558,21 @@ class AutoRatchet(object):
         
         old_state = self._state
         
+        # Tail guard: oldest 10% signaling percentage
+        tail_pct = (tail_v36_votes * 100 // tail_total) if tail_total > 0 else 0
+
         # --- State transitions ---
         if self._state == self.STATE_VOTING:
-            # Only activate with a full window of data
+            # Only activate with a full window of data AND oldest 10% ready.
+            # The tail guard prevents activation before check() (line 1404)
+            # would accept V36 shares — avoids PeerMisbehavingError on peers.
             if full_window and vote_pct >= self.ACTIVATION_THRESHOLD:
+                if tail_total > 0 and tail_pct < 60:
+                    # Oldest shares haven't signaled enough — wait
+                    if self._log_counter % 10 == 0:
+                        print '[AutoRatchet] VOTING: full window %d%% but tail 10%% only %d%% < 60%% - waiting' % (
+                            vote_pct, tail_pct)
+                    return (PaddingBugfixShare, 36)
                 self._state = self.STATE_ACTIVATED
                 self._activated_at = int(time.time())
                 self._activated_height = height
@@ -2853,6 +2880,20 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
                         explicit_count += 1
                         break
         
+        # Tier 1.5: retroactive lookup — same miner's explicit merged
+        # address from their other shares (prevents phantom entries from
+        # activation-boundary shares with empty merged_addresses)
+        if address_key is None and chain_id is not None and share.VERSION >= 36:
+            lookup = getattr(tracker, '_miner_merged_addr', {}).get(chain_id, {})
+            merged_script = lookup.get(share.new_script)
+            if merged_script is None:
+                norm = OkayTracker._normalize_script_for_merged(share.new_script)
+                if norm:
+                    merged_script = lookup.get(norm)
+            if merged_script is not None:
+                address_key = 'MERGED:' + merged_script.encode('hex')
+                explicit_count += 1
+
         if address_key is None:
             # Normalize raw script for merged-chain compatibility (P2WPKH→P2PKH, skip P2WSH/P2TR)
             address_key = OkayTracker._normalize_script_for_merged(share.new_script)

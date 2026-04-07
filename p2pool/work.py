@@ -235,12 +235,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
             'all_time': 0,           # Never resets (absolute record)
             'all_time_user': None,   # Who achieved it
             'all_time_ts': 0,        # When
+            'all_time_net_diff': 0,  # Network difficulty at the time
             'session': 0,            # Resets on restart
             'session_user': None,
             'session_ts': 0,
+            'session_net_diff': 0,
             'round': 0,              # Resets when pool finds a block
             'round_user': None,
             'round_ts': 0,
+            'round_net_diff': 0,
             'round_start': time.time(),
         }
         # Merged chain (DOGE) best difficulty tracking
@@ -248,9 +251,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
             'all_time': 0,
             'all_time_user': None,
             'all_time_ts': 0,
+            'all_time_net_diff': 0,
+            'all_time_merged_net_diff': 0,
             'round': 0,              # Resets when pool finds a DOGE block
             'round_user': None,
             'round_ts': 0,
+            'round_net_diff': 0,
+            'round_merged_net_diff': 0,
             'round_start': time.time(),
         }
 
@@ -1772,12 +1779,60 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)',
                             e, getattr(self.args, 'redistribute_mode', 'pplns'))
                 else:
-                    # Case 3: No valid merged address either — full redistribution
-                    pubkey_hash, pubkey_type = self._redistribute_share()
-                    merged_addresses['_redistributed'] = True
-                    merged_addresses['_reverse_converted'] = False
-                    print >>sys.stderr, '[POOL] Invalid miner address %s from %s - redistributed (%s mode)' % (
-                        user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
+                    # ================================================================
+                    # CASE 5: No explicit DOGE, but parent address might BE a DOGE address
+                    # ================================================================
+                    # Miner connected as DOGE_ADDR.worker (no comma) — detect DOGE address
+                    # in parent field, reverse-convert to LTC, and auto-convert to DOGE.
+                    reverse_done = False
+                    try:
+                        doge_net = self._get_merged_address_net(98)
+                        if doge_net is not None:
+                            doge_ph, doge_v, doge_wv = bitcoin_data.address_to_pubkey_hash(user, doge_net)
+                            # Successfully parsed as DOGE — reverse-convert to LTC
+                            parent_net = self.node.net.PARENT
+                            if doge_v == doge_net.ADDRESS_P2SH_VERSION:
+                                pubkey_hash = doge_ph
+                                pubkey_type = p2pool_data.PUBKEY_TYPE_P2SH
+                                ltc_addr = bitcoin_data.pubkey_hash_to_address(
+                                    doge_ph, parent_net.ADDRESS_P2SH_VERSION, -1, parent_net)
+                            else:
+                                pubkey_hash = doge_ph
+                                pubkey_type = p2pool_data.PUBKEY_TYPE_P2PKH
+                                ltc_addr = bitcoin_data.pubkey_hash_to_address(
+                                    doge_ph, parent_net.ADDRESS_VERSION, -1, parent_net)
+                            # Auto-generate merged (DOGE) address from the same pubkey_hash
+                            auto_entries = self._auto_generate_merged_addresses(doge_ph, 'p2pkh' if pubkey_type == p2pool_data.PUBKEY_TYPE_P2PKH else 'p2sh')
+                            if auto_entries:
+                                merged_addresses['_validated'] = auto_entries
+                                for ae in auto_entries:
+                                    try:
+                                        ae_net = self._get_merged_address_net(ae['chain_id'])
+                                        ae_chain = self._get_merged_chain_name(ae['chain_id'])
+                                        ae_addr = bitcoin_data.pubkey_hash_to_address(
+                                            doge_ph, ae_net.ADDRESS_VERSION if pubkey_type == p2pool_data.PUBKEY_TYPE_P2PKH else ae_net.ADDRESS_P2SH_VERSION, -1, ae_net)
+                                        merged_addresses[ae_chain] = ae_addr
+                                    except Exception:
+                                        pass
+                            merged_addresses['_reverse_converted'] = True
+                            merged_addresses['_auto_converted'] = True
+                            merged_addresses['_redistributed'] = False
+                            reverse_done = True
+                            if not hasattr(self, '_reverse_converted_addrs'):
+                                self._reverse_converted_addrs = set()
+                            if user not in self._reverse_converted_addrs:
+                                self._reverse_converted_addrs.add(user)
+                                print >>sys.stderr, '[POOL] CASE 5: DOGE address %s used as parent — reverse-converted to LTC %s, auto-converted DOGE (pubkey_hash preserved)' % (
+                                    user, ltc_addr)
+                    except Exception:
+                        pass  # Not a valid DOGE address either — fall through to Case 3
+                    if not reverse_done:
+                        # Case 3: No valid merged address either — full redistribution
+                        pubkey_hash, pubkey_type = self._redistribute_share()
+                        merged_addresses['_redistributed'] = True
+                        merged_addresses['_reverse_converted'] = False
+                        print >>sys.stderr, '[POOL] Invalid miner address %s from %s - redistributed (%s mode)' % (
+                            user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
         
         # Append worker name to user for identification
         if worker:
@@ -1944,6 +1999,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
     def update_best_difficulty(self, user, difficulty):
         """Track best difficulty for a miner and node-wide (parent + merged)"""
         now = time.time()
+
+        # Get current network difficulties at this moment
+        try:
+            net_diff = bitcoin_data.target_to_difficulty(self.node.bitcoind_work.value['bits'].target)
+        except Exception:
+            net_diff = 0
+        merged_net_diff = 0
+        try:
+            for chainid, aux_work in self.merged_work.value.iteritems():
+                merged_target = aux_work.get('target', 0)
+                if merged_target and merged_target > 0:
+                    merged_net_diff = bitcoin_data.target_to_difficulty(merged_target)
+                    break
+        except Exception:
+            pass
+
         if user not in self.miner_best_difficulty:
             self.miner_best_difficulty[user] = {
                 'all_time': 0,
@@ -1951,7 +2022,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 'round': 0,
                 'session_start': self.session_start_time
             }
-        
+
         rec = self.miner_best_difficulty[user]
         if difficulty > rec['all_time']:
             rec['all_time'] = difficulty
@@ -1959,32 +2030,39 @@ class WorkerBridge(worker_interface.WorkerBridge):
             rec['session'] = difficulty
         if difficulty > rec['round']:
             rec['round'] = difficulty
-        
+
         # Node-wide tracking (parent chain)
         nb = self.node_best_difficulty
         if difficulty > nb['all_time']:
             nb['all_time'] = difficulty
             nb['all_time_user'] = user
             nb['all_time_ts'] = now
+            nb['all_time_net_diff'] = net_diff
         if difficulty > nb['session']:
             nb['session'] = difficulty
             nb['session_user'] = user
             nb['session_ts'] = now
+            nb['session_net_diff'] = net_diff
         if difficulty > nb['round']:
             nb['round'] = difficulty
             nb['round_user'] = user
             nb['round_ts'] = now
-        
+            nb['round_net_diff'] = net_diff
+
         # Merged chain (DOGE) tracking — same PoW hash, different target
         mb = self.merged_best_difficulty
         if difficulty > mb['all_time']:
             mb['all_time'] = difficulty
             mb['all_time_user'] = user
             mb['all_time_ts'] = now
+            mb['all_time_net_diff'] = net_diff
+            mb['all_time_merged_net_diff'] = merged_net_diff
         if difficulty > mb['round']:
             mb['round'] = difficulty
             mb['round_user'] = user
             mb['round_ts'] = now
+            mb['round_net_diff'] = net_diff
+            mb['round_merged_net_diff'] = merged_net_diff
 
     def reset_round_best_difficulty(self):
         """Reset round-level best difficulty (called when pool finds a block)"""
@@ -1996,6 +2074,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.node_best_difficulty['round'] = 0
         self.node_best_difficulty['round_user'] = None
         self.node_best_difficulty['round_ts'] = 0
+        self.node_best_difficulty['round_net_diff'] = 0
         self.node_best_difficulty['round_start'] = now
         print >>sys.stderr, 'Best difficulty round stats reset (new round started)'
 
@@ -2005,6 +2084,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.merged_best_difficulty['round'] = 0
         self.merged_best_difficulty['round_user'] = None
         self.merged_best_difficulty['round_ts'] = 0
+        self.merged_best_difficulty['round_net_diff'] = 0
+        self.merged_best_difficulty['round_merged_net_diff'] = 0
         self.merged_best_difficulty['round_start'] = now
         print >>sys.stderr, 'Merged best difficulty round stats reset (DOGE block found)'
 
@@ -2780,6 +2861,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         print >>sys.stderr, '*** CRITICAL: Block submission failed! ***'
                         log.err(err, 'Block submission error:')
                     if pow_hash <= header['bits'].target:
+                        # Reset round stats FIRST — before any code that could throw
+                        self.reset_round_best_difficulty()
                         # New block found - notify subscribers
                         self.node.factory.new_block.happened(header_hash)
                         # Fire block_found event with block info for immediate persistence
@@ -2810,8 +2893,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             'miner_payout': miner_payout,
                         }
                         self.block_found.happened(block_info)
-                        # Reset round-level best difficulty stats
-                        self.reset_round_best_difficulty()
             except:
                 log.err(None, 'Error while processing potential block:')
 
@@ -3174,9 +3255,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     # submitblock returns: None=accepted, 'duplicate'=already in chain (also success),
                                     # 'inconclusive'=may have been accepted, other string=rejection reason
                                     if result is None or result == True or result == 'duplicate' or result == 'duplicate-invalid' or result == 'inconclusive':
+                                        # Reset merged round stats FIRST — before any code that could throw
+                                        self.reset_merged_round_best_difficulty()
                                         if result == 'duplicate':
                                             print '  (Note: block already accepted via parallel submission)'
-                                        
+
                                         # Fire broadcast to P2P peers AFTER successful primary RPC submission
                                         chainid = aux_work.get('chainid', 98)
                                         if chainid in self.node.merged_broadcasters:
@@ -3269,9 +3352,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # Keep only last 100 merged blocks
                                         if len(self.recent_merged_blocks) > 100:
                                             self.recent_merged_blocks = self.recent_merged_blocks[-100:]
-                                        # Reset merged round best difficulty
-                                        self.reset_merged_round_best_difficulty()
-                                        
+
                                         # Async verification after a delay
                                         if 'merged_proxy' in aux_work:
                                             def verify_block(block_rec, proxy, block_hash):
@@ -3329,6 +3410,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 else:
                                     # Record merged block find if successful
                                     if result == True:
+                                        # Reset merged round stats FIRST — before any code that could throw
+                                        self.reset_merged_round_best_difficulty()
                                         # Get network info - for single-address mode we may not have full info
                                         chainid = aux_work.get('chainid', 0)
                                         merged_net_name = aux_work.get('merged_net_name', 'Dogecoin' if chainid == 98 else 'Unknown')
@@ -3386,9 +3469,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # Keep only last 100 merged blocks
                                         if len(self.recent_merged_blocks) > 100:
                                             self.recent_merged_blocks = self.recent_merged_blocks[-100:]
-                                        # Reset merged round best difficulty
-                                        self.reset_merged_round_best_difficulty()
-                                        
+
                                         # For testnet: async verification after a delay
                                         # Use aux_work['hash'] (Dogecoin block hash) NOT pow_hash (scrypt hash)
                                         if is_testnet and 'merged_proxy' in aux_work:

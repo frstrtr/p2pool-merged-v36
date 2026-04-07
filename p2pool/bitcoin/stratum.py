@@ -155,10 +155,10 @@ class PoolStatistics(object):
         
         # Track recent difficulties for hash rate estimation
         stats['difficulties'].append((now, difficulty))
-        # Keep last 100 entries
-        if len(stats['difficulties']) > 100:
-            stats['difficulties'] = stats['difficulties'][-100:]
-        
+        # Prune: keep last 100 entries AND only entries within last 10 minutes
+        cutoff = now - 600
+        stats['difficulties'] = [(t, d) for t, d in stats['difficulties'] if t > cutoff][-100:]
+
         # Estimate hash rate from recent shares
         if len(stats['difficulties']) >= 2:
             oldest_t, oldest_d = stats['difficulties'][0]
@@ -167,6 +167,10 @@ class PoolStatistics(object):
                 total_work = sum(d for t, d in stats['difficulties'])
                 # Hash rate = total_difficulty * 2^32 / time_span
                 stats['hash_rate'] = (total_work * (2**32)) / time_span
+            else:
+                stats['hash_rate'] = 0.0
+        else:
+            stats['hash_rate'] = 0.0
     
     def get_global_submission_rate(self):
         """Get current global submission rate (shares/second)"""
@@ -178,9 +182,20 @@ class PoolStatistics(object):
         return len(recent) / self.global_submission_window
     
     def get_worker_stats(self, worker_name=None):
-        """Get statistics for a specific worker or all workers"""
+        """Get statistics for a specific worker or all workers.
+        Decays hash_rate to 0 for workers not seen in the last 10 minutes."""
+        import time as _time
+        now = _time.time()
+        stale_cutoff = now - 600  # 10 minutes
         if worker_name:
-            return self.worker_stats.get(worker_name)
+            stats = self.worker_stats.get(worker_name)
+            if stats and stats.get('last_seen', 0) < stale_cutoff:
+                stats['hash_rate'] = 0.0
+            return stats
+        # Decay all stale workers
+        for wname, stats in self.worker_stats.items():
+            if stats.get('last_seen', 0) < stale_cutoff:
+                stats['hash_rate'] = 0.0
         return self.worker_stats
     
     def get_unique_connected_addresses(self):

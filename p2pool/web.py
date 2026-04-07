@@ -1039,11 +1039,21 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                                 pubkey_hash, chain['addr_net'].ADDRESS_VERSION, -1, chain['addr_net'])
                         # else: P2WSH/P2TR — unconvertible, skip
                         if merged_address is not None:
-                            # Resolve parent address — try P2PKH (base58), then bech32 (P2WPKH)
-                            parent_address = None
+                            # Resolve parent address — must match the encoding used in
+                            # result dict (from get_expected_payouts → script2_to_address).
                             try:
-                                parent_address = bitcoin_data.pubkey_hash_to_address(
-                                    pubkey_hash, parent_net.ADDRESS_VERSION, -1, parent_net)
+                                if len(key) == 22 and key[:2] == '\x00\x14':
+                                    # P2WPKH: parent must be bech32 (not P2PKH)
+                                    parent_address = bitcoin_data.pubkey_hash_to_address(
+                                        pubkey_hash, -1, 0, parent_net)
+                                elif len(key) == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87':
+                                    # P2SH: parent must be P2SH
+                                    parent_address = bitcoin_data.pubkey_hash_to_address(
+                                        pubkey_hash, parent_net.ADDRESS_P2SH_VERSION, -1, parent_net)
+                                else:
+                                    # P2PKH
+                                    parent_address = bitcoin_data.pubkey_hash_to_address(
+                                        pubkey_hash, parent_net.ADDRESS_VERSION, -1, parent_net)
                             except Exception:
                                 pass
                             if parent_address not in result:
@@ -1531,34 +1541,37 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         """Return node-wide best share stats: all-time, session, and current round"""
         nb = wb.node_best_difficulty
         network_difficulty = bitcoin_data.target_to_difficulty(node.bitcoind_work.value['bits'].target)
-        
+
         def pct_of_block(diff, net_diff):
             return (diff / net_diff * 100) if net_diff > 0 and diff > 0 else 0
-        
+
         result = dict(
             network_difficulty=network_difficulty,
             all_time=dict(
                 difficulty=nb['all_time'],
-                pct_of_block=pct_of_block(nb['all_time'], network_difficulty),
+                pct_of_block=pct_of_block(nb['all_time'], nb['all_time_net_diff'] or network_difficulty),
+                net_diff_at_time=nb['all_time_net_diff'],
                 miner=nb['all_time_user'],
                 timestamp=nb['all_time_ts'],
             ),
             session=dict(
                 difficulty=nb['session'],
-                pct_of_block=pct_of_block(nb['session'], network_difficulty),
+                pct_of_block=pct_of_block(nb['session'], nb['session_net_diff'] or network_difficulty),
+                net_diff_at_time=nb['session_net_diff'],
                 miner=nb['session_user'],
                 timestamp=nb['session_ts'],
                 started=wb.session_start_time,
             ),
             round=dict(
                 difficulty=nb['round'],
-                pct_of_block=pct_of_block(nb['round'], network_difficulty),
+                pct_of_block=pct_of_block(nb['round'], nb['round_net_diff'] or network_difficulty),
+                net_diff_at_time=nb['round_net_diff'],
                 miner=nb['round_user'],
                 timestamp=nb['round_ts'],
                 started=nb['round_start'],
             ),
         )
-        
+
         # Add merged chain (DOGE) best share stats
         mb = wb.merged_best_difficulty
         merged_difficulty = 0
@@ -1572,20 +1585,24 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                     break
         except Exception:
             pass
-        
+
         if merged_difficulty > 0 or mb['all_time'] > 0:
             result['merged'] = dict(
                 network_difficulty=merged_difficulty,
                 symbol=merged_symbol or 'DOGE',
                 all_time=dict(
                     difficulty=mb['all_time'],
-                    pct_of_block=pct_of_block(mb['all_time'], merged_difficulty),
+                    pct_of_block=pct_of_block(mb['all_time'], mb['all_time_merged_net_diff'] or merged_difficulty),
+                    net_diff_at_time=mb['all_time_net_diff'],
+                    merged_net_diff_at_time=mb['all_time_merged_net_diff'],
                     miner=mb['all_time_user'],
                     timestamp=mb['all_time_ts'],
                 ),
                 round=dict(
                     difficulty=mb['round'],
-                    pct_of_block=pct_of_block(mb['round'], merged_difficulty),
+                    pct_of_block=pct_of_block(mb['round'], mb['round_merged_net_diff'] or merged_difficulty),
+                    net_diff_at_time=mb['round_net_diff'],
+                    merged_net_diff_at_time=mb['round_merged_net_diff'],
                     miner=mb['round_user'],
                     timestamp=mb['round_ts'],
                     started=mb['round_start'],
@@ -1831,8 +1848,7 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 explorer_url = ''
                 if explorer:
                     base_url = explorer.get('testnet' if is_testnet else 'mainnet', '')
-                    pow_hash = b.get('pow_hash', block_hash)
-                    explorer_url = base_url + pow_hash if base_url else ''
+                    explorer_url = base_url + block_hash if base_url else ''
                 
                 block_entry = {
                     'timestamp': b.get('ts', 0),
@@ -3230,11 +3246,22 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 traceback.print_exc()        
         # Track connected miners and worker counts
         try:
-            connected_miners_count = len(miner_hash_rates)
-            unique_miners = set(miner_hash_rates.keys())
-            hd.datastreams['connected_miners'].add_datum(t, connected_miners_count)
-            hd.datastreams['unique_miner_count'].add_datum(t, len(unique_miners))
-            hd.datastreams['worker_count'].add_datum(t, connected_miners_count)
+            # worker_count = number of unique worker entries (address.worker combos)
+            hd.datastreams['worker_count'].add_datum(t, len(miner_hash_rates))
+            # unique_miner_count = unique base addresses (strip worker/diff suffixes)
+            unique_addrs = set()
+            for user in miner_hash_rates:
+                base = user.split(',')[0]  # take LTC address part
+                base = base.split('+')[0].split('/')[0].split('.')[0].split('_')[0]
+                unique_addrs.add(base)
+            hd.datastreams['unique_miner_count'].add_datum(t, len(unique_addrs))
+            # connected_miners = actual stratum connection count
+            try:
+                from p2pool.bitcoin.stratum import pool_stats
+                stratum_connections = len(pool_stats.connections) if pool_stats else len(miner_hash_rates)
+            except:
+                stratum_connections = len(miner_hash_rates)
+            hd.datastreams['connected_miners'].add_datum(t, stratum_connections)
         except:
             if p2pool.DEBUG:
                 traceback.print_exc()

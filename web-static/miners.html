@@ -712,18 +712,25 @@
 
                         // If no explicit merged address in worker name, check API merged_addresses
                         var mergedAutoConverted = false;
+                        var mergedReverseConverted = false;
                         if (!mergedAddr && workerData.merged_addresses) {
                             mergedAddr = workerData.merged_addresses['dogecoin'] || null;
                             mergedAutoConverted = workerData.merged_auto_converted || false;
                         }
+                        mergedReverseConverted = workerData.merged_reverse_converted || false;
 
                         // During transition, replace explicit DOGE with auto-converted address
+                        var mergedExplicitPending = null;
                         if (inTransition && workerData.merged_addresses) {
                             var autoAddr = workerData.merged_addresses['dogecoin'] || null;
-                            if (autoAddr && mergedAddr && autoAddr !== mergedAddr) {
+                            var explicitAddr = extractMergedAddress(workerName);
+                            if (autoAddr && explicitAddr && autoAddr !== explicitAddr) {
+                                mergedExplicitPending = explicitAddr;
                                 mergedAddr = autoAddr;
+                                mergedAutoConverted = true;
+                            } else if (!explicitAddr) {
+                                mergedAutoConverted = true;
                             }
-                            mergedAutoConverted = true;
                         }
                         
                         // Get difficulty from connection_difficulties
@@ -733,8 +740,11 @@
                         }
                         
                         // Get hashrate: try measured, then local_stats, then estimate from difficulty
-                        var hashrate = workerData.hash_rate || 0;
-                        if (hashrate === 0 && local_stats.miner_hash_rates && local_stats.miner_hash_rates[workerName]) {
+                        // Ignore stale hash_rate from workers not seen in last 10 minutes
+                        var workerLastSeen = workerData.last_seen || 0;
+                        var workerStale = workerLastSeen > 0 && (Date.now() / 1000 - workerLastSeen) > 600;
+                        var hashrate = (!workerStale && workerData.hash_rate) ? workerData.hash_rate : 0;
+                        if (hashrate === 0 && !workerStale && local_stats.miner_hash_rates && local_stats.miner_hash_rates[workerName]) {
                             hashrate = local_stats.miner_hash_rates[workerName];
                         }
                         var isEstimated = false;
@@ -750,6 +760,8 @@
                                 address: baseAddress,
                                 mergedAddress: null,
                                 mergedAutoConverted: false,
+                                mergedReverseConverted: false,
+                                mergedExplicitPending: null,
                                 workers: [],
                                 totalHashrate: 0,
                                 totalDoa: 0,
@@ -761,6 +773,8 @@
                         if (mergedAddr && !minerGroups[baseAddress].mergedAddress) {
                             minerGroups[baseAddress].mergedAddress = mergedAddr;
                             minerGroups[baseAddress].mergedAutoConverted = mergedAutoConverted;
+                            minerGroups[baseAddress].mergedReverseConverted = mergedReverseConverted;
+                            minerGroups[baseAddress].mergedExplicitPending = mergedExplicitPending;
                         }
                         
                         minerGroups[baseAddress].workers.push({
@@ -888,7 +902,22 @@
                     .attr('target', '_blank')
                     .attr('style', 'margin-left: 10px; font-size: 0.8rem;')
                     .text('↗');
-                
+                // Parent address status indicators
+                var _sym = (currency_info && currency_info.symbol) || 'parent';
+                if (miner.mergedReverseConverted && miner.mergedAutoConverted) {
+                    // Case 5: DOGE address used as parent — LTC auto-derived from DOGE key
+                    addr_div.append('span')
+                        .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                        .attr('title', 'DOGE address detected in ' + _sym + ' field \u2014 ' + _sym + ' address auto-derived from same pubkey hash. Set correct ' + _sym + ' address for safety.')
+                        .text('\u26a0 auto');
+                } else if (miner.mergedReverseConverted) {
+                    // Case 4: Invalid LTC + valid explicit DOGE
+                    addr_div.append('span')
+                        .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                        .attr('title', _sym + ' address reverse-derived from DOGE key (original was invalid)')
+                        .text('\u26a0 from DOGE');
+                }
+
                 // Show merged mining (DOGE) address if present
                 if (miner.mergedAddress) {
                     var mergedDiv = header.append('div')
@@ -899,10 +928,25 @@
                         .attr('target', '_blank')
                         .attr('style', 'color: #c3a634; text-decoration: none;')
                         .text(miner.mergedAddress);
-                    if (miner.mergedAutoConverted) {
+                    if (miner.mergedReverseConverted && miner.mergedAutoConverted) {
+                        // Case 5: DOGE address used as parent — DOGE auto-derived from same key
                         mergedDiv.append('span')
                             .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
-                            .attr('title', 'Auto-converted from parent chain address (same pubkey hash). During V35\u2192V36 transition, all merged addresses are auto-converted since V35 shares cannot carry explicit merged addresses.')
+                            .attr('title', 'DOGE address detected in ' + _sym + ' field \u2014 auto-converted from same pubkey hash. Set ' + _sym + '_ADDR,DOGE_ADDR format for explicit control.')
+                            .text('\u26a0 auto');
+                    } else if (miner.mergedAutoConverted && miner.mergedExplicitPending) {
+                        mergedDiv.append('span')
+                            .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                            .attr('title', 'V35\u2192V36 transition: your explicit DOGE address ' + miner.mergedExplicitPending + ' is recognized but not active yet. Until V36 shares appear on the chain, payouts go to this auto-converted address (derived from your parent pubkey). Once transition completes, your explicit address will be used automatically.')
+                            .text('\u26a0 transition');
+                        mergedDiv.append('div')
+                            .attr('style', 'font-size: 0.65rem; color: #888; margin-left: 4px; margin-top: 1px;')
+                            .attr('title', 'Your explicit DOGE address \u2014 will activate after V36 transition completes')
+                            .text('pending: ' + miner.mergedExplicitPending);
+                    } else if (miner.mergedAutoConverted) {
+                        mergedDiv.append('span')
+                            .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
+                            .attr('title', 'Auto-converted from parent chain address (same pubkey hash) \u2014 set explicit DOGE address for safety')
                             .text('\u26a0 auto');
                     }
                     mergedDiv.append('a')
@@ -1197,14 +1241,14 @@
                     var hashLink = document.createElement('a');
                     hashLink.className = 'hash-link';
                     var explorer = merged_explorers[block.chainid];
-                    if (explorer && block.pow_hash) {
-                        hashLink.href = (block.is_testnet ? explorer.testnet : explorer.mainnet) + block.pow_hash;
+                    if (explorer && block.hash) {
+                        hashLink.href = (block.is_testnet ? explorer.testnet : explorer.mainnet) + block.hash;
                     } else {
                         hashLink.href = '#';
                     }
                     hashLink.target = '_blank';
-                    hashLink.title = 'POW Hash: ' + (block.pow_hash || 'N/A');
-                    var hash = block.pow_hash || block.hash || '-';
+                    hashLink.title = 'Block Hash: ' + (block.hash || 'N/A') + '\nPoW Hash: ' + (block.pow_hash || 'N/A');
+                    var hash = block.hash || block.pow_hash || '-';
                     hashLink.textContent = hash.substring(0, 16) + '...';
                     tdHash.appendChild(hashLink);
                     tr.appendChild(tdHash);

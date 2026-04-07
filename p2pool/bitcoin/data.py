@@ -460,7 +460,10 @@ def _pubkey_hash_to_address_impl(pubkey_hash, addr_ver, bech32_ver, net):
             thash = '{:x}'.format(pubkey_hash)
             if len(thash) % 2 == 1:
                 thash = '0%s' % thash
-        data = [int(x) for x in bytearray.fromhex(thash)]
+        # pubkey_hash is a little-endian integer (IntType(160) convention);
+        # reverse the big-endian hex bytes to recover the original byte order
+        # that bech32/cashaddr encoders expect.
+        data = [int(x) for x in bytearray.fromhex(thash)[::-1]]
         if net.SYMBOL.lower() in ['bch', 'tbch', 'bsv', 'tbsv']:
             return cash_addr.encode(net.HUMAN_READABLE_PART, bech32_ver, data)
         else:
@@ -530,9 +533,10 @@ def get_bech32_pubkey_hash(address, net):
     except Exception as e:
         raise AddrError
     else:
-        # Return the witness program as integer, version -1 (indicates bech32), 
-        # witness version, and the original byte length for P2WPKH/P2WSH distinction
-        pubkey_hash_int = int(''.join('{:02x}'.format(x) for x in witprog), 16)
+        # Return the witness program as little-endian integer (IntType(160) convention),
+        # version -1 (indicates bech32), and witness version.
+        # Reverse bytes so the integer matches what IntType(160).unpack() would produce.
+        pubkey_hash_int = int(''.join('{:02x}'.format(x) for x in reversed(witprog)), 16)
         return pubkey_hash_int, -1, witver
 
 def get_cashaddr_pubkey_hash(address, net):
@@ -543,7 +547,7 @@ def get_cashaddr_pubkey_hash(address, net):
     except Exception as e:
         raise AddrError
     else:
-        return int(''.join('{:02x}'.format(x) for x in data), 16), -1, ver
+        return int(''.join('{:02x}'.format(x) for x in reversed(data)), 16), -1, ver
 
 # transactions
 
@@ -588,7 +592,8 @@ def _pubkey_hash_to_script2_impl(pubkey_hash, version, bech32_version, net):
             decoded = '{:040x}'.format(pubkey_hash)
         else:
             decoded = '{:x}'.format(pubkey_hash)
-        ehash = binascii.unhexlify(decoded)
+        # Reverse from big-endian hex to recover original byte order (LE convention)
+        ehash = binascii.unhexlify(decoded)[::-1]
         size = '{:x}'.format(len(decoded) // 2)
         if len(size) % 2 == 1:
             size = '0%s' % size
@@ -663,7 +668,7 @@ def script2_to_cashaddress(script2, addr_ver, ca_ver, net):
             sub_hash = script2[2:-1]
         else:
             raise ValueError
-        pubkey_hash = int(sub_hash.encode('hex'), 16)
+        pubkey_hash = int(sub_hash[::-1].encode('hex'), 16)  # LE convention
         res = pubkey_hash_to_script2(pubkey_hash, addr_ver, ca_ver, net)
         if res != script2:
             raise ValueError
@@ -673,7 +678,7 @@ def script2_to_cashaddress(script2, addr_ver, ca_ver, net):
 
 def script2_to_bech32_address(script2, addr_ver, bech32_ver, net):
     try:
-        pubkey_hash = int(script2[2:].encode('hex'), 16)
+        pubkey_hash = int(script2[2:][::-1].encode('hex'), 16)  # LE convention
         res = pubkey_hash_to_script2(pubkey_hash, addr_ver, bech32_ver, net)
         if res != script2:
             raise ValueError

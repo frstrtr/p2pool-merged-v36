@@ -8,6 +8,10 @@
 
 Decentralized Scrypt mining pool for **Litecoin**, **DigiByte**, and **Dogecoin** (merged mining), building on the p2pool protocol with V36 share format. Supports multiple Scrypt parent chains with a unified multichain dashboard.
 
+> **First merged-mined DOGE block:** [#6135703](https://blockchair.com/dogecoin/block/f84500c25a4cce2a08887f29763726bd5ecec7b66fed65a88b181fb0b0ab2383) (2026-03-23) — proof-of-concept for decentralized LTC+DOGE merged mining via P2Pool V36
+>
+> **First twin block (LTC+DOGE):** [LTC #3085349](https://blockchair.com/litecoin/block/3085349) + [DOGE #6154761](https://blockchair.com/dogecoin/block/6154761) — first V36-desired, V35-signalling share to find both a Litecoin and Dogecoin block simultaneously via P2Pool merged mining
+
 > **📋 New to V36?** Read the **[V36 Release Notes](docs/V36_RELEASE_NOTES.md)** for a complete overview of what changed, why, and how miners are protected from pool hopping attacks.
 
 ## What's different from jtoomim/p2pool (V35)

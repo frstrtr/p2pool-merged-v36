@@ -1398,7 +1398,7 @@
                     <div class="stat-card">
                         <h3><span class="icon">🎯</span> Best Share</h3>
                         <div class="stat-value" style="display: flex; align-items: baseline; justify-content: flex-start; gap: 4px;"><span id="best_share_round_pct_fancy" style="color: var(--primary);">-</span><span id="best_share_merged_round_part" style="display: none;"> / <span id="best_share_merged_pct_fancy" style="color: #c3a634;">-</span></span></div>
-                        <div class="stat-sub" style="font-size: 0.85em;"><span id="best_share_round_diff" style="color: var(--primary);">-</span> / <span id="best_share_net_diff" style="opacity: 0.55;">-</span><span id="best_share_merged_diff_part" style="display: none;"> &nbsp;·&nbsp; <span id="best_share_merged_round_diff" style="color: #c3a634;">-</span> / <span id="best_share_merged_net_diff" style="opacity: 0.55;">-</span></span></div>
+                        <div class="stat-sub" style="font-size: 0.85em;"><span id="best_share_round_diff" style="color: var(--primary);">-</span> / <span id="best_share_net_diff" style="opacity: 0.55;">-</span><span id="best_share_net_diff_now" style="display: none; opacity: 0.4; font-size: 0.9em;"></span><span id="best_share_merged_diff_part" style="display: none;"> &nbsp;·&nbsp; <span id="best_share_merged_round_diff" style="color: #c3a634;">-</span> / <span id="best_share_merged_net_diff" style="opacity: 0.55;">-</span><span id="best_share_merged_net_diff_now" style="display: none; opacity: 0.4; font-size: 0.9em;"></span></span></div>
                         <div class="stat-detail">🏆 <span style="color: var(--primary);"><span id="best_share_alltime_pct_fancy">-</span></span><span id="best_share_merged_record_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_alltime_pct_fancy">-</span></span></span><span id="best_share_median_part" style="display: none;"> &nbsp;· x̃ <span style="color: var(--primary);"><span id="best_share_median_pct_fancy">-</span></span><span id="best_share_merged_median_part" style="display: none;"> / <span style="color: #c3a634;"><span id="best_share_merged_median_pct_fancy">-</span></span></span></span></div>
                     </div>
                 </div>
@@ -1895,14 +1895,21 @@
                 if (v36_status && v36_status.share_chain) {
                     inTransition = (v36_status.share_chain.v36_shares === 0);
                 }
+                window.inV36Transition = inTransition;
+                window.minersWithExplicitMerged = minersWithExplicitMerged;
 
                 // Use stratum_stats.workers as the source of real miners
                 var stratumWorkers = (stratum_stats && stratum_stats.workers) || {};
+                // Track miners with explicit merged addresses (for Current Payouts cross-reference)
+                var minersWithExplicitMerged = {};
 
                 for (var workerName in stratumWorkers) {
                     var workerData = stratumWorkers[workerName];
                     var baseAddress = extractAddress(workerName);
                     var mergedAddr = extractMergedAddress(workerName);
+                    if (mergedAddr) {
+                        minersWithExplicitMerged[baseAddress] = mergedAddr;
+                    }
 
                     // If no explicit merged address in worker name, check API merged_addresses
                     var mergedAutoConverted = false;
@@ -1918,12 +1925,22 @@
                     // During V35->V36 transition, V35 shares cannot carry explicit merged_addresses.
                     // Replace explicitly set DOGE address with the actual auto-converted address
                     // from the API to prevent miners thinking they'll be paid to their explicit address.
+                    var mergedExplicitPending = null;
                     if (inTransition && workerData.merged_addresses) {
                         var autoAddr = workerData.merged_addresses['dogecoin'] || null;
-                        if (autoAddr && mergedAddr && autoAddr !== mergedAddr) {
+                        var explicitAddr = extractMergedAddress(workerName);
+                        if (autoAddr && explicitAddr && autoAddr !== explicitAddr) {
+                            // Explicit address differs from auto-converted — show auto-converted
+                            // but remember the explicit one so the tooltip can reference it
+                            mergedExplicitPending = explicitAddr;
                             mergedAddr = autoAddr;
+                            mergedAutoConverted = true;
+                        } else if (!explicitAddr) {
+                            // No explicit address — this is purely auto-converted
+                            mergedAutoConverted = true;
                         }
-                        mergedAutoConverted = true;
+                        // If miner set explicit address and it matches auto-converted,
+                        // keep mergedAutoConverted from the API flag (line 1913)
                     }
                     
                     // Get difficulty from connection_difficulties array (use first/current difficulty)
@@ -1933,8 +1950,11 @@
                     }
                     
                     // Get hashrate: first try actual measured rate, then estimate from difficulty
-                    var hashrate = workerData.hash_rate || 0;
-                    if (hashrate === 0 && local_stats.miner_hash_rates && local_stats.miner_hash_rates[workerName]) {
+                    // Ignore stale hash_rate from workers not seen in last 10 minutes
+                    var workerLastSeen = workerData.last_seen || 0;
+                    var workerStale = workerLastSeen > 0 && (Date.now() / 1000 - workerLastSeen) > 600;
+                    var hashrate = (!workerStale && workerData.hash_rate) ? workerData.hash_rate : 0;
+                    if (hashrate === 0 && !workerStale && local_stats.miner_hash_rates && local_stats.miner_hash_rates[workerName]) {
                         hashrate = local_stats.miner_hash_rates[workerName];
                     }
                     // If still no hashrate, estimate from difficulty
@@ -1953,6 +1973,8 @@
                             mergedAutoConverted: false,
                             mergedRedistributed: false,
                             mergedReverseConverted: false,
+                            mergedConflict: false,
+                            mergedExplicitPending: null,
                             workers: [],
                             totalHashrate: 0,
                             totalEstimatedHashrate: 0,
@@ -1968,8 +1990,13 @@
                         minerGroups[baseAddress].mergedAutoConverted = mergedAutoConverted;
                         minerGroups[baseAddress].mergedRedistributed = mergedRedistributed;
                         minerGroups[baseAddress].mergedReverseConverted = mergedReverseConverted;
+                        minerGroups[baseAddress].mergedExplicitPending = mergedExplicitPending;
                     }
-                    
+                    // Track if workers have conflicting merged addresses
+                    if (mergedAddr && minerGroups[baseAddress].mergedAddress && mergedAddr !== minerGroups[baseAddress].mergedAddress) {
+                        minerGroups[baseAddress].mergedConflict = true;
+                    }
+
                     minerGroups[baseAddress].workers.push({
                         name: workerName,
                         hashrate: hashrate,
@@ -1980,7 +2007,9 @@
                         accepted: workerData.accepted || 0,
                         rejected: workerData.rejected || 0,
                         connections: workerData.connections || 0,
-                        last_seen: workerData.last_seen || 0
+                        last_seen: workerData.last_seen || 0,
+                        mergedAddress: mergedAddr,
+                        mergedAutoConverted: mergedAutoConverted
                     });
                     minerGroups[baseAddress].totalHashrate += hashrate;
                     if (isEstimated) {
@@ -2081,7 +2110,14 @@
                         .text(miner.address);
                     // Parent address status indicators
                     var _sym = (currency_info && currency_info.symbol) || 'parent';
-                    if (miner.mergedReverseConverted) {
+                    if (miner.mergedReverseConverted && miner.mergedAutoConverted) {
+                        // Case 5: DOGE address used as parent — LTC auto-derived from DOGE key
+                        addressCell.append('span')
+                            .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                            .attr('title', 'DOGE address detected in ' + _sym + ' field — ' + _sym + ' address auto-derived from same pubkey hash. Set correct ' + _sym + ' address for safety.')
+                            .text('⚠ auto');
+                    } else if (miner.mergedReverseConverted) {
+                        // Case 4: Invalid LTC + valid explicit DOGE — LTC reverse-derived from DOGE key
                         addressCell.append('span')
                             .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
                             .attr('title', _sym + ' address reverse-derived from DOGE key (original was invalid)')
@@ -2102,7 +2138,13 @@
                             .attr('onclick', 'event.stopPropagation()')
                             .attr('style', 'color: #c3a634; text-decoration: none;')
                             .text(miner.mergedAddress);
-                        if (miner.mergedReverseConverted) {
+                        if (miner.mergedReverseConverted && miner.mergedAutoConverted) {
+                            // Case 5: DOGE address used as parent — both auto-derived from same key
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
+                                .attr('title', 'DOGE address detected in ' + _sym + ' field — auto-converted from same pubkey hash. Set ' + _sym + '_ADDR,DOGE_ADDR format for explicit control.')
+                                .text('⚠ auto');
+                        } else if (miner.mergedReverseConverted) {
                             // Case 4: Invalid parent but valid DOGE — DOGE preserved, parent reverse-derived
                             mergedDiv.append('span')
                                 .attr('style', 'color: #e8a900; font-size: 0.7rem; margin-left: 4px; font-weight: bold;')
@@ -2114,12 +2156,28 @@
                                 .attr('style', 'color: #e04040; font-size: 0.7rem; margin-left: 4px; font-weight: bold;')
                                 .attr('title', 'Both ' + _sym + ' and DOGE addresses invalid — rewards redistributed to PPLNS miners')
                                 .text('❗ redistributed');
+                        } else if (miner.mergedAutoConverted && miner.mergedExplicitPending) {
+                            // Transition: miner set explicit DOGE but V35 shares use auto-converted
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #e8a900; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                                .attr('title', 'V35\u2192V36 transition: your explicit DOGE address ' + miner.mergedExplicitPending + ' is recognized but not active yet. Until V36 shares appear on the chain, payouts go to this auto-converted address (derived from your ' + _sym + ' pubkey). Once transition completes, your explicit address will be used automatically.')
+                                .text('⚠ transition');
+                            mergedDiv.append('div')
+                                .attr('style', 'font-size: 0.6rem; color: #888; margin-left: 4px; margin-top: 1px;')
+                                .attr('title', 'Your explicit DOGE address — will activate after V36 transition completes')
+                                .text('pending: ' + miner.mergedExplicitPending);
                         } else if (miner.mergedAutoConverted) {
                             // Case 2: Valid parent, no explicit DOGE — auto-derived from parent key
                             mergedDiv.append('span')
                                 .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
                                 .attr('title', 'Auto-converted from ' + _sym + ' address (same pubkey hash) — set explicit DOGE address for safety')
                                 .text('⚠ auto');
+                        }
+                        if (miner.mergedConflict) {
+                            mergedDiv.append('span')
+                                .attr('style', 'color: #ff6b35; font-size: 0.65rem; margin-left: 4px; font-weight: bold;')
+                                .attr('title', 'Workers have different DOGE addresses — each worker pays to its own address. Expand to see per-worker addresses.')
+                                .text('⚠ split');
                         }
                     } else if (miner.mergedRedistributed) {
                         // No DOGE address at all and redistributed — show warning
@@ -2204,8 +2262,26 @@
                             .attr('class', 'worker-row hidden')
                             .attr('data-parent', minerId);
                         
-                        workerRow.append('td').text('↳ ' + worker.name);
-                        
+                        var workerNameCell = workerRow.append('td');
+                        workerNameCell.append('span').text('↳ ' + worker.name);
+                        // Show per-worker merged address when workers have conflicting addresses
+                        if (miner.mergedConflict && worker.mergedAddress) {
+                            var wMergedDiv = workerNameCell.append('div')
+                                .attr('style', 'font-size: 0.65rem; color: #c3a634; margin-left: 20px;');
+                            wMergedDiv.append('span').text('🐕 ');
+                            wMergedDiv.append('a')
+                                .attr('href', 'https://blockchair.com/dogecoin/address/' + encodeURIComponent(worker.mergedAddress))
+                                .attr('target', '_blank')
+                                .attr('onclick', 'event.stopPropagation()')
+                                .attr('style', 'color: #c3a634; text-decoration: none;')
+                                .text(worker.mergedAddress);
+                            if (worker.mergedAutoConverted) {
+                                wMergedDiv.append('span')
+                                    .attr('style', 'color: #b08800; font-size: 0.65rem; margin-left: 4px;')
+                                    .text('⚠ auto');
+                            }
+                        }
+
                         // Worker hashrate with estimated indicator
                         var workerHashrateCell = workerRow.append('td');
                         if (worker.hashrate > 0) {
@@ -2898,9 +2974,17 @@
                         if (!bs) return;
                         // Current round — fancy percentage as hero value
                         d3.select('#best_share_round_pct_fancy').html(format_pct_fancy(bs.round.pct_of_block));
-                        // Share diff vs network diff subtitle
+                        // Share diff vs network diff at the time of the best share
                         d3.select('#best_share_round_diff').text(format_difficulty(bs.round.difficulty));
-                        d3.select('#best_share_net_diff').text(format_difficulty(bs.network_difficulty));
+                        var roundNetDiff = bs.round.net_diff_at_time || bs.network_difficulty;
+                        d3.select('#best_share_net_diff').text(format_difficulty(roundNetDiff));
+                        // Show current net diff if it differs from when best share was found
+                        if (bs.round.net_diff_at_time && bs.round.net_diff_at_time > 0 &&
+                            format_difficulty(bs.round.net_diff_at_time) !== format_difficulty(bs.network_difficulty)) {
+                            d3.select('#best_share_net_diff_now').style('display', 'inline').text(' (now ' + format_difficulty(bs.network_difficulty) + ')');
+                        } else {
+                            d3.select('#best_share_net_diff_now').style('display', 'none');
+                        }
                         // All-time record — percentage only (no redundant difficulty)
                         d3.select('#best_share_alltime_pct_fancy').html(format_pct_fancy(bs.all_time.pct_of_block));
                         // Merged chain (DOGE) stats - inline
@@ -2909,10 +2993,17 @@
                             d3.select('#best_share_merged_pct_fancy').html(format_pct_fancy(bs.merged.round.pct_of_block));
                             d3.select('#best_share_merged_record_part').style('display', 'inline');
                             d3.select('#best_share_merged_alltime_pct_fancy').html(format_pct_fancy(bs.merged.all_time.pct_of_block));
-                            // Merged diff subtitle
+                            // Merged diff subtitle — use net diff at the time of best share
                             d3.select('#best_share_merged_diff_part').style('display', 'inline');
                             d3.select('#best_share_merged_round_diff').text(format_difficulty(bs.merged.round.difficulty));
-                            d3.select('#best_share_merged_net_diff').text(format_difficulty(bs.merged.network_difficulty));
+                            var mergedNetDiff = bs.merged.round.merged_net_diff_at_time || bs.merged.network_difficulty;
+                            d3.select('#best_share_merged_net_diff').text(format_difficulty(mergedNetDiff));
+                            if (bs.merged.round.merged_net_diff_at_time && bs.merged.round.merged_net_diff_at_time > 0 &&
+                                format_difficulty(bs.merged.round.merged_net_diff_at_time) !== format_difficulty(bs.merged.network_difficulty)) {
+                                d3.select('#best_share_merged_net_diff_now').style('display', 'inline').text(' (now ' + format_difficulty(bs.merged.network_difficulty) + ')');
+                            } else {
+                                d3.select('#best_share_merged_net_diff_now').style('display', 'none');
+                            }
                         }
                         // Median share % of full window
                         if (bs.median_pct != null) {
@@ -3435,12 +3526,31 @@
                             .attr('title', merged.address)
                             .text(merged.address);
                         if (merged.source === 'auto-convert') {
-                            addrCell.append('span')
-                                .style('color', '#b08800')
-                                .style('font-size', '0.6rem')
-                                .style('margin-left', '4px')
-                                .attr('title', 'Auto-converted from parent chain address (same pubkey hash). During V35\u2192V36 transition, all merged addresses are auto-converted since V35 shares cannot carry explicit merged addresses.')
-                                .text('\u26a0 auto');
+                            // Check if this miner actually set an explicit merged address
+                            var explicitPending = window.inV36Transition && window.minersWithExplicitMerged && window.minersWithExplicitMerged[addr];
+                            if (explicitPending) {
+                                addrCell.append('span')
+                                    .style('color', '#e8a900')
+                                    .style('font-size', '0.6rem')
+                                    .style('font-weight', 'bold')
+                                    .style('margin-left', '4px')
+                                    .attr('title', 'V35\u2192V36 transition: your explicit DOGE address ' + explicitPending + ' is recognized but not active yet. Until V36 shares appear, payouts go to this auto-converted address. Your explicit address will activate automatically after transition.')
+                                    .text('\u26a0 transition');
+                                addrCell.append('div')
+                                    .style('font-size', '0.55rem')
+                                    .style('color', '#888')
+                                    .style('margin-left', '4px')
+                                    .style('margin-top', '1px')
+                                    .attr('title', 'Your explicit DOGE address \u2014 will activate after V36 transition completes')
+                                    .text('pending: ' + explicitPending);
+                            } else {
+                                addrCell.append('span')
+                                    .style('color', '#b08800')
+                                    .style('font-size', '0.6rem')
+                                    .style('margin-left', '4px')
+                                    .attr('title', 'Auto-converted from parent chain address (same pubkey hash) \u2014 set explicit DOGE address for safety')
+                                    .text('\u26a0 auto');
+                            }
                         } else if (merged.source === 'donation') {
                             addrCell.append('span')
                                 .style('color', '#888')
