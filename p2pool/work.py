@@ -2861,6 +2861,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         print >>sys.stderr, '*** CRITICAL: Block submission failed! ***'
                         log.err(err, 'Block submission error:')
                     if pow_hash <= header['bits'].target:
+                        # Reset round stats FIRST — before any code that could throw
+                        self.reset_round_best_difficulty()
                         # New block found - notify subscribers
                         self.node.factory.new_block.happened(header_hash)
                         # Fire block_found event with block info for immediate persistence
@@ -2891,8 +2893,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                             'miner_payout': miner_payout,
                         }
                         self.block_found.happened(block_info)
-                        # Reset round-level best difficulty stats
-                        self.reset_round_best_difficulty()
             except:
                 log.err(None, 'Error while processing potential block:')
 
@@ -3255,9 +3255,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     # submitblock returns: None=accepted, 'duplicate'=already in chain (also success),
                                     # 'inconclusive'=may have been accepted, other string=rejection reason
                                     if result is None or result == True or result == 'duplicate' or result == 'duplicate-invalid' or result == 'inconclusive':
+                                        # Reset merged round stats FIRST — before any code that could throw
+                                        self.reset_merged_round_best_difficulty()
                                         if result == 'duplicate':
                                             print '  (Note: block already accepted via parallel submission)'
-                                        
+
                                         # Fire broadcast to P2P peers AFTER successful primary RPC submission
                                         chainid = aux_work.get('chainid', 98)
                                         if chainid in self.node.merged_broadcasters:
@@ -3350,9 +3352,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # Keep only last 100 merged blocks
                                         if len(self.recent_merged_blocks) > 100:
                                             self.recent_merged_blocks = self.recent_merged_blocks[-100:]
-                                        # Reset merged round best difficulty
-                                        self.reset_merged_round_best_difficulty()
-                                        
+
                                         # Async verification after a delay
                                         if 'merged_proxy' in aux_work:
                                             def verify_block(block_rec, proxy, block_hash):
@@ -3410,6 +3410,8 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 else:
                                     # Record merged block find if successful
                                     if result == True:
+                                        # Reset merged round stats FIRST — before any code that could throw
+                                        self.reset_merged_round_best_difficulty()
                                         # Get network info - for single-address mode we may not have full info
                                         chainid = aux_work.get('chainid', 0)
                                         merged_net_name = aux_work.get('merged_net_name', 'Dogecoin' if chainid == 98 else 'Unknown')
@@ -3467,9 +3469,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                         # Keep only last 100 merged blocks
                                         if len(self.recent_merged_blocks) > 100:
                                             self.recent_merged_blocks = self.recent_merged_blocks[-100:]
-                                        # Reset merged round best difficulty
-                                        self.reset_merged_round_best_difficulty()
-                                        
+
                                         # For testnet: async verification after a delay
                                         # Use aux_work['hash'] (Dogecoin block hash) NOT pow_hash (scrypt hash)
                                         if is_testnet and 'merged_proxy' in aux_work:
