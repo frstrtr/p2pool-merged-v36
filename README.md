@@ -14,6 +14,8 @@ Decentralized Scrypt mining pool for **Litecoin**, **DigiByte**, and **Dogecoin*
 
 > **📋 New to V36?** Read the **[V36 Release Notes](docs/V36_RELEASE_NOTES.md)** for a complete overview of what changed, why, and how miners are protected from pool hopping attacks.
 
+> **🔧 Looking for the C++ version?** [**c2pool**](https://github.com/frstrtr/c2pool) is a ground-up C++ reimplementation of p2pool with **embedded LTC + DOGE SPV** — no litecoind or dogecoind needed. Same V35 sharechain, cross-platform (Linux/Windows/macOS). [Download v0.1.1-alpha →](https://github.com/frstrtr/c2pool/releases/tag/v0.1.1-alpha)
+
 ## What's different from jtoomim/p2pool (V35)
 
 ### Protocol & Consensus
