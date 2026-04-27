@@ -138,13 +138,14 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         chain_length = node.net.CHAIN_LENGTH
         sampling_window_size = chain_length // 10  # 864 for litecoin
         
-        # Get desired_version counts from the sampling window (or full chain if immature)
+        # Get desired_version counts from the sampling window (oldest CHAIN_LENGTH//10 shares in active chain)
+        # Start from tip and walk back CHAIN_LENGTH//10 — these are the most recent shares,
+        # which have the highest absolute heights and are the oldest within the sampling window
         lookbehind = min(chain_height, chain_length // 10)
         try:
-            previous_share = node.tracker.items[node.best_share_var.value]
             counts = p2pool_data.get_desired_version_counts(
                 node.tracker,
-                node.tracker.get_nth_parent_hash(previous_share.hash, chain_length * 9 // 10) if chain_height >= chain_length else node.best_share_var.value,
+                node.best_share_var.value,
                 lookbehind
             )
         except:
@@ -300,14 +301,13 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
         chain_maturity = min(chain_height / float(chain_length), 1.0) if chain_length > 0 else 0
         
         # Calculate signaling for the EFFECTIVE TARGET in the sampling window
+        # Sample from tip (highest absolute height) back CHAIN_LENGTH//10 shares
         sampling_signaling = 0
         sampling_counts = {}
         if chain_height >= chain_length:
             try:
-                sampling_start = node.tracker.get_nth_parent_hash(
-                    node.best_share_var.value, chain_length * 9 // 10)
                 sampling_counts = p2pool_data.get_desired_version_counts(
-                    node.tracker, sampling_start, sampling_window_size)
+                    node.tracker, node.best_share_var.value, sampling_window_size)
                 sampling_total = sum(sampling_counts.itervalues())
                 if sampling_total > 0 and effective_target is not None:
                     sampling_signaling = (sampling_counts.get(effective_target, 0) / float(sampling_total)) * 100

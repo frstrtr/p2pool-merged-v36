@@ -909,21 +909,6 @@ class BaseShare(object):
         if total_weight != sum(weights.itervalues()) + donation_weight:
             raise ValueError('PPLNS weight mismatch: total_weight=%d, sum+donation=%d' % (total_weight, sum(weights.itervalues()) + donation_weight))
 
-        # Periodic PPLNS weight dump for cross-impl comparison
-        import time as _t2
-        _lt = getattr(cls, '_pplns_dump_t', 0)
-        if _t2.time() - _lt > 30 and len(weights) >= 2:
-            cls._pplns_dump_t = _t2.time()
-            import sys
-            print >>sys.stderr, '[PPLNS-AMT] subsidy=%d total_weight=%d don_weight=%d addrs=%d prev=%s' % (
-                share_data['subsidy'], total_weight, donation_weight, len(weights),
-                '%064x' % (share_data['previous_share_hash'],) if share_data['previous_share_hash'] else 'None')
-            for key, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
-                a = share_data['subsidy'] * w // total_weight if v36_active else share_data['subsidy'] * 199 * w // (200 * total_weight)
-                # V36: key is raw script bytes; Pre-V36: key is address string
-                key_repr = key.encode('hex')[:40] if v36_active else key[:20]
-                print >>sys.stderr, '[PPLNS-AMT]   %s weight=%d amount=%d' % (key_repr, w, a)
-        
         # Phase 2c: V36 removes 199/200 haircut — full subsidy to PPLNS
         # V36: weights dict keys are raw script bytes (from get_decayed_cumulative_weights)
         # Pre-V36: weights dict keys are address strings (from WeightsSkipList)
@@ -1167,6 +1152,20 @@ class BaseShare(object):
         # DEBUG: Verify gentx_before_refhash structure
         packed_gentx = bitcoin_data.tx_id_type.pack(gentx)
         cutoff_prefix = packed_gentx[:-32-8-4]  # Remove ref_hash + nonce + lock_time
+
+        # Cross-impl coinbase dump: log first 160 bytes for byte-diff with c2pool
+        import sys
+        _prev_hex = ('%064x' % share_data['previous_share_hash'])[:16] if share_data['previous_share_hash'] else 'None'
+        _gentx_hex = packed_gentx.encode('hex')
+        print >>sys.stderr, '[GENTX-HEX] prev=%s len=%d n_outs=%d hex=%s' % (
+            _prev_hex, len(packed_gentx), len(gentx['tx_outs']),
+            _gentx_hex[:320])  # first 160 bytes as hex
+        # Also dump amounts for cross-impl comparison
+        if v36_active:
+            _amt_parts = []
+            for o in gentx['tx_outs']:
+                _amt_parts.append('v=%d,slen=%d' % (o['value'], len(o['script'])))
+            print >>sys.stderr, '[GENTX-OUTS] prev=%s outs=[%s]' % (_prev_hex, ', '.join(_amt_parts))
         
         # Donation script is always LAST output before OP_RETURN
         # Pre-V36: DONATION_SCRIPT (P2PK), V36: COMBINED_DONATION_SCRIPT (P2SH-wrapped combined script)
@@ -2086,10 +2085,7 @@ def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weig
     decay_per = _DECAY_SCALE - (_DECAY_SCALE * _LN2_MICRO) // (1000000 * half_life)
 
     _height = tracker.get_height(start_hash) if start_hash is not None else 0
-    import sys
-    print >>sys.stderr, '[PPLNS-WALK] start=%s max_shares=%d height=%d half_life=%d decay_per=%d' % (
-        ('%064x' % start_hash)[:16] if start_hash else 'None', max_shares, _height, half_life, decay_per)
-    
+
     weights = {}
     total_weight = 0
     donation_weight = 0
@@ -2134,18 +2130,6 @@ def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weig
         
         # Decay for next (older) share
         decay_fp = (decay_fp * decay_per) >> _DECAY_PRECISION
-
-    # Per-address parent PPLNS breakdown — log once per new chain height
-    # for death valley comparison between p2pool and c2pool.
-    _last_pplns_h = getattr(get_decayed_cumulative_weights, '_last_pplns_height', -1)
-    if _height != _last_pplns_h:
-        get_decayed_cumulative_weights._last_pplns_height = _height
-        print >>sys.stderr, '[PARENT-PPLNS] height=%d shares=%d addrs=%d total_w=%d don_w=%d' % (
-            _height, share_count, len(weights), total_weight, donation_weight)
-        for key in sorted(weights.keys()):
-            key_disp = key.encode('hex')[:40]
-            pct = 100.0 * weights[key] / total_weight if total_weight > 0 else 0
-            print >>sys.stderr, '[PARENT-PPLNS]   %s w=%d pct=%.2f%%' % (key_disp, weights[key], pct)
 
     return weights, total_weight, donation_weight
 
@@ -2803,53 +2787,11 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
     """
     if chain_length <= 0 or best_share_hash is None:
         return {}, 0, 0
-    
-    def _classify_key(key):
-        """Classify a weight key for diagnostic logging."""
-        if isinstance(key, str) and key.startswith('MERGED:'):
-            return 'MERGED'
-        if not isinstance(key, str):
-            return 'UNKNOWN'
-        n = len(key)
-        if n == 25 and key[:3] == '\x76\xa9\x14' and key[23:] == '\x88\xac':
-            return 'P2PKH'
-        if n == 23 and key[:2] == '\xa9\x14' and key[22:] == '\x87':
-            return 'P2SH'
-        if n == 22 and key[:2] == '\x00\x14':
-            return 'P2WPKH-RAW'
-        if n == 34 and key[:2] == '\x00\x20':
-            return 'P2WSH-RAW'
-        if n == 34 and key[:2] == '\x51\x20':
-            return 'P2TR-RAW'
-        return 'OTHER'
-
-    def _log_doge_pplns(weights, total_weight, donation_weight, height, chain_id, tag):
-        """Log per-address DOGE PPLNS breakdown once per new height."""
-        import sys
-        _last_h = getattr(_log_doge_pplns, '_last_height', -1)
-        if height == _last_h:
-            return
-        _log_doge_pplns._last_height = height
-        miner_total = total_weight - donation_weight if total_weight > donation_weight else 0
-        _start_hex = ('%064x' % best_share_hash)[:16] if best_share_hash is not None else 'null'
-        print >>sys.stderr, '[DOGE-PPLNS] chain_id=%s height=%d max_shares=%d addrs=%d total_w=%d don_w=%d start=%s (%s)' % (
-            chain_id, height, chain_length, len(weights), total_weight, donation_weight, _start_hex, tag)
-        for key in sorted(weights.keys()):
-            cls = _classify_key(key)
-            if isinstance(key, str) and key.startswith('MERGED:'):
-                key_disp = key[:40]
-            else:
-                key_disp = key.encode('hex')[:40]
-            pct = 100.0 * weights[key] / miner_total if miner_total > 0 else 0
-            print >>sys.stderr, '[DOGE-PPLNS]   %s %s w=%d pct=%.2f%%' % (cls, key_disp, weights[key], pct)
 
     # Fast path: O(log n) via MergedWeightsSkipList
     if hasattr(tracker, 'get_v36_merged_cumulative_weights'):
         weights, total_weight, donation_weight = tracker.get_v36_merged_cumulative_weights(
             chain_id, best_share_hash, chain_length, max_weight)
-        if chain_id is not None:
-            _height = tracker.get_height(best_share_hash) if best_share_hash is not None else 0
-            _log_doge_pplns(weights, total_weight, donation_weight, _height, chain_id, 'skiplist')
         return weights, total_weight, donation_weight
     
     # Fallback: O(n) linear walk for trackers without SkipList support
@@ -2935,10 +2877,6 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
         if explicit_count > 0:
             msg += ', %d with explicit merged addresses' % explicit_count
         print msg
-
-    if chain_id is not None:
-        _height = tracker.get_height(best_share_hash) if best_share_hash is not None else 0
-        _log_doge_pplns(weights, grand_total, donation_weight, _height, chain_id, 'linear')
 
     return weights, grand_total, donation_weight
 

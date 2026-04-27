@@ -43,6 +43,11 @@ class LogFile(object):
         f.close()
         self.inner_file = codecs.open(self.filename, 'a', 'utf-8')
     def write(self, data):
+        if isinstance(data, str):
+            try:
+                data = data.decode('utf-8')
+            except UnicodeDecodeError:
+                data = data.decode('utf-8', 'replace')
         self.inner_file.write(data)
     def flush(self):
         self.inner_file.flush()

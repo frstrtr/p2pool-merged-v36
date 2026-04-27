@@ -784,8 +784,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 pass  # Suppressed: print '[MERGED-DEBUG] New Dogecoin block hash calculated: %064x (prev=%s)' % (doge_block_hash, template.get('previousblockhash', 'None')[:16])
                             except Exception as e:
                                 print >>sys.stderr, '[ERROR] Failed to build Dogecoin block (v2-FIXED): %s' % e
-                                import traceback
-                                traceback.print_exc()
                                 doge_block_hash = 0
                             
                             # PHASE B: Store for embedding in Litecoin coinbase
@@ -2426,8 +2424,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 user_merged_work[chainid] = result
             except Exception as e:
                 print >>sys.stderr, '[MERGED-DIAG] WARNING: _build_user_specific_merged_work failed for chain %s: %s' % (chainid, e)
-                import traceback
-                traceback.print_exc()
                 user_merged_work[chainid] = aux_work
 
         return user_merged_work
@@ -3375,8 +3371,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                     
                             except Exception as e:
                                 print >>sys.stderr, '[MERGED-SUBMIT] CRITICAL ERROR building multiaddress merged block: %s' % (e,)
-                                import traceback
-                                traceback.print_exc()
                                 log.err(None, 'Error building multiaddress merged block:')
                         else:
                             # Standard getauxblock submission (backward compatible)
@@ -3492,8 +3486,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                 log.err(err, 'Error submitting merged block:')
                 except:
                     print >>sys.stderr, '[MERGED-SUBMIT] CRITICAL ERROR in merged mining POW processing:'
-                    import traceback
-                    traceback.print_exc()
                     log.err(None, 'Error while processing merged mining POW:')
 
             # P2Pool share creation - re-enabled for PERSIST=False bootstrap
