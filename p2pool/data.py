@@ -2850,8 +2850,13 @@ def compute_merged_payout_hash(tracker, previous_share_hash, block_target, net):
     # Must match get_expected_payouts / generate_transaction.
     chain_length = min(height, net.REAL_CHAIN_LENGTH)
 
+    # C3: commit to the REAL DOGE per-address distribution (chain_id=98), not
+    # the parent-script-keyed no-resolution vector. build_canonical_merged_
+    # coinbase pays the chain_id=98 distribution, so the committed hash must
+    # cover the same vector. Deterministic given C1 (window-scoped merged
+    # address resolution). 98 = Dogecoin (DOGE), matching data.py:498.
     weights, total_weight, donation_weight = get_v36_merged_weights(
-        tracker, previous_share_hash, chain_length, 2**288 - 1)
+        tracker, previous_share_hash, chain_length, 2**288 - 1, chain_id=98)
     
     if not weights or total_weight == 0:
         return None  # No V36 shares in window
