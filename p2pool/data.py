@@ -284,7 +284,11 @@ def build_canonical_merged_coinbase(weights, total_weight, donation_weight,
     # serving as an identifiable P2Pool marker even when donation_weight is 0
     # and there is only one miner (no rounding dust).
     if final_donation < 1 and coinbase_value > 0 and output_amounts:
-        largest_script = max(output_amounts, key=output_amounts.get)
+        # Deterministic tiebreak: (amount, script) total order so equal-max
+        # amounts pick the largest script bytes — matches the parent path
+        # (data.py:957) and c2pool. The previous key=output_amounts.get broke
+        # equal-amount ties by dict iteration order (PYTHONHASHSEED-fragile).
+        largest_script = max(output_amounts, key=lambda k: (output_amounts[k], k))
         output_amounts[largest_script] -= 1
         final_donation += 1
     
