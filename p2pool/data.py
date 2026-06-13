@@ -2416,33 +2416,54 @@ class AutoRatchet(object):
         v36_votes = 0
         v36_shares = 0  # actual V36 format shares (not just votes)
         total = 0
-        # Tail guard: collect vote counts for the oldest 10% of the window.
+        # C5: the activation/tail gates must be WORK-WEIGHTED to match check()'s
+        # get_desired_version_counts basis (target_to_average_attempts, line
+        # 2654) + the same window anchor. Counting shares 1-each disagrees with
+        # check() at the v35->v36 boundary and can activate while check() still
+        # rejects the oldest-10% switch (line 1404), orphaning/banning
+        # freshly-activated producers. Counts are kept only for window-fullness
+        # and logging; the gating percentages below use the work accumulators.
+        total_work = 0
+        v36_vote_work = 0
+        v36_share_work = 0
+        # Tail guard: collect votes for the oldest 10% of the window.
         # check() (line 1398-1405) rejects V36 shares when the oldest 10%
-        # has <60% signaling, so we must not activate before that clears.
+        # has <60% (work-weighted) signaling, so we must not activate before
+        # that clears.
         tail_start = net.CHAIN_LENGTH * 9 // 10  # position where tail begins
         tail_v36_votes = 0
         tail_total = 0
+        tail_v36_work = 0
+        tail_total_work = 0
 
         for share in tracker.get_chain(best_share_hash, sample):
             total += 1
+            att = bitcoin_data.target_to_average_attempts(share.target)
+            total_work += att
             desired_ver = getattr(share, 'desired_version', share.VERSION)
             if desired_ver >= 36:
                 v36_votes += 1
+                v36_vote_work += att
             if share.VERSION >= 36:
                 v36_shares += 1
+                v36_share_work += att
             # Shares are newest-first; positions >= tail_start are the oldest 10%
             if total > tail_start:
                 tail_total += 1
+                tail_total_work += att
                 if desired_ver >= 36:
                     tail_v36_votes += 1
+                    tail_v36_work += att
         
         if total == 0:
             if self._state == self.STATE_CONFIRMED:
                 return (MergedMiningShare, 36)
             return (PaddingBugfixShare, 36)
         
-        vote_pct = (v36_votes * 100) // total
-        share_pct = (v36_shares * 100) // total
+        # C5: gating percentages are WORK-WEIGHTED (match check()); window
+        # fullness stays a share count.
+        vote_pct = (v36_vote_work * 100) // total_work if total_work else 0
+        share_pct = (v36_share_work * 100) // total_work if total_work else 0
         full_window = (total >= net.CHAIN_LENGTH)
         
         # Periodic vote progress logging (every ~10 calls for test visibility)
@@ -2459,8 +2480,9 @@ class AutoRatchet(object):
         
         old_state = self._state
         
-        # Tail guard: oldest 10% signaling percentage
-        tail_pct = (tail_v36_votes * 100 // tail_total) if tail_total > 0 else 0
+        # Tail guard: oldest 10% signaling percentage (C5: work-weighted,
+        # matching check()'s line-1404 work basis)
+        tail_pct = (tail_v36_work * 100 // tail_total_work) if tail_total_work > 0 else 0
 
         # --- State transitions ---
         if self._state == self.STATE_VOTING:
