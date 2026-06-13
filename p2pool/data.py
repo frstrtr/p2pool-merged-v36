@@ -2693,6 +2693,18 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
     rewards because V35 nodes don't contribute to merged block building.
     Their weight is excluded entirely — redistributed proportionally to V36
     miners by virtue of a smaller total_weight denominator.
+
+    CONSENSUS NOTE (C2 — INTENTIONAL, operator-confirmed): merged (DOGE)
+    weights are FLAT/undecayed — each in-window V36 share contributes
+    att*65535 with no exponential-decay factor — whereas the parent (LTC)
+    path is decay-PPLNS via get_decayed_cumulative_weights (decay_fp =
+    fixed-point 2^(-depth/HL)). The two distributions therefore intentionally
+    differ: a miner's DOGE share is flat-PPLNS while their LTC share is
+    decay-PPLNS. This is a deliberate design choice, not a bug; the
+    anti-hopping decay applies to parent rewards only. c2pool must reproduce
+    BOTH bases per chain (parent decayed, merged flat) for parity. Do NOT add
+    decay to this path without a coordinated consensus change on both
+    implementations.
     
     Args:
         tracker: OkayTracker instance (or any Tracker)
