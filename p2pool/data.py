@@ -1882,6 +1882,15 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
         # compute_merged_payout_hash hex-encodes this → matches c2pool's script_to_hex().
         address_key = share.new_script  # raw scriptPubKey bytes
         
+        # NOTE (C1): only Tier 1 (this share's OWN explicit merged_addresses)
+        # is resolved here, because a skiplist delta must be a pure function of
+        # the single element. Window-relative Tier 1.5 retroactive resolution
+        # (an activation-boundary share resolved via OTHER in-window shares)
+        # cannot be a per-element delta, so get_v36_merged_weights BYPASSES this
+        # skiplist when chain_id is set and uses the deterministic O(n)
+        # recompute. This branch therefore runs only for the never-bypassed
+        # chain_id-None case (no merged resolution) in practice; it no longer
+        # reads the node-global tracker._miner_merged_addr (removed).
         if self.chain_id is not None and share.VERSION >= 36:
             merged_addrs = getattr(share, 'merged_addresses', None)
             if merged_addrs is None and hasattr(share, 'share_info') and isinstance(share.share_info, dict):
@@ -1891,19 +1900,6 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
                     if entry['chain_id'] == self.chain_id:
                         address_key = 'MERGED:' + entry['script'].encode('hex')
                         break
-            # Tier 1.5: retroactive lookup — same miner's explicit merged
-            # address from their other shares (prevents phantom entries from
-            # activation-boundary shares with empty merged_addresses)
-            if address_key == share.new_script:
-                lookup = getattr(self.tracker, '_miner_merged_addr', {}).get(self.chain_id, {})
-                merged_script = lookup.get(share.new_script)
-                if merged_script is None:
-                    # Try normalized P2PKH form (P2WPKH shares → P2PKH key)
-                    norm = OkayTracker._normalize_script_for_merged(share.new_script)
-                    if norm:
-                        merged_script = lookup.get(norm)
-                if merged_script is not None:
-                    address_key = 'MERGED:' + merged_script.encode('hex')
 
         return (1, {address_key: att*(65535-share.share_data['donation'])},
                 att*65535, att*share.share_data['donation'])
@@ -2046,7 +2042,10 @@ class OkayTracker(forest.Tracker):
         )), subset_of=self)
         self.get_cumulative_weights = WeightsSkipList(self)
         self._merged_weights_skip_lists = {}  # chain_id -> MergedWeightsSkipList
-        self._miner_merged_addr = {}  # chain_id -> {new_script: merged_script}
+        # C1: the node-global, arrival-ordered, never-pruned _miner_merged_addr
+        # map was removed. Merged-address resolution is now a pure function of
+        # the in-window share set, rebuilt per call by
+        # _build_window_merged_addr_map (see get_v36_merged_weights).
     
     @staticmethod
     def _normalize_script_for_merged(script):
@@ -2072,34 +2071,14 @@ class OkayTracker(forest.Tracker):
 
     def add(self, item):
         forest.Tracker.add(self, item)
-        # Register explicit merged addresses for retroactive lookup.
-        # When a V36 share has empty merged_addresses (activation boundary),
-        # the same miner's explicit address from other shares is used instead
-        # of auto-converting the parent script (which produces a phantom entry).
-        if getattr(item, 'VERSION', 0) >= 36:
-            merged_addrs = getattr(item, 'merged_addresses', None)
-            if merged_addrs:
-                for entry in merged_addrs:
-                    chain_id = entry['chain_id']
-                    script = entry['script']
-                    if not script:
-                        continue
-                    if chain_id not in self._miner_merged_addr:
-                        self._miner_merged_addr[chain_id] = {}
-                    lookup = self._miner_merged_addr[chain_id]
-                    invalidate = False
-                    if item.new_script not in lookup:
-                        lookup[item.new_script] = script
-                        invalidate = True
-                    # Also register under normalized P2PKH form so
-                    # Tier 1.5 catches shares with different script
-                    # encoding (P2WPKH vs P2PKH) for the same miner.
-                    normalized = self._normalize_script_for_merged(item.new_script)
-                    if normalized and normalized != item.new_script and normalized not in lookup:
-                        lookup[normalized] = script
-                        invalidate = True
-                    if invalidate and chain_id in self._merged_weights_skip_lists:
-                        del self._merged_weights_skip_lists[chain_id]
+        # C1: merged-address registration into the node-global _miner_merged_addr
+        # was REMOVED. That map was arrival-ordered and never pruned, so it made
+        # merged-coinbase resolution depend on a node's broader history rather
+        # than the PPLNS window — a chain-split vector. Retroactive lookup is now
+        # rebuilt per call from the in-window shares, oldest-first, in
+        # _build_window_merged_addr_map (see get_v36_merged_weights). The merged
+        # skiplist's per-element deltas are now pure, so no cache invalidation on
+        # registration is needed here either.
 
     def get_v36_merged_cumulative_weights(self, chain_id, start_hash, chain_length, max_weight):
         """O(log n) merged mining weight computation via skip list."""
@@ -2683,6 +2662,50 @@ def get_desired_version_counts(tracker, best_share_hash, dist):
         res[share.desired_version] = res.get(share.desired_version, 0) + bitcoin_data.target_to_average_attempts(share.target)
     return res
 
+def _build_window_merged_addr_map(window_shares_oldest_first, chain_id):
+    """Window-scoped new_script -> merged_script map for one merged chain.
+
+    C1 (chain-split fix): merged-address resolution must be a PURE FUNCTION of
+    the in-window share set, identical on every node with the same PPLNS
+    window. This rebuilds the retroactive-lookup map from the explicit
+    merged_addresses of the V36 shares IN THE WINDOW, oldest-first so the
+    FIRST registration in chain order wins on conflict (deterministic
+    tiebreak). It replaces the node-global, share-arrival-ordered,
+    never-pruned OkayTracker._miner_merged_addr, whose contents depended on a
+    node's broader (out-of-window) history and arrival order — so two honest
+    nodes with the same window but different history could resolve different
+    DOGE coinbases and reject each other's shares.
+
+    Args:
+        window_shares_oldest_first: the in-window shares, OLDEST first.
+        chain_id: merged chain AuxPoW id (e.g. 98 = Dogecoin).
+    Returns:
+        {new_script: merged_script} including the normalized-P2PKH alias so
+        shares with a different script encoding (P2WPKH vs P2PKH) for the same
+        miner resolve too — matching the prior global map's key set.
+    """
+    window_map = {}
+    for share in window_shares_oldest_first:
+        if getattr(share, 'VERSION', 0) < 36:
+            continue
+        merged_addrs = getattr(share, 'merged_addresses', None)
+        if merged_addrs is None and hasattr(share, 'share_info') and isinstance(share.share_info, dict):
+            merged_addrs = share.share_info.get('merged_addresses', None)
+        if not merged_addrs:
+            continue
+        for entry in merged_addrs:
+            if entry['chain_id'] != chain_id:
+                continue
+            script = entry['script']
+            if not script:
+                continue
+            if share.new_script not in window_map:  # first (oldest) wins
+                window_map[share.new_script] = script
+            normalized = OkayTracker._normalize_script_for_merged(share.new_script)
+            if normalized and normalized != share.new_script and normalized not in window_map:
+                window_map[normalized] = script
+    return window_map
+
 def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, chain_id=None):
     """Calculate PPLNS weights for merged mining, including ONLY V36-signaling shares.
     
@@ -2723,8 +2746,15 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
     if chain_length <= 0 or best_share_hash is None:
         return {}, 0, 0
     
-    # Fast path: O(log n) via MergedWeightsSkipList
-    if hasattr(tracker, 'get_v36_merged_cumulative_weights'):
+    # Fast path: O(log n) via MergedWeightsSkipList — ONLY for chain_id is None
+    # (parent-script-keyed, no merged-address resolution). When chain_id is set
+    # (C1), merged-address resolution is WINDOW-RELATIVE: an activation-boundary
+    # share with empty merged_addresses resolves via the registrations of OTHER
+    # in-window shares, so it is not a pure per-element delta and cannot be
+    # cached in a skiplist. Drop to the deterministic O(n) recompute below so
+    # all three consensus paths (this fn, the skiplist fast-path, and
+    # verify_merged_coinbase_commitment which calls this fn) stay bit-exact.
+    if chain_id is None and hasattr(tracker, 'get_v36_merged_cumulative_weights'):
         weights, total_weight, donation_weight = tracker.get_v36_merged_cumulative_weights(
             chain_id, best_share_hash, chain_length, max_weight)
         import time as _time
@@ -2735,8 +2765,18 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
             print 'Merged mining weights: %d addresses (weight=%d, donation=%d) via skip list' % (
                 len(weights), total_weight, donation_weight)
         return weights, total_weight, donation_weight
-    
-    # Fallback: O(n) linear walk for trackers without SkipList support
+
+    # O(n) deterministic walk. For chain_id != None this is the SOLE consensus
+    # path (skiplist bypassed above). Materialize the window once: the main
+    # loop iterates newest-first; the merged-address map is built oldest-first.
+    window_shares = list(tracker.get_chain(best_share_hash, chain_length))
+    window_map = None
+    if chain_id is not None:
+        # C1: window-scoped, order-deterministic resolution (replaces the
+        # node-global tracker._miner_merged_addr). Built from the full
+        # chain_length window, oldest-first, first-registration-wins.
+        window_map = _build_window_merged_addr_map(reversed(window_shares), chain_id)
+
     weights = {}  # {address_key: weight}
     total_weight = 0
     donation_weight = 0
@@ -2744,7 +2784,7 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
     pre_v36_count = 0
     explicit_count = 0
     
-    for share in tracker.get_chain(best_share_hash, chain_length):
+    for share in window_shares:  # newest-first; same set the map was built from
         att = bitcoin_data.target_to_average_attempts(share.target)
         share_total = att * 65535  # Total contribution of this share
         
@@ -2780,16 +2820,17 @@ def get_v36_merged_weights(tracker, best_share_hash, chain_length, max_weight, c
                         explicit_count += 1
                         break
         
-        # Tier 1.5: retroactive lookup — same miner's explicit merged
-        # address from their other shares (prevents phantom entries from
-        # activation-boundary shares with empty merged_addresses)
-        if address_key is None and chain_id is not None and share.VERSION >= 36:
-            lookup = getattr(tracker, '_miner_merged_addr', {}).get(chain_id, {})
-            merged_script = lookup.get(share.new_script)
+        # Tier 1.5: retroactive lookup — same miner's explicit merged address
+        # from their OTHER IN-WINDOW shares (prevents phantom entries from
+        # activation-boundary shares with empty merged_addresses). C1: resolved
+        # against the window-scoped, order-deterministic map built above, NOT
+        # the node-global tracker._miner_merged_addr.
+        if address_key is None and window_map is not None and share.VERSION >= 36:
+            merged_script = window_map.get(share.new_script)
             if merged_script is None:
                 norm = OkayTracker._normalize_script_for_merged(share.new_script)
                 if norm:
-                    merged_script = lookup.get(norm)
+                    merged_script = window_map.get(norm)
             if merged_script is not None:
                 address_key = 'MERGED:' + merged_script.encode('hex')
                 explicit_count += 1
