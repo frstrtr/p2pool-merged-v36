@@ -1390,8 +1390,11 @@ class BaseShare(object):
     def check(self, tracker, known_txs=None, block_abs_height_func=None):
         from p2pool import p2p
         if self.timestamp > int(time.time()) + 600:
+            # NOTE: parenthesize the subtraction — '%' binds tighter than '-',
+            # so the unparenthesized form evaluated as (str % self.timestamp) -
+            # int(...), raising TypeError instead of the intended ValueError.
             raise ValueError("Share timestamp is %i seconds in the future! Check your system clock." % \
-                self.timestamp - int(time.time()))
+                (self.timestamp - int(time.time())))
         counts = None
         if self.share_data['previous_share_hash'] is not None and block_abs_height_func is not None:
             previous_share = tracker.items[self.share_data['previous_share_hash']]
