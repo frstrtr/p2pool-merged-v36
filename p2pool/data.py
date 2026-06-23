@@ -2409,12 +2409,6 @@ class AutoRatchet(object):
         v36_votes = 0
         v36_shares = 0  # actual V36 format shares (not just votes)
         total = 0
-        # Tail guard: collect vote counts for the oldest 10% of the window.
-        # check() (line 1398-1405) rejects V36 shares when the oldest 10%
-        # has <60% signaling, so we must not activate before that clears.
-        tail_start = net.CHAIN_LENGTH * 9 // 10  # position where tail begins
-        tail_v36_votes = 0
-        tail_total = 0
 
         for share in tracker.get_chain(best_share_hash, sample):
             total += 1
@@ -2423,12 +2417,7 @@ class AutoRatchet(object):
                 v36_votes += 1
             if share.VERSION >= 36:
                 v36_shares += 1
-            # Shares are newest-first; positions >= tail_start are the oldest 10%
-            if total > tail_start:
-                tail_total += 1
-                if desired_ver >= 36:
-                    tail_v36_votes += 1
-        
+
         if total == 0:
             if self._state == self.STATE_CONFIRMED:
                 return (MergedMiningShare, 36)
@@ -2451,20 +2440,34 @@ class AutoRatchet(object):
                 self._state.upper(), vote_pct, v36_votes, total, share_pct, full_window, height, extra)
         
         old_state = self._state
-        
-        # Tail guard: oldest 10% signaling percentage
-        tail_pct = (tail_v36_votes * 100 // tail_total) if tail_total > 0 else 0
 
         # --- State transitions ---
         if self._state == self.STATE_VOTING:
             # Only activate with a full window of data AND oldest 10% ready.
-            # The tail guard prevents activation before check() (line 1404)
+            # The tail guard prevents activation before check() (line 1399-1405)
             # would accept V36 shares — avoids PeerMisbehavingError on peers.
             if full_window and vote_pct >= self.ACTIVATION_THRESHOLD:
-                if tail_total > 0 and tail_pct < 60:
-                    # Oldest shares haven't signaled enough — wait
+                # WORK-WEIGHTED tail guard (mint<->accept coupling). c2pool #288
+                # parity: the activation tail guard must use the SAME work-weighted
+                # 60% rule that check() (line 1399-1405) enforces over the oldest
+                # 10% of the window — get_desired_version_counts already weights
+                # each vote by target_to_average_attempts(target) (WORK), not a
+                # flat share count. Computing the tail guard off the identical
+                # function and window makes a node activate at the EXACT cross
+                # point its own (and every peer's) accept gate would accept, so a
+                # 95%-by-COUNT activation can never outrun the 60%-by-WORK accept
+                # gate and wedge the crossing.
+                tail_ancestor = tracker.get_nth_parent_hash(best_share_hash, net.CHAIN_LENGTH * 9 // 10)
+                tail_counts = get_desired_version_counts(tracker, tail_ancestor, net.CHAIN_LENGTH // 10)
+                tail_target = tail_counts.get(36, 0)
+                tail_weight_total = sum(tail_counts.itervalues())
+                # Identical expression to check() line 1404:
+                #   counts.get(self.VERSION, 0) < sum(counts.itervalues())*60//100
+                if tail_weight_total > 0 and tail_target * 100 < tail_weight_total * 60:
+                    # Oldest 10% hasn't signaled enough WORK — wait
                     if self._log_counter % 10 == 0:
-                        print '[AutoRatchet] VOTING: full window %d%% but tail 10%% only %d%% < 60%% - waiting' % (
+                        tail_pct = tail_target * 100 // tail_weight_total
+                        print '[AutoRatchet] VOTING: full window %d%% but tail 10%% work-weighted only %d%% < 60%% - waiting' % (
                             vote_pct, tail_pct)
                     return (PaddingBugfixShare, 36)
                 self._state = self.STATE_ACTIVATED
