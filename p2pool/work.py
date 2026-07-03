@@ -14,6 +14,7 @@ from twisted.python import log
 from bitcoin import getwork, data as bitcoin_data, helper, script, worker_interface
 from bitcoin.merged_broadcaster import MergedMiningBroadcaster
 from util import forest, jsonrpc, variable, deferral, math, pack
+from p2pool.util import coopevent
 import p2pool, p2pool.data as p2pool_data
 from p2pool import merged_mining
 
@@ -1085,6 +1086,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
             except Exception:
                 pass  # non-critical; don't break the event chain
         self.node.best_share_var.changed.watch(_ratchet_tick)
+
+        # === DOA fix: time-sliced new_work_event fan-out ====================
+        # Swap the event object BEFORE anything watches it; per-connection
+        # stratum/longpoll watchers attach at runtime, long after __init__.
+        assert not self.new_work_event.observers, 'new_work_event already has watchers; move the CooperativeEvent swap earlier'
+        self.new_work_event = coopevent.CooperativeEvent(budget_s=0.025)  # TODO(maintainer): tune budget
+
+        # === DOA fix: per-work-event gentx template cache ===================
+        self._gentx_template_cache = None   # (work_value, best_share, share_type, v36_active, template)
+        self.use_gentx_template_cache = True   # False => legacy per-connection path (fallback + differential gate)
+        self.differential_capture = None       # test hook: dict to capture get_work internals
+        # Registered FIRST, so the one O(T) template build per event runs
+        # before the per-connection fan-out; every get_work() after it is
+        # O(payout outputs).
+        self.new_work_event.watch(self._prewarm_gentx_template)
 
     def stop(self):
         self.running = False
@@ -2432,6 +2448,51 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         return user_merged_work
 
+    def _get_gentx_template(self, share_type, v36_active):
+        '''Return the cached user-independent gentx template for the current
+        (bitcoind work, best share, share_type) state, building it if stale.
+        O(1) on cache hit.  Single-entry cache: the work dict is compared by
+        identity (compute_work replaces the dict on every change) and a
+        strong reference is held, so the identity check is sound.'''
+        work = self.current_work.value
+        best = self.node.best_share_var.value
+        c = self._gentx_template_cache
+        if c is not None and c[0] is work and c[1] == best and c[2] is share_type and c[3] == v36_active:
+            return c[4]
+        t0 = time.time()
+        tx_hashes = work['transaction_hashes']
+        transactions = work['transactions']
+        tx_map = dict(zip(tx_hashes, transactions))  # once per work event, not per connection
+        template = share_type.generate_transaction_template(
+            tracker=self.node.tracker,
+            previous_share_hash=best,
+            block_target=work['bits'].target,
+            desired_other_transaction_hashes_and_fees=zip(tx_hashes, work['transaction_fees']),
+            net=self.node.net,
+            known_txs=tx_map,
+            subsidy=work['subsidy'],
+            base_subsidy=work['subsidy'],
+            v36_active=v36_active,
+        )
+        template['tx_map'] = tx_map
+        template['other_transactions'] = [tx_map[tx_hash] for tx_hash in template['other_transaction_hashes']]
+        self._gentx_template_cache = (work, best, share_type, v36_active, template)
+        if p2pool.BENCH: print '%8.3f ms for work.py:_get_gentx_template() (%i txs)' % ((time.time()-t0)*1000., len(tx_hashes))
+        return template
+
+    def _prewarm_gentx_template(self, *args):
+        '''First new_work_event watcher: build the template once per event,
+        before any stratum/longpoll watcher runs get_work().'''
+        if not self.use_gentx_template_cache:
+            return
+        try:
+            share_type, desired_ver = self.auto_ratchet.get_share_version(
+                self.node.tracker, self.node.best_share_var.value, self.node.net)
+            # matches get_work(): v36_active is aligned with AutoRatchet's choice
+            self._get_gentx_template(share_type, share_type.VERSION >= 36)
+        except Exception:
+            log.err(None, 'Error pre-warming gentx template:')
+
     def get_work(self, user, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses=None):
         # Debug: Uncomment to trace get_work calls
         #print '[DEBUG] get_work called with user=%r, merged_addresses=%r' % (user, merged_addresses)
@@ -2486,7 +2547,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         transactions = self.current_work.value['transactions']
         
         tx_hashes = self.current_work.value['transaction_hashes']
-        tx_map = dict(zip(tx_hashes, transactions))
+        # CHANGED (DOA fix): tx_map is no longer built per connection.  The
+        # cached-template path takes it from the template (built once per
+        # work event); the legacy path builds it inside its branch below.
         # AutoRatchet determines share version from network state + persisted state.
         # This replaces the manual share_type selection with a fully automated,
         # network-aware ratchet that persists across restarts.
@@ -2617,25 +2680,68 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 if mci_entries:
                     merged_coinbase_info_for_share = mci_entries
             
-            share_info, gentx, other_transaction_hashes, get_share = share_type.generate_transaction(
-                tracker=self.node.tracker,
-                share_data=share_data_base,
-                block_target=self.current_work.value['bits'].target,
-                desired_timestamp=int(time.time() + 0.5),
-                desired_target=desired_share_target,
-                ref_merkle_link=dict(branch=[], index=0),
-                desired_other_transaction_hashes_and_fees=zip(tx_hashes, self.current_work.value['transaction_fees']),
-                net=self.node.net,
-                known_txs=tx_map,
-                base_subsidy=self.current_work.value['subsidy'],
-                v36_active=v36_active,  # Pass V36 status for donation script switch
-                merged_addresses=merged_addresses_for_share,  # Validated merged chain addresses
-                message_data=self.transition_message_data if v36_active else None,
-                merged_coinbase_info=merged_coinbase_info_for_share,  # Merged coinbase verification data
-            )
+            if self.use_gentx_template_cache:
+                # NEW PATH (DOA fix): cached per-work-event template + cheap
+                # per-user finalize.  Byte-identical to the legacy path below
+                # for identical inputs — gated by
+                # p2pool/test/test_getwork_differential.py.
+                template = self._get_gentx_template(share_type, v36_active)
+                tx_map = template['tx_map']
+                share_info, gentx, other_transaction_hashes, get_share = share_type.finalize_generate_transaction(
+                    template=template,
+                    share_data=share_data_base,
+                    desired_timestamp=int(time.time() + 0.5),
+                    desired_target=desired_share_target,
+                    ref_merkle_link=dict(branch=[], index=0),
+                    net=self.node.net,
+                    merged_addresses=merged_addresses_for_share,  # Validated merged chain addresses
+                    message_data=self.transition_message_data if v36_active else None,
+                    merged_coinbase_info=merged_coinbase_info_for_share,  # Merged coinbase verification data
+                )
+                other_transactions = template['other_transactions']
+                # segwit: stratum merkle_link MUST be the txid merkle link
+                # (see original comment below); non-segwit link is cached
+                # per tx-set in the template.
+                merkle_link = template['merkle_link_nonsegwit'] if share_info.get('segwit_data', None) is None else share_info['segwit_data']['txid_merkle_link']
+            else:
+                # LEGACY PATH — verbatim original per-connection code.  Kept
+                # as operational fallback and as the reference side of the
+                # differential gate.
+                tx_map = dict(zip(tx_hashes, transactions))
+                share_info, gentx, other_transaction_hashes, get_share = share_type.generate_transaction(
+                    tracker=self.node.tracker,
+                    share_data=share_data_base,
+                    block_target=self.current_work.value['bits'].target,
+                    desired_timestamp=int(time.time() + 0.5),
+                    desired_target=desired_share_target,
+                    ref_merkle_link=dict(branch=[], index=0),
+                    desired_other_transaction_hashes_and_fees=zip(tx_hashes, self.current_work.value['transaction_fees']),
+                    net=self.node.net,
+                    known_txs=tx_map,
+                    base_subsidy=self.current_work.value['subsidy'],
+                    v36_active=v36_active,  # Pass V36 status for donation script switch
+                    merged_addresses=merged_addresses_for_share,  # Validated merged chain addresses
+                    message_data=self.transition_message_data if v36_active else None,
+                    merged_coinbase_info=merged_coinbase_info_for_share,  # Merged coinbase verification data
+                )
+                other_transactions = [tx_map[tx_hash] for tx_hash in other_transaction_hashes]
+                # CRITICAL (unchanged semantics): when segwit is activated the
+                # stratum merkle_link MUST be segwit_data['txid_merkle_link'],
+                # otherwise all shares fail with "share PoW invalid".
+                merkle_link = bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0) if share_info.get('segwit_data', None) is None else share_info['segwit_data']['txid_merkle_link']
+
+        # test hook for the differential gate — a plain dict assignment, no
+        # cost when disabled
+        if self.differential_capture is not None:
+            self.differential_capture.update(
+                share_info=share_info, gentx=gentx,
+                other_transaction_hashes=other_transaction_hashes,
+                get_share=get_share, merkle_link=merkle_link)
 
         packed_gentx = bitcoin_data.tx_type.pack(gentx)
-        other_transactions = [tx_map[tx_hash] for tx_hash in other_transaction_hashes]
+        # CHANGED (DOA fix): `other_transactions = [tx_map[tx_hash] for ...]`
+        # moved into the branches above (cached in the template on the new
+        # path).
 
         mm_later = [(dict(aux_work, target=aux_work['target'] if aux_work['target'] != 'p2pool' else share_info['bits'].target), index, hashes) for aux_work, index, hashes in mm_later]
 
@@ -2667,7 +2773,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # otherwise the reconstructed merkle_root in __init__ will differ from the miner's header
         # and ALL shares will fail with "share PoW invalid".
         # When segwit is NOT activated, use other_transaction_hashes directly (which are wtxids from GBT).
-        merkle_link = bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0) if share_info.get('segwit_data', None) is None else share_info['segwit_data']['txid_merkle_link']
+        # CHANGED (DOA fix): the original
+        #   merkle_link = bitcoin_data.calculate_merkle_link(...) if ... else ...
+        # line that stood here is DELETED — merkle_link is now assigned inside
+        # the branch above (cached per tx-set on the new path).
 
 
         if print_throttle is 0.0:

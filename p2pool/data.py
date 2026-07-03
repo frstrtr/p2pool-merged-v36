@@ -14,6 +14,12 @@ import p2pool
 from p2pool.bitcoin import data as bitcoin_data, script, sha256
 from p2pool.util import math, forest, pack
 
+# DOA-under-load fix (G1): module-level L1 cache of tx-set artifacts
+# (see BaseShare._get_txset_artifacts).
+_txset_artifact_cache = {}   # L1: key -> artifacts dict
+_txset_artifact_order = []   # insertion order, for eviction
+_TXSET_ARTIFACT_CACHE_SIZE = 4  # TODO(maintainer): raise if >4 distinct GBT tx-sets can alternate within one share period
+
 def parse_bip0034(coinbase):
     _, opdata = script.parse(coinbase).next()
     bignum = pack.IntType(len(opdata)*8).unpack(opdata)
@@ -1622,6 +1628,505 @@ class BaseShare(object):
         if other_txs is None:
             return None # not all txs present
         return dict(header=self.header, txs=[self.check(tracker, other_txs)] + other_txs)
+
+    @classmethod
+    def _get_txset_artifacts(cls, tracker, previous_share_hash, height, desired_other_transaction_hashes_and_fees, net, known_txs):
+        '''
+        L1 cache: everything that depends ONLY on the GBT tx set (plus, for
+        VERSION < 34, the chain tip via tx_hash_to_this).  Survives best-share
+        changes for VERSION >= 34, so a share arrival with an unchanged
+        mempool template does NO O(T) work at all.
+
+        known_txs must not be None (this path is only used for work
+        generation; share verification keeps using generate_transaction()).
+        '''
+        assert known_txs is not None
+        # O(T) tuple build + hash, but only once per TEMPLATE build (per work
+        # event), never per user/connection.
+        txs_key = tuple(desired_other_transaction_hashes_and_fees)
+        key = (cls, net, previous_share_hash if cls.VERSION < 34 else None, txs_key)
+        cached = _txset_artifact_cache.get(key)
+        if cached is not None:
+            return cached
+
+        # ---- verbatim from generate_transaction(): tx selection ----
+        new_transaction_hashes = []
+        new_transaction_size = 0 # including witnesses
+        all_transaction_stripped_size = 0 # stripped size
+        all_transaction_real_size = 0 # including witnesses, for statistics
+        new_transaction_weight = 0
+        all_transaction_weight = 0
+        transaction_hash_refs = []
+        other_transaction_hashes = []
+        tx_hash_to_this = {}
+        if cls.VERSION < 34:
+            past_shares = list(tracker.get_chain(previous_share_hash, min(height, 100)))
+            for i, share in enumerate(past_shares):
+                for j, tx_hash in enumerate(share.new_transaction_hashes):
+                    if tx_hash not in tx_hash_to_this:
+                        tx_hash_to_this[tx_hash] = [1+i, j] # share_count, tx_count
+
+        for tx_hash, fee in desired_other_transaction_hashes_and_fees:
+            # known_txs is guaranteed non-None here, so the monolith's
+            # known_txs-is-None branches collapse; the arithmetic is identical.
+            this_stripped_size = bitcoin_data.get_stripped_size(known_txs[tx_hash])
+            this_real_size     = bitcoin_data.get_size(known_txs[tx_hash])
+            this_weight        = this_real_size + 3*this_stripped_size
+
+            if all_transaction_stripped_size + this_stripped_size + 80 + cls.gentx_size +  500 > net.BLOCK_MAX_SIZE:
+                break
+            if all_transaction_weight + this_weight + 4*80 + cls.gentx_weight + 2000 > net.BLOCK_MAX_WEIGHT and not getattr(net, 'IMMUTABLE_BLOCKS', False):
+                break
+            # NOTE(maintainer): if this fork carries additional selection
+            # conditions at this point in generate_transaction() (e.g. the
+            # <=50kB new-transaction ramp), move them here VERBATIM as well —
+            # they are tx-set/chain-local and belong in this cached phase.
+            # Do NOT remove them.
+
+            if tx_hash in tx_hash_to_this:
+                this = tx_hash_to_this[tx_hash]
+                all_transaction_stripped_size += this_stripped_size
+                all_transaction_real_size += this_real_size
+                all_transaction_weight += this_weight
+            else:
+                new_transaction_size += this_real_size
+                all_transaction_stripped_size += this_stripped_size
+                all_transaction_real_size += this_real_size
+                new_transaction_weight += this_weight
+                all_transaction_weight += this_weight
+                new_transaction_hashes.append(tx_hash)
+                this = [0, len(new_transaction_hashes)-1]
+            transaction_hash_refs.extend(this)
+            other_transaction_hashes.append(tx_hash)
+
+        if transaction_hash_refs and max(transaction_hash_refs) < 2**16:
+            transaction_hash_refs = array.array('H', transaction_hash_refs)
+        elif transaction_hash_refs and max(transaction_hash_refs) < 2**32: # in case we see blocks with more than 65536 tx
+            transaction_hash_refs = array.array('L', transaction_hash_refs)
+
+        if all_transaction_stripped_size and p2pool.DEBUG:
+            print "Generating a share with %i bytes, %i WU (new: %i B, %i WU) in %i tx (%i new), plus est gentx of %i bytes/%i WU" % (
+                all_transaction_real_size,
+                all_transaction_weight,
+                new_transaction_size,
+                new_transaction_weight,
+                len(other_transaction_hashes),
+                len(new_transaction_hashes),
+                cls.gentx_size,
+                cls.gentx_weight)
+            print "Total block stripped size=%i B, full size=%i B,  weight: %i WU" % (
+                80+all_transaction_stripped_size+cls.gentx_size,
+                80+all_transaction_real_size+cls.gentx_size,
+                3*80+all_transaction_weight+cls.gentx_weight)
+
+        # ---- verbatim: fee bookkeeping for the subsidy adjustment ----
+        included_transactions = set(other_transaction_hashes)
+        removed_fees = [fee for tx_hash, fee in desired_other_transaction_hashes_and_fees if tx_hash not in included_transactions]
+        definite_fees = sum(0 if fee is None else fee for tx_hash, fee in desired_other_transaction_hashes_and_fees if tx_hash in included_transactions)
+        removed_fee_sum = sum(removed_fees) if None not in removed_fees else None
+
+        # ---- verbatim: segwit tx-set work (the O(T) merkle/wtxid passes) ----
+        segwit_activated = is_segwit_activated(cls.VERSION, net)
+        # (monolith: 'if segwit_data is None and known_txs is None' — known_txs
+        # is non-None here, so segwit_activated is never demoted on this path)
+        if not segwit_activated and any(bitcoin_data.is_segwit_tx(known_txs[h]) for h in other_transaction_hashes):
+            raise ValueError('segwit transaction included before activation')
+        segwit_data = None
+        witness_commitment_hash = None
+        witness_reserved_value_str = None
+        witness_commitment_outputs = []
+        merkle_link_nonsegwit = None
+        if segwit_activated:
+            share_txs = [(known_txs[h], bitcoin_data.get_txid(known_txs[h])) for h in other_transaction_hashes]
+            # (see monolith comment: pass None as txhash so get_wtxid() hashes
+            # the full transaction including witness data)
+            segwit_data = dict(txid_merkle_link=bitcoin_data.calculate_merkle_link([None] + [tx[1] for tx in share_txs], 0), wtxid_merkle_root=bitcoin_data.merkle_hash([0] + [bitcoin_data.get_wtxid(tx[0], tx[1], None) for tx in share_txs]))
+            witness_reserved_value_str = '[P2Pool]'*4
+            witness_reserved_value = pack.IntType(256).unpack(witness_reserved_value_str)
+            witness_commitment_hash = bitcoin_data.get_witness_commitment_hash(segwit_data['wtxid_merkle_root'], witness_reserved_value)
+            witness_commitment_outputs = [dict(value=0, script='\x6a\x24\xaa\x21\xa9\xed' + pack.IntType(256).pack(witness_commitment_hash))]
+        else:
+            # the stratum job merkle link over the selected tx set (this is
+            # the '# XXX optimize this' hot spot — now computed once per
+            # tx-set instead of once per connection)
+            merkle_link_nonsegwit = bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0)
+
+        artifacts = dict(
+            new_transaction_hashes=new_transaction_hashes,
+            transaction_hash_refs=transaction_hash_refs,
+            other_transaction_hashes=other_transaction_hashes,
+            removed_fee_sum=removed_fee_sum,
+            definite_fees=definite_fees,
+            segwit_activated=segwit_activated,
+            segwit_data=segwit_data,
+            witness_commitment_hash=witness_commitment_hash,
+            witness_reserved_value_str=witness_reserved_value_str,
+            witness_commitment_outputs=witness_commitment_outputs,
+            merkle_link_nonsegwit=merkle_link_nonsegwit,
+        )
+        _txset_artifact_cache[key] = artifacts
+        _txset_artifact_order.append(key)
+        while len(_txset_artifact_order) > _TXSET_ARTIFACT_CACHE_SIZE:
+            _txset_artifact_cache.pop(_txset_artifact_order.pop(0), None)
+        return artifacts
+
+    @classmethod
+    def generate_transaction_template(cls, tracker, previous_share_hash, block_target, desired_other_transaction_hashes_and_fees, net, known_txs, subsidy, base_subsidy=None, v36_active=False):
+        '''
+        L2: build the user-INDEPENDENT gentx template for one work event.
+        Everything here is identical for every stratum connection at a given
+        (best share, GBT tx set, block target): PPLNS weights, base payout
+        amounts, tx selection/refs, segwit data, far_share_hash,
+        merged_payout_hash.  Only finalize_generate_transaction() differs per
+        user.  Cached one level up by WorkerBridge._get_gentx_template().
+        '''
+        t0 = time.time()
+        if known_txs is None:
+            raise ValueError('generate_transaction_template requires known_txs; use generate_transaction() for share verification')
+        previous_share = tracker.items[previous_share_hash] if previous_share_hash is not None else None
+
+        height, last = tracker.get_height_and_last(previous_share_hash)
+        if not (height >= net.REAL_CHAIN_LENGTH or last is None):
+            raise ValueError('share chain not long enough (height=%d, need %d)' % (height, net.REAL_CHAIN_LENGTH))
+        # pre_target3/max_bits/bits are finished in finalize because the V36
+        # emergency time-based decay depends on desired_timestamp (per call).
+        # Only the expensive chain lookup is done (and cached) here.
+        attempts_per_second = None
+        if height >= net.TARGET_LOOKBEHIND:
+            attempts_per_second = get_pool_attempts_per_second(tracker, previous_share_hash, net.TARGET_LOOKBEHIND, min_work=True, integer=True)
+
+        txset = cls._get_txset_artifacts(tracker, previous_share_hash, height, desired_other_transaction_hashes_and_fees, net, known_txs)
+        other_transaction_hashes = txset['other_transaction_hashes']
+
+        # ---- verbatim: subsidy adjustment ----
+        if txset['removed_fee_sum'] is not None:
+            adjusted_subsidy = subsidy - txset['removed_fee_sum']
+        else:
+            if base_subsidy is None:
+                raise ValueError('base_subsidy is None in subsidy calculation')
+            adjusted_subsidy = base_subsidy + txset['definite_fees']
+
+        # ---- verbatim: PPLNS weights ----
+        if v36_active:
+            # Phase 2c: Include parent share in PPLNS window (close 2-share gap)
+            _pplns_start = previous_share.hash if previous_share is not None else None
+            _pplns_max_shares = min(height, net.REAL_CHAIN_LENGTH)
+        else:
+            _pplns_start = previous_share.share_data['previous_share_hash'] if previous_share is not None else None
+            _pplns_max_shares = max(0, min(height, net.REAL_CHAIN_LENGTH) - 1)
+        _pplns_desired_weight = 65535*net.SPREAD*bitcoin_data.target_to_average_attempts(block_target)
+
+        if v36_active:
+            weights, total_weight, donation_weight = get_decayed_cumulative_weights(
+                tracker, _pplns_start, _pplns_max_shares, 2**288 - 1, net)
+        else:
+            weights, total_weight, donation_weight = tracker.get_cumulative_weights(
+                _pplns_start, _pplns_max_shares, _pplns_desired_weight)
+
+        if total_weight != sum(weights.itervalues()) + donation_weight:
+            raise ValueError('PPLNS weight mismatch: total_weight=%d, sum+donation=%d' % (total_weight, sum(weights.itervalues()) + donation_weight))
+
+        # Periodic PPLNS weight dump for cross-impl comparison (verbatim,
+        # shares the same throttle attribute as generate_transaction)
+        import time as _t2
+        _lt = getattr(cls, '_pplns_dump_t', 0)
+        if _t2.time() - _lt > 30 and len(weights) >= 2:
+            cls._pplns_dump_t = _t2.time()
+            import sys
+            print >>sys.stderr, '[PPLNS-AMT] subsidy=%d total_weight=%d don_weight=%d addrs=%d prev=%s' % (
+                adjusted_subsidy, total_weight, donation_weight, len(weights),
+                '%064x' % (previous_share_hash,) if previous_share_hash else 'None')
+            for key, w in sorted(weights.iteritems(), key=lambda x: -x[1])[:4]:
+                a = adjusted_subsidy * w // total_weight if v36_active else adjusted_subsidy * 199 * w // (200 * total_weight)
+                key_repr = key.encode('hex')[:40] if v36_active else key[:20]
+                print >>sys.stderr, '[PPLNS-AMT]   %s weight=%d amount=%d' % (key_repr, w, a)
+
+        template = dict(
+            cls=cls,
+            net=net,
+            v36_active=v36_active,
+            previous_share_hash=previous_share_hash,
+            previous_share=previous_share,
+            height=height,
+            last=last,
+            attempts_per_second=attempts_per_second,
+            orig_subsidy=subsidy,
+            subsidy=adjusted_subsidy,
+            new_transaction_hashes=txset['new_transaction_hashes'],
+            transaction_hash_refs=txset['transaction_hash_refs'],
+            other_transaction_hashes=other_transaction_hashes,
+            segwit_activated=txset['segwit_activated'],
+            segwit_data=txset['segwit_data'],
+            witness_reserved_value_str=txset['witness_reserved_value_str'],
+            witness_commitment_outputs=txset['witness_commitment_outputs'],
+            merkle_link_nonsegwit=txset['merkle_link_nonsegwit'],
+            far_share_hash=None if last is None and height < 99 else tracker.get_nth_parent_hash(previous_share_hash, 99),
+            merged_payout_hash=compute_merged_payout_hash(tracker, previous_share_hash, block_target, net) if cls.VERSION >= 36 else None,
+        )
+
+        # ---- payout amounts ----
+        if v36_active:
+            # V36 has no finder fee, so the ENTIRE payout list (including the
+            # dust-marker adjustment and the trailing combined-donation output)
+            # is user-independent — build it once here.  Verbatim.
+            amounts = dict((script, adjusted_subsidy*weight//total_weight) for script, weight in weights.iteritems())
+            total_donation = adjusted_subsidy - sum(amounts.itervalues())
+            # V36 CONSENSUS RULE: Donation/marker output must be >= 1 satoshi.
+            if total_donation < 1 and adjusted_subsidy > 0:
+                # Deterministic tiebreak: (amount, script) so equal amounts pick largest script
+                largest_key = max(amounts, key=lambda k: (amounts[k], k))
+                amounts[largest_key] -= 1
+                total_donation = adjusted_subsidy - sum(amounts.itervalues())
+            amounts[COMBINED_DONATION_SCRIPT] = amounts.get(COMBINED_DONATION_SCRIPT, 0) + total_donation
+            excluded_scripts = {DONATION_SCRIPT, COMBINED_DONATION_SCRIPT}
+            dests = sorted([s for s in amounts.iterkeys() if s not in excluded_scripts],
+                           key=lambda s: (amounts[s], s))[-4000:]
+            if len(dests) >= 200:
+                print "found %i payment dests. Antminer S9s may crash when this is close to 226." % len(dests)
+            payouts = [dict(value=amounts[s], script=s) for s in dests if amounts[s]]
+            # COMBINED_DONATION_SCRIPT MUST BE LAST payout output before the OP_RETURN
+            payouts.append({'script': COMBINED_DONATION_SCRIPT, 'value': amounts[COMBINED_DONATION_SCRIPT]})
+            template['amounts'] = amounts        # shared, treated as read-only by finalize
+            template['payouts'] = payouts        # shared, treated as read-only by finalize
+        else:
+            # Pre-V36: the 0.5% finder fee targets the requesting user, so
+            # amounts/dests/payouts are completed per-user in finalize from
+            # this cached base (an O(A) dict copy + O(A log A) sort — that is
+            # the allowed per-user O(payout outputs) budget).  Verbatim base:
+            template['amounts_base'] = dict((script, adjusted_subsidy*(199*weight)//(200*total_weight)) for script, weight in weights.iteritems()) # 99.5% goes according to weights prior to this share
+
+        t1 = time.time()
+        if p2pool.BENCH: print "%8.3f ms for data.py:generate_transaction_template()" % ((t1-t0)*1000.,)
+        return template
+
+    @classmethod
+    def finalize_generate_transaction(cls, template, share_data, desired_timestamp, desired_target, ref_merkle_link, net, last_txout_nonce=0, merged_addresses=None, message_data=None, merged_coinbase_info=None):
+        '''
+        Cheap per-user phase.  Returns exactly what generate_transaction()
+        returns: (share_info, gentx, other_transaction_hashes, get_share) —
+        byte-identical for identical inputs.  Cost: O(payout outputs); no
+        O(transactions) work happens here.
+        '''
+        t0 = time.time()
+        # Staleness guards — a template MUST match the state this share is
+        # being built against; mismatch here would be a consensus bug.
+        if template['cls'] is not cls or template['net'] is not net:
+            raise ValueError('gentx template built for a different share class/net')
+        if template['previous_share_hash'] != share_data['previous_share_hash']:
+            raise ValueError('gentx template is stale: previous_share_hash mismatch')
+        if template['orig_subsidy'] != share_data['subsidy']:
+            raise ValueError('gentx template is stale: subsidy mismatch')
+        v36_active = template['v36_active']
+        previous_share = template['previous_share']
+        height = template['height']
+        other_transaction_hashes = template['other_transaction_hashes']
+
+        # ---- verbatim: difficulty (desired_timestamp-dependent V36 decay) ----
+        if height < net.TARGET_LOOKBEHIND:
+            pre_target3 = net.MAX_TARGET
+        else:
+            attempts_per_second = template['attempts_per_second']
+            pre_target = 2**256//(net.SHARE_PERIOD*attempts_per_second) - 1 if attempts_per_second else 2**256-1
+            clamp_ref_target = previous_share.max_target
+            if v36_active and previous_share is not None:
+                time_since_share = max(0, desired_timestamp - previous_share.timestamp)
+                emergency_threshold = net.SHARE_PERIOD * 20
+                if time_since_share > emergency_threshold:
+                    half_life = net.SHARE_PERIOD * 10
+                    excess = time_since_share - emergency_threshold
+                    halvings = excess // half_life
+                    remainder = excess % half_life
+                    eased = previous_share.max_target << int(halvings)
+                    eased = (eased * (half_life + remainder)) // half_life
+                    clamp_ref_target = min(eased, net.MAX_TARGET)
+            pre_target2 = math.clip(pre_target, (clamp_ref_target*9//10, clamp_ref_target*11//10))
+            pre_target3 = math.clip(pre_target2, (net.MIN_TARGET, net.MAX_TARGET))
+        max_bits = bitcoin_data.FloatingInteger.from_target_upper_bound(pre_target3)
+        bits = bitcoin_data.FloatingInteger.from_target_upper_bound(math.clip(desired_target, (pre_target3//30, pre_target3)))
+
+        # verbatim: fee-adjusted subsidy on a copy of share_data
+        share_data = dict(share_data, subsidy=template['subsidy'])
+
+        # ---- payouts ----
+        if v36_active:
+            amounts = template['amounts']   # read-only
+            payouts = template['payouts']   # read-only
+        else:
+            # verbatim: derive this_address, then apply the 0.5% finder fee
+            if 'address' not in share_data:
+                _pt = share_data.get('pubkey_type', PUBKEY_TYPE_P2PKH)
+                _ver, _witver = pubkey_type_to_version_witver(_pt, net.PARENT)
+                this_address = bitcoin_data.pubkey_hash_to_address(
+                        share_data['pubkey_hash'], _ver, _witver, net.PARENT)
+            else:
+                this_address = share_data['address']
+            amounts = dict(template['amounts_base'])
+            amounts[this_address] = amounts.get(this_address, 0) \
+                                    + share_data['subsidy']//200
+            total_donation = share_data['subsidy'] - sum(amounts.itervalues())
+            primary_donation_address = donation_script_to_address(net)
+            amounts[primary_donation_address] = amounts.get(primary_donation_address, 0) + total_donation
+
+        # verbatim: share_data pubkey fixups
+        if cls.VERSION < 34 and 'pubkey_hash' not in share_data:
+            share_data['pubkey_hash'], _, _ = bitcoin_data.address_to_pubkey_hash(
+                    this_address, net.PARENT)
+            del(share_data['address'])
+        if cls.VERSION >= 36 and 'pubkey_hash' not in share_data:
+            _pt = share_data.get('pubkey_type', PUBKEY_TYPE_P2PKH)
+            _ver, _witver = pubkey_type_to_version_witver(_pt, net.PARENT)
+            _ph, _, _ = bitcoin_data.address_to_pubkey_hash(
+                    bitcoin_data.pubkey_hash_to_address(
+                        share_data['pubkey_hash'], _ver, _witver, net.PARENT),
+                    net.PARENT)
+            share_data['pubkey_hash'] = _ph
+            share_data['pubkey_type'] = get_pubkey_type(_ver, _witver, net.PARENT)
+            if 'address' in share_data:
+                del share_data['address']
+
+        if sum(amounts.itervalues()) != share_data['subsidy'] or any(x < 0 for x in amounts.itervalues()):
+            raise ValueError()
+
+        if not v36_active:
+            # verbatim: pre-V36 dests sort + payout build (per-user because
+            # the finder fee can reorder dests)
+            combined_donation_addr = combined_donation_script_to_address(net)
+            excluded_dests = {primary_donation_address, combined_donation_addr}
+            dests = sorted([addr for addr in amounts.iterkeys() if addr not in excluded_dests],
+                           key=lambda address: (amounts[address], address))[-4000:]
+            if len(dests) >= 200:
+                print "found %i payment dests. Antminer S9s may crash when this is close to 226." % len(dests)
+            payouts = [dict(value=amounts[addr],
+                            script=bitcoin_data.address_to_script2(addr, net.PARENT)
+                            ) for addr in dests if amounts[addr]]
+            # Pre-V36: Only primary donation script (MUST BE LAST!)
+            payouts.append({'script': DONATION_SCRIPT, 'value': amounts[primary_donation_address]})
+
+        segwit_activated = template['segwit_activated']
+        segwit_data = template['segwit_data']
+
+        # ---- verbatim: share_info assembly ----
+        share_info = dict(
+            share_data=share_data,
+            far_share_hash=template['far_share_hash'],
+            max_bits=max_bits,
+            bits=bits,
+
+            timestamp=(math.clip(desired_timestamp, (
+                        (previous_share.timestamp + net.SHARE_PERIOD) - (net.SHARE_PERIOD - 1), # = previous_share.timestamp + 1
+                        (previous_share.timestamp + net.SHARE_PERIOD) + (net.SHARE_PERIOD - 1),)) if previous_share is not None else desired_timestamp
+                      ) if cls.VERSION < 32 else
+                      max(desired_timestamp, (previous_share.timestamp + 1)) if previous_share is not None else desired_timestamp,
+            absheight=((previous_share.absheight if previous_share is not None else 0) + 1) % 2**32,
+            abswork=((previous_share.abswork if previous_share is not None else 0) + bitcoin_data.target_to_average_attempts(bits.target)) % 2**128,
+        )
+        if cls.VERSION < 34:
+            share_info['new_transaction_hashes'] = template['new_transaction_hashes']
+            share_info['transaction_hash_refs'] = template['transaction_hash_refs']
+
+        if previous_share != None and desired_timestamp > previous_share.timestamp + 180:
+            print "Warning: Previous share's timestamp is %i seconds old." % int(desired_timestamp - previous_share.timestamp)
+            print "Make sure your system clock is accurate, and ensure that you're connected to decent peers."
+            print "If your clock is more than 300 seconds behind, it can result in orphaned shares."
+            print "(It's also possible that this share is just taking a long time to mine.)"
+        if previous_share != None and previous_share.timestamp > int(time.time()) + 3:
+            print "WARNING! Previous share's timestamp is %i seconds in the future. This is not normal." % \
+                   int(previous_share.timestamp - (int(time.time())))
+            print "Make sure your system clock is accurate. Errors beyond 300 sec result in orphaned shares."
+
+        if segwit_activated:
+            share_info['segwit_data'] = segwit_data
+
+        if cls.VERSION >= 36:
+            share_info['merged_addresses'] = merged_addresses  # None or list of validated entries
+            share_info['merged_coinbase_info'] = merged_coinbase_info if merged_coinbase_info else None
+            share_info['merged_payout_hash'] = template['merged_payout_hash']
+
+        # ---- verbatim: message_data defense-in-depth validation ----
+        if message_data is not None and cls.VERSION >= 36:
+            try:
+                from p2pool.share_messages import (
+                    unpack_share_messages as _unpack_msgs,
+                    DONATION_AUTHORITY_PUBKEYS as _AUTH_PUBKEYS,
+                )
+                _msgs, _info = _unpack_msgs(message_data)
+                if not _msgs or _info is None:
+                    import sys as _sys
+                    print >> _sys.stderr, ('[TRANSITION MSG] REJECTED: '
+                        'message_data failed decryption -- not encrypted '
+                        'by any donation authority key')
+                    message_data = None
+                else:
+                    _auth_pk = _info.get('authority_pubkey', b'')
+                    for _m in _msgs:
+                        if not _m.signature or not _m.verify_authority_direct(_auth_pk):
+                            import sys as _sys
+                            print >> _sys.stderr, ('[TRANSITION MSG] REJECTED: '
+                                'message type 0x%02x signature invalid after '
+                                'decryption -- not embedding' % _m.msg_type)
+                            message_data = None
+                            break
+            except Exception as _e:
+                import sys as _sys
+                print >> _sys.stderr, ('[TRANSITION MSG] REJECTED: '
+                    'failed to validate message_data -- %s' % _e)
+                message_data = None
+
+        # ---- verbatim: gentx assembly (witness-commitment output list is the
+        # cached, constant prefix; the ref-hash OP_RETURN is per-user) ----
+        gentx = dict(
+            version=1,
+            tx_ins=[dict(
+                previous_output=None,
+                sequence=None,
+                script=share_data['coinbase'],
+            )],
+            tx_outs=(list(template['witness_commitment_outputs']) if segwit_activated else []) \
+                    + payouts \
+                    + [dict(value=0, script='\x6a\x28' + cls.get_ref_hash(
+                        net, share_info, ref_merkle_link, message_data=message_data) \
+                                + pack.IntType(64).pack(last_txout_nonce))],
+            lock_time=0,
+        )
+
+        # verbatim: gentx_before_refhash structural guard
+        packed_gentx = bitcoin_data.tx_id_type.pack(gentx)
+        cutoff_prefix = packed_gentx[:-32-8-4]  # Remove ref_hash + nonce + lock_time
+        if not cutoff_prefix.endswith(cls.gentx_before_refhash):
+            print >>sys.stderr, '[GENTX ERROR] Prefix does NOT end with gentx_before_refhash!'
+            print >>sys.stderr, '[GENTX ERROR] V36 active: %s' % v36_active
+            print >>sys.stderr, '[GENTX ERROR] Expected ending: %s' % cls.gentx_before_refhash.encode('hex')
+            print >>sys.stderr, '[GENTX ERROR] Actual ending:   %s' % cutoff_prefix[-len(cls.gentx_before_refhash):].encode('hex')
+
+        if segwit_activated:
+            gentx['marker'] = 0
+            gentx['flag'] = 1
+            gentx['witness'] = [[template['witness_reserved_value_str']]]
+
+        # verbatim: get_share closure (only runs when a share is actually
+        # FOUND, so its O(T) merkle link stays off the per-connection path)
+        def get_share(header, last_txout_nonce=last_txout_nonce):
+            min_header = dict(header); del min_header['merkle_root']
+            packed_for_link = bitcoin_data.tx_id_type.pack(gentx)
+            prefix_for_link = packed_for_link[:-32-8-4]
+            share_contents = dict(
+                min_header=min_header,
+                share_info=share_info,
+                ref_merkle_link=dict(branch=[], index=0),
+                last_txout_nonce=last_txout_nonce,
+                hash_link=prefix_to_hash_link(prefix_for_link, cls.gentx_before_refhash),
+                merkle_link=bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0),
+            )
+            if cls.VERSION >= 36:
+                share_contents['message_data'] = message_data
+            share = cls(net, None, share_contents)
+            if share.header != header: # checks merkle_root
+                raise ValueError('share header does not match expected header (merkle_root mismatch)')
+            return share
+
+        t1 = time.time()
+        if p2pool.BENCH: print "%8.3f ms for data.py:finalize_generate_transaction()" % ((t1-t0)*1000.,)
+        return share_info, gentx, other_transaction_hashes, get_share
 
 
 class MergedMiningShare(BaseShare):
