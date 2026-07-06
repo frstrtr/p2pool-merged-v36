@@ -37,3 +37,8 @@ scripts/start_p2pool_*_local.sh
 service/.venv/
 service/__pycache__/
 .claude/settings.json
+pypy2.7-v7.3.20-linux64/
+pypy2.7-v7.3.20-linux64.tar.bz2
+*.bak-custom-*
+*.stock-preparityid
+*.pyc
