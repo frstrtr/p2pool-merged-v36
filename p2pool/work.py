@@ -14,6 +14,7 @@ from twisted.python import log
 from bitcoin import getwork, data as bitcoin_data, helper, script, worker_interface
 from bitcoin.merged_broadcaster import MergedMiningBroadcaster
 from util import forest, jsonrpc, variable, deferral, math, pack
+from p2pool import fillbudget
 from p2pool.util import coopevent
 import p2pool, p2pool.data as p2pool_data
 from p2pool import merged_mining
@@ -1071,6 +1072,21 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 self.parent_block_event.happened()
         self.merged_work.changed.watch(lambda _: self.new_work_event.happened())
         self.node.best_share_var.changed.watch(lambda _: self.new_work_event.happened())
+
+        # === G2 fill-budget wiring (LOCAL policy; see p2pool/fillbudget.py)
+        # One token bucket per parent chain, keyed by PARENT.SYMBOL. The
+        # parent-block reset is detected LAZILY in _g2_newtx_budget() (same
+        # version/previous_block/bits trio parent_block_event keys on), NOT
+        # via an event watch: new_work_event fires BEFORE parent_block_event
+        # in the transitioned watcher above, so an event-based reset would
+        # let the G1 prewarm build the first post-block template with a
+        # stale pre-reset grant.
+        self.fill_budgets = fillbudget.FillBudgetBook()
+        self._g2_parent_tag = self.node.net.PARENT.SYMBOL.lower()
+        self.fill_budgets.register(self._g2_parent_tag,
+            fillbudget.budget_from_net(self.node.net))
+        self._g2_frozen_grant = None      # (work-dict identity, granted bytes)
+        self._g2_last_parent_key = None   # (version, previous_block, bits)
 
         # Tick AutoRatchet on every new share so it advances even on non-mining
         # nodes that only receive shares from peers.  get_share_version() is the
@@ -2448,6 +2464,29 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
         return user_merged_work
 
+    def _g2_newtx_budget(self):
+        """G2 fill-budget grant (LOCAL policy), FROZEN per work event
+        (identity of the current_work dict): every get_work()/template
+        build within one work event sees the same value, preserving G1's
+        one-template-build-per-event property. grant() is a pure read --
+        tokens are debited only in got_response() when a share is actually
+        FOUND. Returns None (= unlimited, pre-G2 v36 behavior) when
+        FILL_BUDGETS_ENABLED is False on the network module."""
+        if not getattr(self.node.net, 'FILL_BUDGETS_ENABLED', True):
+            return None
+        work = self.current_work.value
+        f = self._g2_frozen_grant
+        if f is not None and f[0] is work:
+            return f[1]
+        parent_key = (work['version'], work['previous_block'], work['bits'])
+        if self._g2_last_parent_key != parent_key:
+            if self._g2_last_parent_key is not None:
+                self.fill_budgets.on_block_reset(self._g2_parent_tag)
+            self._g2_last_parent_key = parent_key
+        g = self.fill_budgets.get(self._g2_parent_tag).grant()
+        self._g2_frozen_grant = (work, g)
+        return g
+
     def _get_gentx_template(self, share_type, v36_active):
         '''Return the cached user-independent gentx template for the current
         (bitcoind work, best share, share_type) state, building it if stale.
@@ -2456,8 +2495,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
         strong reference is held, so the identity check is sound.'''
         work = self.current_work.value
         best = self.node.best_share_var.value
+        g2_budget = self._g2_newtx_budget()   # G2: part of the cache key
         c = self._gentx_template_cache
-        if c is not None and c[0] is work and c[1] == best and c[2] is share_type and c[3] == v36_active:
+        if c is not None and c[0] is work and c[1] == best and c[2] is share_type and c[3] == v36_active and c[5] == g2_budget:
             return c[4]
         t0 = time.time()
         tx_hashes = work['transaction_hashes']
@@ -2473,10 +2513,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
             subsidy=work['subsidy'],
             base_subsidy=work['subsidy'],
             v36_active=v36_active,
+            new_tx_budget=g2_budget,  # G2 fill-budget (None = unlimited)
         )
         template['tx_map'] = tx_map
         template['other_transactions'] = [tx_map[tx_hash] for tx_hash in template['other_transaction_hashes']]
-        self._gentx_template_cache = (work, best, share_type, v36_active, template)
+        self._gentx_template_cache = (work, best, share_type, v36_active, template, g2_budget)
         if p2pool.BENCH: print '%8.3f ms for work.py:_get_gentx_template() (%i txs)' % ((time.time()-t0)*1000., len(tx_hashes))
         return template
 
@@ -2699,6 +2740,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     merged_coinbase_info=merged_coinbase_info_for_share,  # Merged coinbase verification data
                 )
                 other_transactions = template['other_transactions']
+                g2_newtx_spent = template.get('g2_newtx_size', 0)   # G2: bytes actually committed
                 # segwit: stratum merkle_link MUST be the txid merkle link
                 # (see original comment below); non-segwit link is cached
                 # per tx-set in the template.
@@ -2708,6 +2750,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 # as operational fallback and as the reference side of the
                 # differential gate.
                 tx_map = dict(zip(tx_hashes, transactions))
+                g2_budget = self._g2_newtx_budget()   # G2 (legacy path)
                 share_info, gentx, other_transaction_hashes, get_share = share_type.generate_transaction(
                     tracker=self.node.tracker,
                     share_data=share_data_base,
@@ -2718,6 +2761,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     desired_other_transaction_hashes_and_fees=zip(tx_hashes, self.current_work.value['transaction_fees']),
                     net=self.node.net,
                     known_txs=tx_map,
+                    new_tx_budget=g2_budget,  # G2 (legacy path; None = unlimited)
                     base_subsidy=self.current_work.value['subsidy'],
                     v36_active=v36_active,  # Pass V36 status for donation script switch
                     merged_addresses=merged_addresses_for_share,  # Validated merged chain addresses
@@ -2725,6 +2769,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     merged_coinbase_info=merged_coinbase_info_for_share,  # Merged coinbase verification data
                 )
                 other_transactions = [tx_map[tx_hash] for tx_hash in other_transaction_hashes]
+                # G2: v34+ shares carry no cross-share tx refs, so every
+                # selected tx is new-to-window; for VERSION < 34 this
+                # overcounts re-referenced txs -- conservative for a local
+                # throttle.
+                g2_newtx_spent = sum(bitcoin_data.get_size(tx_map[h]) for h in other_transaction_hashes)
                 # CRITICAL (unchanged semantics): when segwit is activated the
                 # stratum merkle_link MUST be segwit_data['txid_merkle_link'],
                 # otherwise all shares fail with "share PoW invalid".
@@ -3630,6 +3679,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     self.my_doa_share_hashes.add(share.hash)
 
                 self.node.tracker.add(share)
+
+                # G2 fill-budget settle: debit tokens exactly ONCE, here,
+                # when a share is actually FOUND (grant() at get_work time
+                # is a pure read). DOA shares settle too -- their bytes hit
+                # the p2p wire regardless of acceptance. Runs BEFORE
+                # set_best_share() so the template prewarm triggered by the
+                # new best share already sees the advanced ramp; unfreezing
+                # the per-event grant makes that rebuild take a fresh one.
+                try:
+                    self.fill_budgets.get(self._g2_parent_tag).settle(g2_newtx_spent)
+                    self._g2_frozen_grant = None
+                except Exception:
+                    log.err(None, 'G2 fill-budget settle failed (non-fatal):')
                 self.node.set_best_share()
                 
                 # Broadcast share to P2P network

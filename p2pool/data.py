@@ -757,7 +757,7 @@ class BaseShare(object):
         return t
 
     @classmethod
-    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False, merged_addresses=None, message_data=None, merged_coinbase_info=None):
+    def generate_transaction(cls, tracker, share_data, block_target, desired_timestamp, desired_target, ref_merkle_link, desired_other_transaction_hashes_and_fees, net, known_txs=None, last_txout_nonce=0, base_subsidy=None, segwit_data=None, v36_active=False, merged_addresses=None, message_data=None, merged_coinbase_info=None, new_tx_budget=None):
         # V36 Donation Switch:
         # - Pre-V36 (<95%): Uses DONATION_SCRIPT (P2PK, original P2Pool author)
         # - Post-V36 (>=95%): Uses COMBINED_DONATION_SCRIPT (P2SH wrapping 1-of-2 P2MS redeem script)
@@ -829,6 +829,17 @@ class BaseShare(object):
             if all_transaction_stripped_size + this_stripped_size + 80 + cls.gentx_size +  500 > net.BLOCK_MAX_SIZE:
                 break
             if all_transaction_weight + this_weight + 4*80 + cls.gentx_weight + 2000 > net.BLOCK_MAX_WEIGHT and not getattr(net, 'IMMUTABLE_BLOCKS', False):
+                break
+
+            # G2 fill-budget break (monolith): LOCAL generation policy,
+            # NOT consensus. Meters bytes NEW to the sharechain window.
+            # Inert on the verify path: check() calls with known_txs=None,
+            # so this_real_size == 0 and the condition can never trip
+            # there; new_tx_budget=None (every call site that does not opt
+            # in, including check()) disables it entirely.
+            if (new_tx_budget is not None and known_txs is not None
+                    and tx_hash not in tx_hash_to_this
+                    and new_transaction_size + this_real_size > new_tx_budget):
                 break
 
             if tx_hash in tx_hash_to_this:
@@ -1630,7 +1641,7 @@ class BaseShare(object):
         return dict(header=self.header, txs=[self.check(tracker, other_txs)] + other_txs)
 
     @classmethod
-    def _get_txset_artifacts(cls, tracker, previous_share_hash, height, desired_other_transaction_hashes_and_fees, net, known_txs):
+    def _get_txset_artifacts(cls, tracker, previous_share_hash, height, desired_other_transaction_hashes_and_fees, net, known_txs, new_tx_budget=None):
         '''
         L1 cache: everything that depends ONLY on the GBT tx set (plus, for
         VERSION < 34, the chain tip via tx_hash_to_this).  Survives best-share
@@ -1643,7 +1654,10 @@ class BaseShare(object):
         assert known_txs is not None
         # O(T) tuple build + hash, but only once per TEMPLATE build (per work
         # event), never per user/connection.
-        txs_key = tuple(desired_other_transaction_hashes_and_fees)
+        # G2: budget participates in the L1 key via txs_key (deliberately
+        # NOT via the `key = (...)` line below, which the G1
+        # witness-hardening fix also edits).
+        txs_key = (tuple(desired_other_transaction_hashes_and_fees), new_tx_budget)
         key = (cls, net, previous_share_hash if cls.VERSION < 34 else None, txs_key)
         cached = _txset_artifact_cache.get(key)
         if cached is not None:
@@ -1682,6 +1696,16 @@ class BaseShare(object):
             # <=50kB new-transaction ramp), move them here VERBATIM as well —
             # they are tx-set/chain-local and belong in this cached phase.
             # Do NOT remove them.
+
+            # G2 fill-budget break (cached selection): the condition the
+            # NOTE above reserves this spot for. known_txs is guaranteed
+            # non-None on this path; the verify path never reaches this
+            # method. Cached under a key that includes new_tx_budget (via
+            # txs_key above).
+            if (new_tx_budget is not None
+                    and tx_hash not in tx_hash_to_this
+                    and new_transaction_size + this_real_size > new_tx_budget):
+                break
 
             if tx_hash in tx_hash_to_this:
                 this = tx_hash_to_this[tx_hash]
@@ -1752,6 +1776,7 @@ class BaseShare(object):
             merkle_link_nonsegwit = bitcoin_data.calculate_merkle_link([None] + other_transaction_hashes, 0)
 
         artifacts = dict(
+            g2_newtx_size=new_transaction_size,   # G2: new-to-window bytes actually selected
             new_transaction_hashes=new_transaction_hashes,
             transaction_hash_refs=transaction_hash_refs,
             other_transaction_hashes=other_transaction_hashes,
@@ -1771,7 +1796,7 @@ class BaseShare(object):
         return artifacts
 
     @classmethod
-    def generate_transaction_template(cls, tracker, previous_share_hash, block_target, desired_other_transaction_hashes_and_fees, net, known_txs, subsidy, base_subsidy=None, v36_active=False):
+    def generate_transaction_template(cls, tracker, previous_share_hash, block_target, desired_other_transaction_hashes_and_fees, net, known_txs, subsidy, base_subsidy=None, v36_active=False, new_tx_budget=None):
         '''
         L2: build the user-INDEPENDENT gentx template for one work event.
         Everything here is identical for every stratum connection at a given
@@ -1795,7 +1820,7 @@ class BaseShare(object):
         if height >= net.TARGET_LOOKBEHIND:
             attempts_per_second = get_pool_attempts_per_second(tracker, previous_share_hash, net.TARGET_LOOKBEHIND, min_work=True, integer=True)
 
-        txset = cls._get_txset_artifacts(tracker, previous_share_hash, height, desired_other_transaction_hashes_and_fees, net, known_txs)
+        txset = cls._get_txset_artifacts(tracker, previous_share_hash, height, desired_other_transaction_hashes_and_fees, net, known_txs, new_tx_budget=new_tx_budget)
         other_transaction_hashes = txset['other_transaction_hashes']
 
         # ---- verbatim: subsidy adjustment ----
@@ -1853,6 +1878,7 @@ class BaseShare(object):
             orig_subsidy=subsidy,
             subsidy=adjusted_subsidy,
             new_transaction_hashes=txset['new_transaction_hashes'],
+            g2_newtx_size=txset['g2_newtx_size'],   # G2: for settle() in got_response
             transaction_hash_refs=txset['transaction_hash_refs'],
             other_transaction_hashes=other_transaction_hashes,
             segwit_activated=txset['segwit_activated'],
