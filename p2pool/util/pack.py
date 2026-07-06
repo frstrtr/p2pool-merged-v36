@@ -158,7 +158,8 @@ class ListType(Type):
         return res
     
     def write(self, file, item):
-        assert len(item) % self.mul == 0
+        if len(item) % self.mul != 0:
+            raise RuntimeError('ListType.write: length %d not a multiple of %d (consensus guard, -O-safe)' % (len(item), self.mul))
         self._inner_size.write(file, len(item)//self.mul)
         for subitem in item:
             self.type.write(file, subitem)
@@ -225,7 +226,8 @@ class IPV6AddressType(Type):
             if len(bits) != 4:
                 raise ValueError('invalid address: %r' % (bits,))
             data = '00000000000000000000ffff'.decode('hex') + ''.join(chr(x) for x in bits)
-        assert len(data) == 16, len(data)
+        if len(data) != 16:
+            raise RuntimeError('IPV6AddressType.write: bad packed length %d (consensus guard, -O-safe)' % (len(data),))
         file.write(data)
 
 _record_types = {}
@@ -281,7 +283,8 @@ class ComposedType(Type):
         return item
     
     def write(self, file, item):
-        assert set(item.keys()) >= self.field_names
+        if not (set(item.keys()) >= self.field_names):
+            raise RuntimeError('ComposedType.write: missing fields %r (consensus guard, -O-safe)' % (self.field_names - set(item.keys()),))
         for key, type_ in self.fields:
             type_.write(file, item[key])
 
