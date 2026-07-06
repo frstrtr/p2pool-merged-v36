@@ -1106,8 +1106,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # === DOA fix: time-sliced new_work_event fan-out ====================
         # Swap the event object BEFORE anything watches it; per-connection
         # stratum/longpoll watchers attach at runtime, long after __init__.
-        if not (not self.new_work_event.observers):  # G1-HARDEN-2 [F2a-new-work-observers]: was assert; must survive python -O
-            raise RuntimeError('new_work_event already has watchers; move the CooperativeEvent swap earlier')
+        assert not self.new_work_event.observers, 'new_work_event already has watchers; move the CooperativeEvent swap earlier'
         self.new_work_event = coopevent.CooperativeEvent(budget_s=0.025)  # TODO(maintainer): tune budget
 
         # === DOA fix: per-work-event gentx template cache ===================
