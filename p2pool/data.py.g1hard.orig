@@ -20,44 +20,6 @@ _txset_artifact_cache = {}   # L1: key -> artifacts dict
 _txset_artifact_order = []   # insertion order, for eviction
 _TXSET_ARTIFACT_CACHE_SIZE = 4  # TODO(maintainer): raise if >4 distinct GBT tx-sets can alternate within one share period
 
-
-# ---- G1-HARDEN-1 helper ----------------------------------------------------
-# Witness commitment for the L1 tx-set artifact cache key.  txs_key covers
-# only (txid, fee), but the cached artifacts embed segwit_data derived from
-# the actual witness bytes in known_txs -- an identical (txid, fee) set with
-# different witnesses must MISS, not serve a stale witness commitment (lost
-# block, not a fork).  Legacy txs are fully committed by their txid already,
-# so only segwit txs contribute their wtxid.  Per-tx wtxids are memoized on
-# tx object identity (tx dicts are never mutated in place), so steady-state
-# cost per template build is one dict lookup + one 'is' check per candidate
-# tx -- same order as the txs_key tuple build the caller already pays;
-# pack+hash256 runs once per new tx object.  The memo is pruned to the
-# current candidate set every call, so it stays bounded by the template size.
-_g1_wtxid_memo = {}  # tx_hash -> (tx_object, wtxid)
-
-def _g1_witness_key(desired_other_transaction_hashes_and_fees, known_txs):
-    if known_txs is None:
-        return None
-    fresh = {}
-    wtxids = []
-    for tx_hash, _fee in desired_other_transaction_hashes_and_fees:
-        tx = known_txs.get(tx_hash)
-        if tx is None:
-            continue
-        ent = _g1_wtxid_memo.get(tx_hash)
-        if ent is not None and ent[0] is tx:
-            fresh[tx_hash] = ent
-            wtxids.append(ent[1])
-        elif bitcoin_data.is_segwit_tx(tx):
-            ent = (tx, bitcoin_data.get_wtxid(tx, None, None))
-            fresh[tx_hash] = ent
-            wtxids.append(ent[1])
-        # else: legacy tx -- its txid (already in txs_key) commits to all
-        # of its bytes
-    _g1_wtxid_memo.clear()
-    _g1_wtxid_memo.update(fresh)
-    return frozenset(wtxids)
-
 def parse_bip0034(coinbase):
     _, opdata = script.parse(coinbase).next()
     bignum = pack.IntType(len(opdata)*8).unpack(opdata)
@@ -1696,8 +1658,7 @@ class BaseShare(object):
         # NOT via the `key = (...)` line below, which the G1
         # witness-hardening fix also edits).
         txs_key = (tuple(desired_other_transaction_hashes_and_fees), new_tx_budget)
-        key = (cls, net, previous_share_hash if cls.VERSION < 34 else None, txs_key,
-               _g1_witness_key(desired_other_transaction_hashes_and_fees, known_txs))  # G1-HARDEN-1: bind L1 key to actual witness bytes
+        key = (cls, net, previous_share_hash if cls.VERSION < 34 else None, txs_key)
         cached = _txset_artifact_cache.get(key)
         if cached is not None:
             return cached
