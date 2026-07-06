@@ -2352,12 +2352,15 @@ class WeightsSkipList(forest.TrackerSkipList):
         return share_count1 + share_count2, math.add_dicts(weights1, weights2), total_weight1 + total_weight2, total_donation_weight1 + total_donation_weight2
     
     def initial_solution(self, start, (max_shares, desired_weight)):
-        assert desired_weight % 65535 == 0, divmod(desired_weight, 65535)
+        if desired_weight % 65535 != 0:
+            raise RuntimeError('PPLNS window quantum violated (consensus guard, -O-safe): desired_weight %% 65535 != 0: %r'
+                % (divmod(desired_weight, 65535),))
         return 0, None, 0, 0
     
     def apply_delta(self, (share_count1, weights_list, total_weight1, total_donation_weight1), (share_count2, weights2, total_weight2, total_donation_weight2), (max_shares, desired_weight)):
         if total_weight1 + total_weight2 > desired_weight and share_count2 == 1:
-            assert (desired_weight - total_weight1) % 65535 == 0
+            if (desired_weight - total_weight1) % 65535 != 0:
+                raise RuntimeError('PPLNS truncation remainder violated (consensus guard, -O-safe): desired_weight-total_weight1 not a multiple of 65535')
             script, = weights2.iterkeys()
             new_weights = {script: (desired_weight - total_weight1)//65535*weights2[script]//(total_weight2//65535)}
             return share_count1 + share_count2, (weights_list, new_weights), desired_weight, total_donation_weight1 + (desired_weight - total_weight1)//65535*total_donation_weight2//(total_weight2//65535)
@@ -2372,8 +2375,12 @@ class WeightsSkipList(forest.TrackerSkipList):
             return -1
     
     def finalize(self, (share_count, weights_list, total_weight, total_donation_weight), (max_shares, desired_weight)):
-        assert share_count <= max_shares and total_weight <= desired_weight
-        assert share_count == max_shares or total_weight == desired_weight
+        if not (share_count <= max_shares and total_weight <= desired_weight):
+            raise RuntimeError('PPLNS finalize overrun (consensus guard, -O-safe): share_count=%r max_shares=%r total_weight=%r desired_weight=%r'
+                % (share_count, max_shares, total_weight, desired_weight))
+        if not (share_count == max_shares or total_weight == desired_weight):
+            raise RuntimeError('PPLNS finalize underrun (consensus guard, -O-safe): share_count=%r max_shares=%r total_weight=%r desired_weight=%r'
+                % (share_count, max_shares, total_weight, desired_weight))
         return math.add_dicts(*math.flatten_linked_list(weights_list)), total_weight, total_donation_weight
 
 class MergedWeightsSkipList(forest.TrackerSkipList):
@@ -2436,7 +2443,9 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
         return sc1 + sc2, math.add_dicts(w1, w2), tw1 + tw2, dw1 + dw2
     
     def initial_solution(self, start, (max_shares, desired_weight)):
-        assert desired_weight % 65535 == 0, divmod(desired_weight, 65535)
+        if desired_weight % 65535 != 0:
+            raise RuntimeError('PPLNS window quantum violated (consensus guard, -O-safe): desired_weight %% 65535 != 0: %r'
+                % (divmod(desired_weight, 65535),))
         return 0, None, 0, 0
     
     def apply_delta(self, (sc1, wl, tw1, dw1), (sc2, w2, tw2, dw2), (max_shares, desired_weight)):
@@ -2444,7 +2453,8 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
             if not w2:
                 # Pre-V36 single step with zero weight — can't overshoot, pass through
                 return sc1 + sc2, (wl, w2), tw1, dw1
-            assert (desired_weight - tw1) % 65535 == 0
+            if (desired_weight - tw1) % 65535 != 0:
+                raise RuntimeError('PPLNS truncation remainder violated (consensus guard, -O-safe): desired_weight-tw1 not a multiple of 65535')
             script, = w2.iterkeys()
             new_weights = {script: (desired_weight - tw1)//65535*w2[script]//(tw2//65535)}
             return sc1 + sc2, (wl, new_weights), desired_weight, dw1 + (desired_weight - tw1)//65535*dw2//(tw2//65535)
@@ -2459,8 +2469,12 @@ class MergedWeightsSkipList(forest.TrackerSkipList):
             return -1
     
     def finalize(self, (sc, wl, tw, dw), (max_shares, desired_weight)):
-        assert sc <= max_shares and tw <= desired_weight
-        assert sc == max_shares or tw == desired_weight
+        if not (sc <= max_shares and tw <= desired_weight):
+            raise RuntimeError('PPLNS finalize overrun (consensus guard, -O-safe): sc=%r max_shares=%r tw=%r desired_weight=%r'
+                % (sc, max_shares, tw, desired_weight))
+        if not (sc == max_shares or tw == desired_weight):
+            raise RuntimeError('PPLNS finalize underrun (consensus guard, -O-safe): sc=%r max_shares=%r tw=%r desired_weight=%r'
+                % (sc, max_shares, tw, desired_weight))
         return math.add_dicts(*math.flatten_linked_list(wl)), tw, dw
 
 # =========================================================================
@@ -3084,7 +3098,8 @@ class AutoRatchet(object):
 
 
 def get_pool_attempts_per_second(tracker, previous_share_hash, dist, min_work=False, integer=False):
-    assert dist >= 2
+    if dist < 2:
+        raise RuntimeError('get_pool_attempts_per_second: dist must be >= 2 (consensus guard, -O-safe): dist=%r' % (dist,))
     near = tracker.items[previous_share_hash]
     far = tracker.items[tracker.get_nth_parent_hash(previous_share_hash, dist - 1)]
     attempts = tracker.get_delta(near.hash, far.hash).work if not min_work else tracker.get_delta(near.hash, far.hash).min_work

@@ -26,7 +26,8 @@ class SkipList(object):
                 if i in updates:
                     that_hash, delta = updates.pop(i)
                     x, y = self.skips[that_hash]
-                    assert len(y) == i
+                    if len(y) != i:
+                        raise RuntimeError('SkipList cache inconsistency (consensus guard, -O-safe): len(y)=%d != %d' % (len(y), i))
                     y.append((pos, delta))
             
             # put desired skip nodes in updates

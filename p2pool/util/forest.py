@@ -44,7 +44,8 @@ class DistanceSkipList(TrackerSkipList):
             return -1
     
     def finalize(self, (dist, hash), (n,)):
-        assert dist == n
+        if dist != n:
+            raise RuntimeError('DistanceSkipList.finalize: dist=%r != n=%r (consensus guard, -O-safe)' % (dist, n))
         return hash
 
 def get_attributedelta_type(attrs): # attrs: {name: func}

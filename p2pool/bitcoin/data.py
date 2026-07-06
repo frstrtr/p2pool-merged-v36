@@ -213,7 +213,8 @@ class TransactionType(pack.Type):
             file.write(item['data'].decode('hex'))
             return
         if is_segwit_tx(item):
-            assert len(item['tx_ins']) == len(item['witness'])
+            if len(item['tx_ins']) != len(item['witness']):
+                raise RuntimeError('segwit tx pack: tx_ins/witness length mismatch (consensus guard, -O-safe)')
             self._write_type.write(file, item)
             for w in item['witness']:
                 self._witness_type.write(file, w)
@@ -388,7 +389,8 @@ def check_merkle_link(tip_hash, link):
 # targets
 
 def target_to_average_attempts(target):
-    assert 0 <= target and isinstance(target, (int, long)), target
+    if not (0 <= target and isinstance(target, (int, long))):
+        raise RuntimeError('invalid target for work conversion (consensus guard, -O-safe): %r' % (target,))
     if target >= 2**256: warnings.warn('target >= 2**256!')
     return 2**256//(target + 1)
 
@@ -397,7 +399,8 @@ def average_attempts_to_target(average_attempts):
     return min(int(2**256/average_attempts - 1 + 0.5), 2**256-1)
 
 def target_to_difficulty(target):
-    assert 0 <= target and isinstance(target, (int, long)), target
+    if not (0 <= target and isinstance(target, (int, long))):
+        raise RuntimeError('invalid target for work conversion (consensus guard, -O-safe): %r' % (target,))
     if target >= 2**256: warnings.warn('target >= 2**256!')
     return (0xffff0000 * 2**(256-64) + 1)/(target + 1)
 
@@ -560,7 +563,8 @@ def get_wtxid(tx, txid=None, txhash=None):
         return hex_to_hash(tx['hash'])
     has_witness = False
     if is_segwit_tx(tx):
-        assert len(tx['tx_ins']) == len(tx['witness'])
+        if len(tx['tx_ins']) != len(tx['witness']):
+            raise RuntimeError('get_wtxid: tx_ins/witness length mismatch (consensus guard, -O-safe)')
         has_witness = any(len(w) > 0 for w in tx['witness'])
     if has_witness:
         return hash256(tx_type.pack(tx)) if txhash is None else txhash
