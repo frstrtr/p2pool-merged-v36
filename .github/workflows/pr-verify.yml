@@ -1,0 +1,35 @@
+name: PR verify (python2 merged-divergence)
+
+# Minimal, honest gate for divergence-critical PRs on the merged (LTC/DOGE/DGB) fork.
+# docker-publish.yml only fires on v* tags, so PRs land with no automated check.
+# Byte-compiles the touched Python2 modules when present, and runs the standalone C1
+# merged-determinism test when it is present in the tree. That test ships with
+# v36-fix/merged-divergence (PR #1), NOT with master, so on a bare/master tree the
+# steps self-skip and this gate stays green and honest. Once #1 lands data.py + the
+# test alongside this workflow, the same gate exercises the real determinism check.
+# The test also self-skips its REAL-module leg when the p2pool package/twisted are absent.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - 'v36-fix/**'
+      - 'v36-ci/**'
+
+jobs:
+  py2-verify:
+    runs-on: ubuntu-latest
+    container: python:2.7.18-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Byte-compile touched Python2 modules (if present)
+        run: |
+          if [ -f p2pool/data.py ]; then python -m py_compile p2pool/data.py; else echo "skip: p2pool/data.py absent"; fi
+          if [ -f tests/test_c1_merged_determinism.py ]; then python -m py_compile tests/test_c1_merged_determinism.py; else echo "skip: tests/test_c1_merged_determinism.py absent"; fi
+      - name: C1 merged-determinism (chain-split guard, if present)
+        run: |
+          if [ -f tests/test_c1_merged_determinism.py ]; then
+            python tests/test_c1_merged_determinism.py
+          else
+            echo "skip: tests/test_c1_merged_determinism.py absent on this tree (ships with v36-fix/merged-divergence, PR #1)"
+          fi
