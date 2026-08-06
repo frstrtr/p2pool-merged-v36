@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python
 """Tests for AutoRatchet — automated V35->V36 share version ratchet.
 

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python
 """Test compute_merged_payout_hash determinism and correctness."""
 

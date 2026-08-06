@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 RPC Proxy — Authenticated JSON-RPC relay to blockchain daemons.
 

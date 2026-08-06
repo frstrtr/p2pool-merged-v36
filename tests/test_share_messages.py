@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env pypy
 """
 Comprehensive test suite for p2pool/share_messages.py

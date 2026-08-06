@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Differential gate for the gentx template cache (DOA-under-load fix, G1).
 

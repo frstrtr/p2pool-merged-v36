@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python
 """
 Test Case 4 P2SH reverse conversion: DOGE P2SH → LTC P2SH

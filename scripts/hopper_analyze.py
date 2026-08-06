@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 """
 Phase 1a Asymmetric Clamp - Test Results Analyzer

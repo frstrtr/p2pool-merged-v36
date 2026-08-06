@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 """
 Derive compressed public key from BIP39 mnemonic phrase.

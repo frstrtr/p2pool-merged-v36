@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python2
 """
 End-to-end bech32 address conversion tests for merged mining.
