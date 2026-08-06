@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 """
 Comprehensive P2Pool V36 Reward Distribution Verification Script

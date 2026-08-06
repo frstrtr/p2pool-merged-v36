@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Phase 3L: Log-based pool monitoring for attack detection.
 
 Emits structured [MONITOR] log lines every status cycle (~30s).

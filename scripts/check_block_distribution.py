@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 """Check payout distribution in recent p2pool-mined blocks on parent (LTC) and child (DOGE) testnets."""
 import json

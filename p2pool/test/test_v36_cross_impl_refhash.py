@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Cross-implementation test: V36 ref_hash and gentx_hash computation.
 

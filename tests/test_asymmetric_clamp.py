@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python
 """Tests for Phase 1a: Asymmetric Difficulty Clamp (§7.1.1).
 

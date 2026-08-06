@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 P2Pool Share-Based Messaging System (V36 Integrated)
 
