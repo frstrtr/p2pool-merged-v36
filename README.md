@@ -11,6 +11,8 @@ Decentralized Scrypt mining pool for **Litecoin**, **DigiByte**, and **Dogecoin*
 > **First merged-mined DOGE block:** [#6135703](https://blockchair.com/dogecoin/block/f84500c25a4cce2a08887f29763726bd5ecec7b66fed65a88b181fb0b0ab2383) (2026-03-23) — proof-of-concept for decentralized LTC+DOGE merged mining via P2Pool V36
 >
 > **First twin block (LTC+DOGE):** [LTC #3085349](https://blockchair.com/litecoin/block/3085349) + [DOGE #6154761](https://blockchair.com/dogecoin/block/6154761) — first V36-desired, V35-signalling share to find both a Litecoin and Dogecoin block simultaneously via P2Pool merged mining
+>
+> **Latest verified twin block (LTC+DOGE):** [LTC #3158760](https://blockchair.com/litecoin/block/3158760) + [DOGE #6328987](https://blockchair.com/dogecoin/block/af4fb4e157a9cc3947baaf22d55811cfadd9accd4ca54038aba0cf744d06db86) (2026-08-12) — merged LTC+DOGE twin block on the V36 share chain months after the first; both parents confirmed on-chain, DOGE coinbase tagged `/P2Pool v36/` — decentralized merged mining still live in production
 
 > **📋 New to V36?** Read the **[V36 Release Notes](docs/V36_RELEASE_NOTES.md)** for a complete overview of what changed, why, and how miners are protected from pool hopping attacks.
 
