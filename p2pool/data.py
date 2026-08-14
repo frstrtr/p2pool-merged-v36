@@ -1085,7 +1085,19 @@ class BaseShare(object):
                       ) if cls.VERSION < 32 else
                       max(desired_timestamp, (previous_share.timestamp + 1)) if previous_share is not None else desired_timestamp,
             absheight=((previous_share.absheight if previous_share is not None else 0) + 1) % 2**32,
-            abswork=((previous_share.abswork if previous_share is not None else 0) + bitcoin_data.target_to_average_attempts(bits.target)) % 2**128,
+            # abswork is a wrapping cumulative-work counter (same idiom as the
+            # absheight % 2**32 wrap above).  V36 serializes abswork as
+            # VarIntType, whose wire ceiling is 2**64-1 (pack.py
+            # VarIntType.write); pre-V36 IntType(128) allowed the historical
+            # % 2**128 mask.  The modulus must match the wire type's value
+            # domain: with the old mask, the moment the sharechain tip's
+            # cumulative work plus one share's attempts crosses 2**64,
+            # ref_type.pack raises 'int too large for varint' on every
+            # share-creation attempt and the node crash-loops deterministically
+            # (reboot reloads the same tip).  Wrapping at 2**64 is
+            # consensus-safe below the boundary (identical values) and must be
+            # applied identically here and in the other generate path.
+            abswork=((previous_share.abswork if previous_share is not None else 0) + bitcoin_data.target_to_average_attempts(bits.target)) % (2**64 if cls.VERSION >= 36 else 2**128),
         )
         if cls.VERSION < 34:
             share_info['new_transaction_hashes'] = new_transaction_hashes
@@ -2083,7 +2095,19 @@ class BaseShare(object):
                       ) if cls.VERSION < 32 else
                       max(desired_timestamp, (previous_share.timestamp + 1)) if previous_share is not None else desired_timestamp,
             absheight=((previous_share.absheight if previous_share is not None else 0) + 1) % 2**32,
-            abswork=((previous_share.abswork if previous_share is not None else 0) + bitcoin_data.target_to_average_attempts(bits.target)) % 2**128,
+            # abswork is a wrapping cumulative-work counter (same idiom as the
+            # absheight % 2**32 wrap above).  V36 serializes abswork as
+            # VarIntType, whose wire ceiling is 2**64-1 (pack.py
+            # VarIntType.write); pre-V36 IntType(128) allowed the historical
+            # % 2**128 mask.  The modulus must match the wire type's value
+            # domain: with the old mask, the moment the sharechain tip's
+            # cumulative work plus one share's attempts crosses 2**64,
+            # ref_type.pack raises 'int too large for varint' on every
+            # share-creation attempt and the node crash-loops deterministically
+            # (reboot reloads the same tip).  Wrapping at 2**64 is
+            # consensus-safe below the boundary (identical values) and must be
+            # applied identically here and in the other generate path.
+            abswork=((previous_share.abswork if previous_share is not None else 0) + bitcoin_data.target_to_average_attempts(bits.target)) % (2**64 if cls.VERSION >= 36 else 2**128),
         )
         if cls.VERSION < 34:
             share_info['new_transaction_hashes'] = template['new_transaction_hashes']
