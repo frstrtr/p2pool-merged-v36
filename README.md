@@ -18,6 +18,8 @@ Decentralized Scrypt mining pool for **Litecoin**, **DigiByte**, and **Dogecoin*
 
 > **🔧 Looking for the C++ version?** [**c2pool**](https://github.com/frstrtr/c2pool) is a ground-up C++ reimplementation of p2pool with **embedded LTC + DOGE SPV** — no litecoind or dogecoind needed. Same V35 sharechain, cross-platform (Linux/Windows/macOS). [Download v0.1.1-alpha →](https://github.com/frstrtr/c2pool/releases/tag/v0.1.1-alpha)
 
+> **📌 V36 is the final Python generation.** This Python p2pool fork is maintained for the **V36 share format** it runs — the **last share generation shared between this Python codebase and [c2pool](https://github.com/frstrtr/c2pool) (C++)**. As of August 2026 the live LTC share chain signals 100% V36, and Python and c2pool nodes interoperate on it. No further **Python** protocol development is planned. The next generation — **Work Receipts** and the **MRR Roundabout** settlement core (**v37**) — is being built **exclusively in C++** in c2pool; there is no Python v37, and the v37 share chain does not interoperate with this fork. This fork stays available and functional for V36 merged mining.
+
 ## What's different from jtoomim/p2pool (V35)
 
 ### Protocol & Consensus
