@@ -1,5 +1,6 @@
 from __future__ import division
 
+import collections
 import hashlib
 import os
 import random
@@ -13,6 +14,25 @@ from twisted.python import log
 import p2pool
 from p2pool.bitcoin import data as bitcoin_data, script, sha256
 from p2pool.util import math, forest, pack
+
+
+class DeterministicShareCheckFailure(ValueError):
+    '''Raised by Share.check() for a rejection that is a pure function of the
+    share's own immutable content plus its already-present (immutable) ancestor
+    shares' PPLNS weights -- e.g. the V36 merged-coinbase / merkle / gentx-hash
+    mismatch.  Such a verdict can NEVER change on a later re-check, so the
+    OkayTracker may negatively-cache it and skip the (expensive) re-computation.
+
+    It subclasses ValueError so every existing ``except ValueError`` handler
+    around check() keeps its old behaviour byte-for-byte; only attempt_verify
+    inspects the concrete type to decide whether to cache.
+
+    TRANSIENT failures (missing parent, chain-not-long-enough, timestamp-in-the-
+    future, missing known_txs, incomplete-height AssertionError) MUST NOT be
+    raised as this type -- they can succeed once more data arrives, so they stay
+    plain ValueError / KeyError / AssertionError and are never cached.'''
+    pass
+
 
 # DOA-under-load fix (G1): module-level L1 cache of tx-set artifacts
 # (see BaseShare._get_txset_artifacts).
@@ -1501,7 +1521,7 @@ class BaseShare(object):
             merged_coinbase_info=self.share_info.get('merged_coinbase_info', None))
 
         if other_tx_hashes2 != other_tx_hashes:
-            raise ValueError('reconstructed other_tx_hashes do not match expected')
+            raise DeterministicShareCheckFailure('reconstructed other_tx_hashes do not match expected')
         if bitcoin_data.get_txid(gentx) != self.gentx_hash:
             import sys
             packed = bitcoin_data.tx_id_type.pack(gentx)
@@ -1529,7 +1549,7 @@ class BaseShare(object):
             for i, txout in enumerate(gentx['tx_outs'][:6]):
                 print >>sys.stderr, '[GENTX-FAIL]  out[%d] value=%d script=%s' % (
                     i, txout['value'], txout['script'].encode('hex')[:60])
-            raise ValueError('''gentx doesn't match hash_link''')
+            raise DeterministicShareCheckFailure('''gentx doesn't match hash_link''')
         
         # V36+: Verify merged coinbase consensus enforcement.
         # Re-derive the canonical merged chain coinbase from PPLNS weights and
@@ -1541,7 +1561,13 @@ class BaseShare(object):
                 merged_info = self.share_info.get('merged_coinbase_info')
                 verify_merged_coinbase_commitment(self, tracker, self.net, parent_net)
             except ValueError as e:
-                raise ValueError('merged coinbase verification failed: %s' % (e,))
+                # Deterministic: re-derived from PPLNS weights over the saturated
+                # (immutable) ancestor window + this share's own committed params.
+                # The completeness gate inside verify_merged_coinbase_commitment
+                # (height < REAL_CHAIN_LENGTH -> early return, NOT raise) means any
+                # ValueError that reaches here is past the point where the check is
+                # deterministic, so the verdict is safe to negatively-cache.
+                raise DeterministicShareCheckFailure('merged coinbase verification failed: %s' % (e,))
         
         # V36+: Validate share-embedded messages (transition signals, etc.)
         #
@@ -1611,11 +1637,11 @@ class BaseShare(object):
 
         # share_info was already validated by generate_transaction matching gentx_hash
         if share_info != self.share_info:
-            raise ValueError('share_info invalid')
+            raise DeterministicShareCheckFailure('share_info invalid')
         
         if self.VERSION < 34:
             if bitcoin_data.calculate_merkle_link([None] + other_tx_hashes, 0) != self.merkle_link: # the other hash commitments are checked in the share_info assertion
-                raise ValueError('merkle_link and other_tx_hashes do not match')
+                raise DeterministicShareCheckFailure('merkle_link and other_tx_hashes do not match')
         
         update_min_protocol_version(counts, self)
 
@@ -2648,6 +2674,19 @@ class OkayTracker(forest.Tracker):
         self.get_cumulative_weights = WeightsSkipList(self)
         self._merged_weights_skip_lists = {}  # chain_id -> MergedWeightsSkipList
         self._miner_merged_addr = {}  # chain_id -> {new_script: merged_script}
+        # Bounded negative-verify cache: share.hash -> None for shares whose
+        # check() raised a DeterministicShareCheckFailure (a verdict that is a
+        # pure function of the share's own immutable content + its immutable
+        # ancestors, so it can never change on a re-check).  think() re-runs
+        # attempt_verify on every unverified head EVERY cycle (~1/s + on every
+        # share/block); for V36 merged mining check() rebuilds the canonical
+        # merged coinbase from PPLNS weights -- O(window) -- so a single stuck
+        # foreign/mis-versioned share would peg CPU by being re-verified forever.
+        # We record ONLY deterministic failures here; transient failures (missing
+        # parent, chain-not-long-enough, future timestamp) are never inserted, so
+        # they are retried normally once the missing data arrives.
+        self._negative_verify_cache = collections.OrderedDict()  # hash -> None, FIFO
+        self._negative_verify_cache_max = 10000
     
     @staticmethod
     def _normalize_script_for_merged(script):
@@ -2708,15 +2747,40 @@ class OkayTracker(forest.Tracker):
             self._merged_weights_skip_lists[chain_id] = MergedWeightsSkipList(self, chain_id)
         return self._merged_weights_skip_lists[chain_id](start_hash, chain_length, max_weight)
 
+    def _negatively_cache_share(self, share_hash):
+        # Record a DETERMINISTIC check() failure so think()'s per-cycle
+        # re-verification never recomputes it. Bounded FIFO eviction.
+        cache = self._negative_verify_cache
+        if share_hash in cache:
+            return
+        cache[share_hash] = None
+        while len(cache) > self._negative_verify_cache_max:
+            cache.popitem(last=False)  # evict oldest
+
     def attempt_verify(self, share, block_abs_height_func, known_txs):
         if share.hash in self.verified.items:
             return True
+        if share.hash in self._negative_verify_cache:
+            # A previous cycle recorded a DETERMINISTIC check() rejection for this
+            # exact share (verdict is a pure function of its immutable content +
+            # immutable ancestors). Re-running check() -- which for V36 merged
+            # mining rebuilds the canonical merged coinbase from PPLNS weights at
+            # O(window) cost -- would only burn CPU to reach the same rejection.
+            return False
         height, last = self.get_height_and_last(share.hash)
         if height < self.net.CHAIN_LENGTH + 1 and last is not None:
             raise AssertionError()
         try:
             share.gentx = share.check(self, known_txs, block_abs_height_func=block_abs_height_func)
+        except DeterministicShareCheckFailure:
+            # Rejection that can NEVER change on a re-check -> negatively cache it.
+            log.err(None, 'Share check failed (deterministic, negative-cached): %064x -> %064x' % (share.hash, share.previous_hash if share.previous_hash is not None else 0))
+            self._negatively_cache_share(share.hash)
+            return False
         except:
+            # TRANSIENT failure (missing parent, chain-not-long-enough, future
+            # timestamp, incomplete height, ...). NOT cached -- it may succeed
+            # once the missing data arrives, so it must be retried next cycle.
             log.err(None, 'Share check failed: %064x -> %064x' % (share.hash, share.previous_hash if share.previous_hash is not None else 0))
             return False
         else:
