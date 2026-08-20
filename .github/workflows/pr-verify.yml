@@ -25,6 +25,9 @@ jobs:
       - name: Byte-compile touched Python2 modules (if present)
         run: |
           if [ -f p2pool/data.py ]; then python -m py_compile p2pool/data.py; else echo "skip: p2pool/data.py absent"; fi
+          if [ -f p2pool/work.py ]; then python -m py_compile p2pool/work.py; else echo "skip: p2pool/work.py absent"; fi
+          if [ -f p2pool/web.py ]; then python -m py_compile p2pool/web.py; else echo "skip: p2pool/web.py absent"; fi
+          if [ -f p2pool/override_governor.py ]; then python -m py_compile p2pool/override_governor.py; else echo "skip: p2pool/override_governor.py absent"; fi
           if [ -f tests/test_c1_merged_determinism.py ]; then python -m py_compile tests/test_c1_merged_determinism.py; else echo "skip: tests/test_c1_merged_determinism.py absent"; fi
       - name: C1 merged-determinism (chain-split guard, if present)
         run: |
@@ -32,4 +35,18 @@ jobs:
             python tests/test_c1_merged_determinism.py
           else
             echo "skip: tests/test_c1_merged_determinism.py absent on this tree (ships with v36-fix/merged-divergence, PR #1)"
+          fi
+      - name: Install twisted (for the whale-latch real-module tests)
+        run: |
+          if [ -f p2pool/test/test_whale_latch.py ]; then
+            pip install "twisted<21" || echo "warn: twisted install failed; whale-latch WorkerBridge tests will self-skip"
+          else
+            echo "skip: test_whale_latch.py absent"
+          fi
+      - name: Whale-mode latch regression suite (if present)
+        run: |
+          if [ -f p2pool/test/test_whale_latch.py ]; then
+            python -m unittest -v p2pool.test.test_whale_latch
+          else
+            echo "skip: p2pool/test/test_whale_latch.py absent on this tree"
           fi

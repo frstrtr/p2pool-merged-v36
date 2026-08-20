@@ -18,6 +18,7 @@ from p2pool import fillbudget
 from p2pool.util import coopevent
 import p2pool, p2pool.data as p2pool_data
 from p2pool import merged_mining
+from p2pool.override_governor import OverrideGovernor
 
 # Import merged chain networks for address conversion
 # These are used when converting pubkey_hash from share chain to merged chain addresses
@@ -288,6 +289,25 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Poll detector independently of miner get_work() traffic.
         self._whale_poll_task = task.LoopingCall(self._whale_poll_tick)
         self._whale_poll_task.start(self._whale_sample_interval, now=False)
+
+        # Generalized override governor: whale-departure ENTRY is decided by the
+        # detector below, but EXIT is delegated to the governor, which reads ONLY
+        # own-production counters + wall-clock -- signals the easy-target override
+        # cannot itself degrade. This structurally dissolves the self-suppressing
+        # latch (the removed ratio>=0.75 exit read chain-surviving hashrate, which
+        # the override itself distorts). Whale passes recovery_fn=None: legitimate
+        # whale-mode is preserved by running to the duration backstop, not curtailed
+        # by an own-hr recovery arm.
+        def _own_hr():
+            mh, dh = self.get_local_rates()                 # 2-tuple, verified work.py:2005
+            return sum(mh.itervalues()) + sum(dh.itervalues())
+        self._override_gov = OverrideGovernor(
+            own_hr_fn       = _own_hr,
+            own_mint_fn     = lambda: self.get_stale_counts()[1],
+            own_notchain_fn = lambda: sum(self.get_stale_counts()[0]),
+        )
+        self._whale_refused_siblings = 0
+        self._whale_last_exit_reason = None
 
         self.removed_unstales_var = variable.Variable((0, 0, 0))
         self.removed_doa_unstales_var = variable.Variable(0)
@@ -1896,6 +1916,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
 
     def _whale_poll_tick(self):
         # Keep detector active even if no local miners are requesting work.
+        # Sample own-production every tick (always), then advance the state machine.
+        try:
+            self._override_gov.sample()
+        except Exception:
+            if p2pool.DEBUG:
+                log.err(None, 'whale governor sample failed:')
         try:
             self._detect_whale_departure(trigger_source='timer')
         except Exception:
@@ -1979,28 +2005,58 @@ class WorkerBridge(worker_interface.WorkerBridge):
             source=trigger_source,
         )
 
+        # EXIT is now delegated entirely to the OverrideGovernor. Its exits read
+        # ONLY own-production counters + wall-clock -- signals the easy-target
+        # override cannot itself degrade -- so the self-suppressing latch is
+        # structurally impossible. The old ratio>=0.75 recovery arm (which read
+        # the distorted chain-surviving-hashrate signal) has been REMOVED.
+        # att_s/ratio remain computed above for ENTRY only.
         if self._whale_departure_active:
-            # Recovery: require sustained improvement to exit emergency mode
-            if ratio >= self._whale_recovery_threshold:
+            # Governor tick: True == still active, False == time to exit.
+            if not self._override_gov.tick('whale'):
                 self._whale_departure_active = False
                 self._whale_baseline_hr = 0
-                duration = now - self._whale_departure_ts
-                print '[WHALE-RECOVERY] OFF src=%s ratio=%.2f gap=%.0fs duration=%.0fs current=%sH/s baseline=%sH/s' % (
-                    trigger_source, ratio, share_gap, duration, _fmt_hr(att_s), _fmt_hr(baseline_hr))
+                st = self._override_gov.status().get('whale', {})
+                self._whale_last_exit_reason = st.get('exit_reason')
+                print '[WHALE-RECOVERY] OFF reason=%s dur=%.0fs own_orphan=%s baseline=%sH/s' % (
+                    st.get('exit_reason'), st.get('seconds', 0), st.get('own_orphan_rate'), _fmt_hr(baseline_hr))
             elif now - self._whale_log_interval > 30:
                 self._whale_log_interval = now
-                print '[WHALE-DEPARTURE] ACTIVE src=%s current=%sH/s baseline=%sH/s avg_30m=%sH/s ratio=%.2f gap=%.0fs recover>%.0f%%' % (
-                    trigger_source, _fmt_hr(att_s), _fmt_hr(baseline_hr), _fmt_hr(avg_hr), ratio, share_gap, self._whale_recovery_threshold * 100)
+                st = self._override_gov.status().get('whale', {})
+                print '[WHALE-DEPARTURE] ACTIVE src=%s current=%sH/s baseline=%sH/s avg_30m=%sH/s ratio=%.2f gap=%.0fs gov_dur=%.0fs own_orphan=%s' % (
+                    trigger_source, _fmt_hr(att_s), _fmt_hr(baseline_hr), _fmt_hr(avg_hr), ratio, share_gap,
+                    st.get('seconds', 0), st.get('own_orphan_rate'))
         else:
-            # Detection: trigger when hashrate drops below threshold
+            # Detection/ENTRY: unchanged trigger expression. The governor's arm()
+            # respects a re-arm cooldown after an orphan-forced exit, so a re-trip
+            # during cooldown leaves _whale_departure_active False (override off).
             if (enough_samples and ratio <= self._whale_drop_threshold) or (gap_trigger and ratio <= 0.90):
-                self._whale_departure_active = True
-                self._whale_departure_ts = now
-                self._whale_baseline_hr = baseline_hr
-                print '[WHALE-DEPARTURE] DETECTED src=%s ratio=%.2f gap=%.0fs current=%sH/s baseline=%sH/s avg_30m=%sH/s' % (
-                    trigger_source, ratio, share_gap, _fmt_hr(att_s), _fmt_hr(baseline_hr), _fmt_hr(avg_hr))
+                if self._override_gov.arm('whale', recovery_fn=None):
+                    self._whale_departure_active = True
+                    self._whale_departure_ts = now
+                    self._whale_baseline_hr = baseline_hr
+                    print '[WHALE-DEPARTURE] DETECTED src=%s ratio=%.2f gap=%.0fs current=%sH/s baseline=%sH/s avg_30m=%sH/s' % (
+                        trigger_source, ratio, share_gap, _fmt_hr(att_s), _fmt_hr(baseline_hr), _fmt_hr(avg_hr))
 
         return self._whale_departure_active
+
+    def _share_job_lags_tip(self, job_prev):
+        '''Fork-safe: True iff the job's parent (job_prev) lags the current best
+        share by MORE than one (i.e. best has already been extended past a normal
+        one-step drift). Used ONLY in easy-target (whale-override) mode to refuse
+        minting a sibling of an already-extended tip -- the orphan-flood source.
+        Lag 0 (job_prev == best) and lag 1 (job_prev == parent of best, normal
+        drift) both return False. Unknown/divergent -> never refuse (returns per
+        the walk below; an exception is treated as "do not refuse").'''
+        best = self.node.best_share_var.value
+        if job_prev is None or best is None or job_prev == best:      # lag 0
+            return False
+        try:
+            if self.node.tracker.get_nth_parent_hash(best, 1) == job_prev:   # lag 1 (normal drift)
+                return False
+        except Exception:
+            return False                                             # unknown -> never refuse
+        return True                                                  # lag > 1 or divergent fork
 
     def get_local_rates(self):
         miner_hash_rates = {}
@@ -2651,18 +2707,23 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # accelerating the difficulty recovery from ~18 min to much less.
         # This is non-consensus: bits stays within [pre_target3//30, pre_target3].
         local_hash_rate_for_guard = local_addr_rates.get(pubkey_hash, 0)
-        if self._detect_whale_departure():
-            if local_hash_rate_for_guard >= self._whale_min_local_hashrate:
-                desired_share_target = 2**256 - 1  # will be clamped to pre_target3 (easiest)
-            elif time.time() - self._whale_last_no_local_log > 30:
-                self._whale_last_no_local_log = time.time()
-                metrics = self._whale_last_metrics or {}
-                print '[WHALE-DEPARTURE] ACTIVE but override skipped: local=%sH/s < %.1fMH/s (ratio=%.2f gap=%.0fs src=%s)' % (
-                    _fmt_hr(local_hash_rate_for_guard),
-                    self._whale_min_local_hashrate/1e6,
-                    metrics.get('ratio', 0),
-                    metrics.get('share_gap', 0),
-                    metrics.get('source', 'unknown'))
+        # Capture whether the whale override actually applies to THIS job into a
+        # plain local -- it is visible in the got_response() closure below, where
+        # the stale-tip sibling refusal consults it. Override magnitude is
+        # unchanged (still 2**256-1, still clamped at data.py:857).
+        whale_override_applied = (self._detect_whale_departure()
+                                  and local_hash_rate_for_guard >= self._whale_min_local_hashrate)
+        if whale_override_applied:
+            desired_share_target = 2**256 - 1  # will be clamped to pre_target3 (easiest)
+        elif self._detect_whale_departure() and time.time() - self._whale_last_no_local_log > 30:
+            self._whale_last_no_local_log = time.time()
+            metrics = self._whale_last_metrics or {}
+            print '[WHALE-DEPARTURE] ACTIVE but override skipped: local=%sH/s < %.1fMH/s (ratio=%.2f gap=%.0fs src=%s)' % (
+                _fmt_hr(local_hash_rate_for_guard),
+                self._whale_min_local_hashrate/1e6,
+                metrics.get('ratio', 0),
+                metrics.get('share_gap', 0),
+                metrics.get('source', 'unknown'))
 
         if True:
             # Build share_data differently based on share version
@@ -2688,7 +2749,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 )(*self.get_stale_counts()),
                 desired_version=desired_ver,  # From AutoRatchet: always 36 (signals V36 capability)
             )
-            
+
+            # Job parent captured for the stale-tip sibling refusal (see the share
+            # gate in got_response). Read directly from share_data_base so refusal
+            # does not depend on the share_info dict shape.
+            job_prev = share_data_base['previous_share_hash']
+
             if share_type.VERSION >= 36:
                 # V36: store pubkey_hash as IntType(160) + pubkey_type (1 byte)
                 share_data_base['pubkey_hash'] = pubkey_hash
@@ -3660,7 +3726,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
             # Share.__init__ reconstructs gentx and this should now work correctly.
             # CRITICAL: Only attempt share creation if merkle_root matches current work template!
             # If work_merkle_root != header['merkle_root'], the submitted work is stale (from old template)
-            if pow_hash <= share_info['bits'].target and header_hash not in received_header_hashes and work_merkle_root == header['merkle_root']:
+            if pow_hash <= share_info['bits'].target and header_hash not in received_header_hashes \
+               and work_merkle_root == header['merkle_root'] \
+               and not (whale_override_applied and self._share_job_lags_tip(job_prev)):
                 last_txout_nonce = pack.IntType(8*self.COINBASE_NONCE_LENGTH).unpack(coinbase_nonce)
                 try:
                     share = get_share(header, last_txout_nonce)
@@ -3718,6 +3786,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 self.local_rate_monitor.add_datum(dict(work=bitcoin_data.target_to_average_attempts(effective_target), dead=not on_time, user=user, share_target=share_info['bits'].target))
                 self.local_addr_rate_monitor.add_datum(dict(work=bitcoin_data.target_to_average_attempts(effective_target), pubkey_hash=pubkey_hash))
                 received_header_hashes.add(header_hash)
+            elif whale_override_applied and self._share_job_lags_tip(job_prev) \
+                 and pow_hash <= share_info['bits'].target and work_merkle_root == header['merkle_root']:
+                # STALE-TIP SIBLING REFUSAL (mandate 3): in easy-target whale mode,
+                # this job's parent (job_prev) lags the current best by >1 -- best has
+                # already been extended past a normal one-step drift. Minting here would
+                # add a sibling of an already-extended tip, i.e. an orphan that carries
+                # no PPLNS weight and feeds the flood. Refuse to mint. The work is still
+                # counted as DEAD local hashrate so own_hr stays honest, and this branch
+                # sits BELOW both block-submit paths (LTC ~3012 / DOGE aux ~3125+), so no
+                # block can be lost by refusing. Reached ONLY in easy mode with lag>1;
+                # the normal path (whale_override_applied False) never enters here.
+                self._whale_refused_siblings += 1
+                self.local_rate_monitor.add_datum(dict(
+                    work=bitcoin_data.target_to_average_attempts(share_info['bits'].target),
+                    dead=True, user=user, share_target=share_info['bits'].target))
+                print '[WHALE-SIBLING-REFUSED] job_prev lags best by >1 in easy mode; not minting'
             elif pow_hash <= share_info['bits'].target and work_merkle_root != header['merkle_root']:
                 # Stale work - share meets P2Pool difficulty but merkle_root mismatch
                 # This means the miner submitted work based on an old template

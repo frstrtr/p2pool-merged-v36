@@ -826,6 +826,16 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
             version=p2pool.__version__,
             protocol_version=p2p.Protocol.VERSION,
             fee=getattr(wb, 'node_owner_fee', wb.worker_fee),
+            whale=dict(
+                active=getattr(wb, '_whale_departure_active', False),
+                refused_siblings=getattr(wb, '_whale_refused_siblings', 0),
+                last_exit_reason=getattr(wb, '_whale_last_exit_reason', None),
+                # governor sub-dict: active/seconds/own_orphan_rate/own_hr/
+                # baseline_own_hr/exit_reason/rearm_blocked -- lets soak
+                # verification read /local_stats instead of scraping logs.
+                governor=(wb._override_gov.status().get('whale', {})
+                          if hasattr(wb, '_override_gov') else {}),
+            ),
         )
     
     class WebInterface(deferred_resource.DeferredResource):
