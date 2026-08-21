@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import division
 from collections import deque
 
@@ -637,13 +638,14 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                     skipped_addresses.append((key.encode('hex')[:20] + '...', 'unconvertible script type'))
                                                     continue
 
-                                                # Node operator override for raw script keys
-                                                # Compare pubkey_hash directly — self.args.address may be None
-                                                # when address was auto-detected from bitcoind
-                                                if self.my_pubkey_hash is not None and pubkey_hash == self.my_pubkey_hash and self.merged_operator_address:
-                                                    override_addr = self._get_validated_merged_operator_address(merged_addr_net, chainid)
-                                                    if override_addr is not None:
-                                                        merged_address = override_addr
+                                                # NOTE: no served-only operator override here. The operator's
+                                                # merged (DOGE) commission is resolved and COMMITTED into the
+                                                # share at creation time (get_user_details ->
+                                                # _resolve_operator_merged_addresses), so this served coinbase,
+                                                # the canonical verifier (build_canonical_merged_coinbase), and
+                                                # the payout hash all read the SAME committed merged_addresses.
+                                                # A redirect here would be served-only and diverge from the
+                                                # committed distribution -> rejected on any multi-node pool.
                                             elif key_is_address:
                                                 # VERSION >= 34: key is already a parent chain address string
                                                 # Need to convert to merged chain address
@@ -665,23 +667,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                     skipped_addresses.append((parent_address[:20] + '...', error_msg))
                                                     continue
 
-                                                # Node operator override: if --merged-operator-address is set,
-                                                # use it for the operator's own share of merged chain payout
-                                                # instead of auto-converting from parent chain address.
-                                                is_own_address = (self.args.address is not None and parent_address == self.args.address) or \
-                                                    (self.my_pubkey_hash is not None and pubkey_hash is not None and pubkey_hash == self.my_pubkey_hash)
-                                                if is_own_address and self.merged_operator_address:
-                                                    override_addr = self._get_validated_merged_operator_address(merged_addr_net, chainid)
-                                                    if override_addr is not None:
-                                                        merged_address = override_addr
-                                                    else:
-                                                        # Validation failed — fall through to normal auto-conversion
-                                                        if addr_type == 'p2sh':
-                                                            merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
-                                                        else:
-                                                            merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
-                                                # Standard auto-conversion from parent chain address
-                                                elif addr_type == 'p2sh':
+                                                # NOTE: no served-only operator override here either. The
+                                                # operator's merged commission is committed into the share at
+                                                # creation (get_user_details -> _resolve_operator_merged_addresses);
+                                                # overriding only the served coinbase would diverge from
+                                                # build_canonical_merged_coinbase() (the peer verifier) and fork.
+                                                # Standard auto-conversion from parent chain address.
+                                                if addr_type == 'p2sh':
                                                     merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
                                                 else:
                                                     merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
@@ -1318,6 +1310,130 @@ class WorkerBridge(worker_interface.WorkerBridge):
             self._merged_op_addr_cache[cache_key] = ''  # Cache the negative result
             return None
 
+    def _resolve_operator_merged_addresses(self, chainid=98):
+        """Resolve the node operator's merged (DOGE) payout for a share that the
+        -f/--fee draw has reassigned to the operator's OWN key.
+
+        LTC-parity, never-empty cascade (mirrors the parent-chain rule that the
+        operator destination is always resolvable, plus miner Tier-1/2/3):
+
+          P1. --merged-operator-address set AND valid on the merged net
+              -> commit its script (address->hash->script2, P2SH-aware).
+          P2. unset OR invalid OR script build throws
+              -> auto-convert the operator's own parent key (my_pubkey_hash),
+                 hash-preserving, exactly like miner Tier-2
+                 (_auto_generate_merged_addresses). This is what [CHECK 3]
+                 promised at startup, so the boot banner and the committed
+                 share agree.
+          P3. operator key type unconvertible (never for P2PKH/P2SH/P2WPKH)
+              -> commit the FIXED pool DONATION script (COMBINED_DONATION_SCRIPT).
+                 This is the FINAL never-empty fallback: rather than returning an
+                 empty merged_addresses (which would drop the operator merged
+                 commission to pool distribution AND is the only remaining
+                 empty-commit path), the operator merged commission is routed to
+                 the pool donation address. The donation script is a compile-time
+                 pool constant (identical on every node), so this NEVER yields an
+                 empty entry. No path returns None any more -> empty-commit for an
+                 operator/fallback share is eliminated by construction.
+
+        The result is COMMITTED into share_info['merged_addresses'] upstream, so
+        the served coinbase, build_canonical_merged_coinbase() (peer verifier)
+        and compute_merged_payout_hash() all read the identical bytes -> the
+        redirect is consensus-safe on every node. Cached once (hot per-request
+        path); my_pubkey_hash / merged_operator_address are process-fixed.
+        Always returns a fresh non-empty dict (P1/P2/P3-donation), never None.
+        """
+        if getattr(self, '_operator_merged_cache_set', False):
+            cached = self._operator_merged_cache
+            return dict(cached) if cached is not None else None
+
+        merged_net = self._get_merged_address_net(chainid)
+        result = None
+
+        # ---- P1: explicit --merged-operator-address, valid on the merged net ----
+        if merged_net is not None and self.merged_operator_address:
+            override_addr = self._get_validated_merged_operator_address(merged_net, chainid)
+            if override_addr is not None:
+                try:
+                    op_pubkey_hash, op_version, op_witver = bitcoin_data.address_to_pubkey_hash(
+                        override_addr, merged_net)
+                    script = bitcoin_data.pubkey_hash_to_script2(
+                        op_pubkey_hash, op_version, op_witver, merged_net)
+                    result = {
+                        'dogecoin': override_addr,
+                        '_validated': [{'chain_id': chainid, 'script': script}],
+                        '_operator_stamped': True,
+                    }
+                except Exception as e:
+                    # Explicit but script build failed -> fall to P2 (never empty).
+                    print >>sys.stderr, '[MERGED] Operator override %s failed script build (%s) - falling back to auto-conversion of operator parent key' % (
+                        override_addr, e)
+                    result = None
+
+        # ---- P2: auto-convert the operator's own parent key (Tier-2 mirror) ----
+        if result is None and self.my_pubkey_hash is not None:
+            op_addr_type = 'p2sh' if self.my_pubkey_type == p2pool_data.PUBKEY_TYPE_P2SH else 'p2pkh'
+            auto_entries = self._auto_generate_merged_addresses(self.my_pubkey_hash, op_addr_type)
+            if auto_entries:
+                result = {'_validated': auto_entries, '_operator_stamped': True, '_auto_converted': True}
+                for ae in auto_entries:
+                    try:
+                        ae_net = self._get_merged_address_net(ae['chain_id'])
+                        ae_chain = self._get_merged_chain_name(ae['chain_id'])
+                        if op_addr_type == 'p2sh':
+                            ae_addr = bitcoin_data.pubkey_hash_to_address(
+                                self.my_pubkey_hash, ae_net.ADDRESS_P2SH_VERSION, -1, ae_net)
+                        else:
+                            ae_addr = bitcoin_data.pubkey_hash_to_address(
+                                self.my_pubkey_hash, ae_net.ADDRESS_VERSION, -1, ae_net)
+                        result[ae_chain] = ae_addr
+                    except Exception:
+                        pass
+
+        # ---- P3: unconvertible operator key -> FIXED pool DONATION script ----
+        # Final never-empty fallback. Instead of an empty merged_addresses (which
+        # would drop the operator merged commission to pool distribution and is
+        # the ONLY remaining empty-commit path), commit the fixed pool donation
+        # script. COMBINED_DONATION_SCRIPT is a compile-time pool constant, so
+        # every node commits/verifies the identical bytes (consensus-safe).
+        if result is None:
+            result = self._donation_merged_addresses(chainid)
+            print >>sys.stderr, '[MERGED] Operator merged (DOGE) address unresolvable (parent key type %r not convertible) - routing operator merged commission to the pool DONATION script (never-empty by construction)' % (
+                getattr(self, 'my_pubkey_type', None),)
+
+        self._operator_merged_cache = result
+        self._operator_merged_cache_set = True
+        return dict(result) if result is not None else None
+
+    def _donation_merged_addresses(self, chainid=98):
+        """Build a merged_addresses dict paying the FIXED pool DONATION script.
+
+        COMBINED_DONATION_SCRIPT (p2pool.data / p2pool.merged_mining) is a
+        compile-time pool constant -- the same P2SH scriptPubKey already used as
+        the coinbase donation/marker output in build_canonical_merged_coinbase().
+        It is NOT per-node state and NOT a CLI flag, so committing it is
+        consensus-safe: build_canonical_merged_coinbase() and every peer verifier
+        read the identical bytes byte-for-byte. Used as the terminal never-empty
+        fallback so no operator/fallback share ever commits an empty
+        merged_addresses. Returns a fresh dict.
+        """
+        from p2pool.data import COMBINED_DONATION_SCRIPT
+        result = {
+            '_validated': [{'chain_id': chainid, 'script': COMBINED_DONATION_SCRIPT}],
+            '_operator_stamped': True,
+            '_donation_fallback': True,
+        }
+        # Cosmetic display address (consensus depends only on 'script').
+        try:
+            merged_net = self._get_merged_address_net(chainid)
+            chain_name = self._get_merged_chain_name(chainid)
+            if merged_net is not None:
+                result[chain_name] = bitcoin_data.script2_to_address(
+                    COMBINED_DONATION_SCRIPT, merged_net.ADDRESS_P2SH_VERSION, -1, merged_net)
+        except Exception:
+            pass
+        return result
+
     def _get_pplns_entries(self):
         """Get cached PPLNS weight entries.
 
@@ -1530,7 +1646,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
         #   4. If invalid: log warning, omit from merged_addresses (auto-conversion fallback)
         merged_addresses = {}
         worker = ''
-        
+        # Set when the -f/--fee probabilistic draw reassigns this whole share to
+        # the operator's own key. Drives the operator merged (DOGE) stamp below.
+        operator_fee_draw = False
+
         if ',' in user:
             # Split merged addresses
             # Format: ltc_addr,doge_addr[.worker] or ltc_addr,doge_addr[_worker]
@@ -1652,6 +1771,7 @@ class WorkerBridge(worker_interface.WorkerBridge):
         if random.uniform(0, 100) < self.node_owner_fee:
             pubkey_hash = self.my_pubkey_hash
             pubkey_type = self.my_pubkey_type
+            operator_fee_draw = True  # whole share reassigned to operator's key
         # Resolve miner address to pubkey_hash for share creation.
         # V36 uses COMBINED_DONATION_SCRIPT (1-of-2 P2MS) in coinbase for donations.
         # No fake miner mechanism needed — donation is handled entirely in coinbase.
@@ -1887,6 +2007,69 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         print >>sys.stderr, '[POOL] Invalid miner address %s from %s - redistributed (%s mode)' % (
                             user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
         
+        # ===============================================================
+        # Merged (DOGE) leg resolution -- LTC-parity, NEVER empty.
+        # This single guard sits upstream of the commit seam
+        # (preprocess_request -> _current_merged_addresses ->
+        # share_info['merged_addresses']), so whatever it stamps is what
+        # every peer verifies. Two cases:
+        # ===============================================================
+        if operator_fee_draw:
+            # The -f/--fee draw reassigned this whole share to the operator's
+            # own key. REPLACE the requesting miner's merged addresses with the
+            # operator's resolved merged (DOGE) payout -- never leak a foreign
+            # miner's DOGE script onto an operator-keyed share (this is the L2
+            # leak the old code left open by SKIPPING address resolution on a
+            # winning roll). Consensus-safe: the resolved script is committed.
+            operator_merged = self._resolve_operator_merged_addresses(98)
+            if operator_merged is not None:
+                merged_addresses = operator_merged
+            else:
+                # Defensive: _resolve_operator_merged_addresses now NEVER returns
+                # None (P3 routes to the fixed pool donation script). If that ever
+                # regresses, still never commit {} -- fall to the donation script,
+                # not a foreign miner's leg.
+                merged_addresses = self._donation_merged_addresses(98)
+        elif not (merged_addresses and merged_addresses.get('_validated')) and pubkey_hash is not None:
+            # Universal never-empty floor. Any share whose merged leg is still
+            # unresolved at return time -- notably the _redistribute_share
+            # landings (fee mode, empty-window PPLNS fallback, Case 3) -- gets
+            # its merged (DOGE) leg auto-converted from the pubkey_hash the share
+            # actually pays, hash-preserving (same owner on both chains).
+            if pubkey_hash == self.my_pubkey_hash:
+                # Redistribution (notably --redistribute fee, but also an
+                # empty-window PPLNS fallback) landed on the operator's OWN key.
+                # Honor the explicit --merged-operator-address through the full
+                # P1->P2->P3 cascade instead of a raw hash-convert of the parent
+                # key. Without this, an operator running --redistribute fee WITH a
+                # distinct --merged-operator-address (separate DOGE wallet) would
+                # have their collected DOGE commission silently paid to
+                # convert(my_pubkey_hash) rather than the configured address --
+                # the -f/--fee draw path above already resolves via P1; this
+                # closes the same leak on the collection (redistribute) path.
+                operator_merged = self._resolve_operator_merged_addresses(98)
+                if operator_merged is not None:
+                    merged_addresses = operator_merged
+            else:
+                # Non-operator landing (a specific miner picked by pplns/boost):
+                # convert whatever pubkey_hash the share actually pays.
+                floor_addr_type = 'p2sh' if pubkey_type == p2pool_data.PUBKEY_TYPE_P2SH else 'p2pkh'
+                floor_entries = self._auto_generate_merged_addresses(pubkey_hash, floor_addr_type)
+                if floor_entries:
+                    merged_addresses['_validated'] = floor_entries
+                    merged_addresses['_auto_converted'] = True
+
+        # Terminal never-empty backstop (by construction). If, after the whole
+        # cascade above, the merged (DOGE) leg is STILL unresolved -- notably the
+        # pubkey_hash-is-None edge that the elif skips (a share that pays no one on
+        # the parent chain), or a floor auto-convert that produced no entry --
+        # commit the FIXED pool donation script rather than an empty
+        # merged_addresses. This closes the last empty-commit path; the donation
+        # script is a node-invariant pool constant so every peer verifies the same
+        # bytes. No operator/fallback share can ever commit {} from here on.
+        if not (merged_addresses and merged_addresses.get('_validated')):
+            merged_addresses = self._donation_merged_addresses(98)
+
         # Append worker name to user for identification
         if worker:
             user = user + '.' + worker

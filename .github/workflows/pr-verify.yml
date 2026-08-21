@@ -50,3 +50,11 @@ jobs:
           else
             echo "skip: p2pool/test/test_whale_latch.py absent on this tree"
           fi
+      - name: Merged/DOGE operator-fee reward-path KAT (if present)
+        run: |
+          if [ -f p2pool/test/test_v36_merged_operator_fee.py ]; then
+            pip install "twisted<21" ecdsa || echo "warn: deps install failed; operator-fee KAT will self-skip"
+            python -m unittest -v p2pool.test.test_v36_merged_operator_fee
+          else
+            echo "skip: p2pool/test/test_v36_merged_operator_fee.py absent on this tree"
+          fi
