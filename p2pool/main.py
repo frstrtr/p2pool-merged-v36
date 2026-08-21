@@ -91,6 +91,13 @@ class keypool():
 
 gnode = None # for debugging via rconsole/rfoo only
 
+# Operator merged (DOGE) address helpers (pure; shared with the KAT).
+from p2pool.operator_merged import (
+    reverse_convert_operator_address as _reverse_convert_operator_address,
+    operator_merged_display_address as _operator_merged_display_address,
+)
+
+
 @defer.inlineCallbacks
 def main(args, net, datadir_path, merged_urls, worker_endpoint):
     try:
@@ -398,9 +405,29 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
         print 'Listening for workers on %r port %i...' % (worker_endpoint[0], worker_endpoint[1])
         
         # Convert address to pubkey_hash and preserve address type for WorkerBridge
-        my_pubkey_hash, _my_ver, _my_witver = bitcoin_data.address_to_pubkey_hash(my_address, net.PARENT)
         from p2pool.data import get_pubkey_type as _get_pubkey_type
-        my_pubkey_type = _get_pubkey_type(_my_ver, _my_witver, net.PARENT)
+        try:
+            my_pubkey_hash, _my_ver, _my_witver = bitcoin_data.address_to_pubkey_hash(my_address, net.PARENT)
+            my_pubkey_type = _get_pubkey_type(_my_ver, _my_witver, net.PARENT)
+        except Exception:
+            # Reverse (merged -> main) auto-conversion: the main (LTC) identity
+            # is unresolved (autodetect failure / unset), but a valid
+            # --merged-operator-address on the DOGE net lets us derive it,
+            # hash-preserving. An explicitly-supplied invalid --address stays
+            # fatal at parse time (parser.error), so this only covers the
+            # unset/autodetect-failure path.
+            _reverse = None
+            if getattr(args, 'merged_operator_address', None):
+                from p2pool.work import dogecoin_net as _doge_net, dogecoin_testnet_net as _doge_test_net
+                _parent_sym = getattr(net.PARENT, 'SYMBOL', '')
+                _is_testnet = _parent_sym.lower().startswith('t') or 'test' in _parent_sym.lower()
+                _doge = _doge_test_net if _is_testnet else _doge_net
+                _reverse = _reverse_convert_operator_address(args.merged_operator_address, _doge, net.PARENT)
+            if _reverse is None:
+                raise
+            my_pubkey_hash, my_address, my_pubkey_type = _reverse
+            print '    ...main address unresolved -> reverse-converted operator identity from --merged-operator-address: %s' % my_address
+            pubkeys.addkey({'address': my_address})
         
         # Log merged chain operator address configuration
         if merged_urls:
@@ -422,24 +449,26 @@ def main(args, net, datadir_path, merged_urls, worker_endpoint):
                 else:
                     print '             Operator payout address: (auto-convert from parent)'
             print
-            # [CHECK 3] Merged operator address -- show actual DOGE address
-            if args.merged_operator_address:
-                print '  [CHECK 3] Merged operator address: %s (explicit via --merged-operator-address)' % args.merged_operator_address
-            else:
-                try:
-                    # Import dogecoin networks for proper address conversion
-                    from p2pool.work import dogecoin_net as _doge_net, dogecoin_testnet_net as _doge_test_net
-                    _parent_sym = getattr(net.PARENT, 'SYMBOL', '')
-                    _is_testnet = _parent_sym.lower().startswith('t') or 'test' in _parent_sym.lower()
-                    _merged_net = _doge_test_net if _is_testnet else _doge_net
-                    if _merged_net:
-                        merged_operator_addr = bitcoin_data.pubkey_hash_to_address(
-                            my_pubkey_hash, _merged_net.ADDRESS_VERSION, -1, _merged_net)
-                        print '  [CHECK 3] Merged operator address: %s (auto-converted from %s)' % (merged_operator_addr, my_address)
-                    else:
-                        print '  [CHECK 3] Merged operator address: (auto-convert pending -- dogecoin network not loaded)'
-                except Exception as e:
-                    print '  [CHECK 3] Merged operator address: FAILED to convert (%s)' % e
+            # [CHECK 3] Merged operator address -- computed with the SAME cascade
+            # the runtime resolver (WorkerBridge._resolve_operator_merged_addresses)
+            # applies, so the banner can never disagree with what a -f fee-draw
+            # share commits: P1 explicit-if-valid-on-DOGE, else P2 auto-convert
+            # the operator's own parent key (P2SH-aware). An explicit address
+            # that is INVALID on the DOGE net is reported as auto-converted here,
+            # because that is exactly what the resolver will commit.
+            try:
+                from p2pool.work import dogecoin_net as _doge_net, dogecoin_testnet_net as _doge_test_net
+                _parent_sym = getattr(net.PARENT, 'SYMBOL', '')
+                _is_testnet = _parent_sym.lower().startswith('t') or 'test' in _parent_sym.lower()
+                _merged_net = _doge_test_net if _is_testnet else _doge_net
+                _check3_addr, _check3_src = _operator_merged_display_address(
+                    args.merged_operator_address, my_pubkey_hash, my_pubkey_type, _merged_net, net.PARENT)
+                if _check3_addr is not None:
+                    print '  [CHECK 3] Merged operator address: %s (%s)' % (_check3_addr, _check3_src)
+                else:
+                    print '  [CHECK 3] Merged operator address: (auto-convert pending -- dogecoin network not loaded)'
+            except Exception as e:
+                print '  [CHECK 3] Merged operator address: FAILED to convert (%s)' % e
             print
             # [CHECK 4] P2P broadcaster config
             merged_p2p_addr = getattr(args, 'merged_coind_p2p_address', None)

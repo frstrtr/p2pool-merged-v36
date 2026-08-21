@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Helper functions for merged mining with multiaddress coinbase support
 
