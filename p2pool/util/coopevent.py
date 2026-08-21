@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 '''
 CooperativeEvent: drop-in replacement for p2pool.util.variable.Event whose
 fan-out is time-sliced across reactor turns.

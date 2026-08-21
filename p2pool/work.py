@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from __future__ import division
 from collections import deque
 
@@ -638,13 +637,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                     skipped_addresses.append((key.encode('hex')[:20] + '...', 'unconvertible script type'))
                                                     continue
 
-                                                # NOTE: the operator's merged commission is redirected at
-                                                # SHARE-CREATION time (get_user_details ->
-                                                # _operator_merged_addresses), which commits the operator
-                                                # address into merged_addresses so this served coinbase and
-                                                # the canonical verifier / payout hash agree. A redirect HERE
-                                                # (served-only) would diverge from build_canonical_merged_coinbase
-                                                # and be rejected on multi-node pools, so none is applied.
+                                                # Node operator override for raw script keys
+                                                # Compare pubkey_hash directly — self.args.address may be None
+                                                # when address was auto-detected from bitcoind
+                                                if self.my_pubkey_hash is not None and pubkey_hash == self.my_pubkey_hash and self.merged_operator_address:
+                                                    override_addr = self._get_validated_merged_operator_address(merged_addr_net, chainid)
+                                                    if override_addr is not None:
+                                                        merged_address = override_addr
                                             elif key_is_address:
                                                 # VERSION >= 34: key is already a parent chain address string
                                                 # Need to convert to merged chain address
@@ -666,13 +665,23 @@ class WorkerBridge(worker_interface.WorkerBridge):
                                                     skipped_addresses.append((parent_address[:20] + '...', error_msg))
                                                     continue
 
-                                                # NOTE: no served-only operator override here either. The
-                                                # operator's merged commission is committed into the share at
-                                                # creation (get_user_details -> _operator_merged_addresses);
-                                                # overriding only the served coinbase would diverge from
-                                                # build_canonical_merged_coinbase() (peer verifier) and fork.
-                                                # Standard auto-conversion from parent chain address.
-                                                if addr_type == 'p2sh':
+                                                # Node operator override: if --merged-operator-address is set,
+                                                # use it for the operator's own share of merged chain payout
+                                                # instead of auto-converting from parent chain address.
+                                                is_own_address = (self.args.address is not None and parent_address == self.args.address) or \
+                                                    (self.my_pubkey_hash is not None and pubkey_hash is not None and pubkey_hash == self.my_pubkey_hash)
+                                                if is_own_address and self.merged_operator_address:
+                                                    override_addr = self._get_validated_merged_operator_address(merged_addr_net, chainid)
+                                                    if override_addr is not None:
+                                                        merged_address = override_addr
+                                                    else:
+                                                        # Validation failed — fall through to normal auto-conversion
+                                                        if addr_type == 'p2sh':
+                                                            merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
+                                                        else:
+                                                            merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
+                                                # Standard auto-conversion from parent chain address
+                                                elif addr_type == 'p2sh':
                                                     merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_P2SH_VERSION, -1, merged_addr_net)
                                                 else:
                                                     merged_address = bitcoin_data.pubkey_hash_to_address(pubkey_hash, merged_addr_net.ADDRESS_VERSION, -1, merged_addr_net)
@@ -1309,84 +1318,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
             self._merged_op_addr_cache[cache_key] = ''  # Cache the negative result
             return None
 
-    def _pubkey_hash_from_merged_script(self, script):
-        """Extract the 20-byte pubkey_hash (as int) from a merged-chain payment
-        script. Handles the P2PKH / P2SH / P2WPKH templates recognized by
-        data.build_canonical_merged_coinbase(); returns None for other/empty
-        scripts (P2WSH, P2TR, ...)."""
-        if not script:
-            return None
-        if len(script) == 25 and script[:3] == '\x76\xa9\x14' and script[23:] == '\x88\xac':
-            return pack.IntType(160).unpack(script[3:23])
-        if len(script) == 23 and script[:2] == '\xa9\x14' and script[22:] == '\x87':
-            return pack.IntType(160).unpack(script[2:22])
-        if len(script) == 22 and script[:2] == '\x00\x14':
-            return pack.IntType(160).unpack(script[2:22])
-        return None
-
-    def _merged_addresses_belong_to_operator(self, merged_addresses):
-        """True iff every validated merged script in `merged_addresses` binds the
-        operator's own key (pubkey_hash == my_pubkey_hash). Used to decide whether
-        a requester's parsed merged addresses may safely ride along on a share that
-        has been reassigned to the operator (the legitimate case where the operator
-        themselves supplied a combined LTC,DOGE address)."""
-        if self.my_pubkey_hash is None or not merged_addresses:
-            return False
-        validated = merged_addresses.get('_validated')
-        if not validated:
-            return False
-        for entry in validated:
-            ph = self._pubkey_hash_from_merged_script(entry.get('script'))
-            if ph is None or ph != self.my_pubkey_hash:
-                return False
-        return True
-
-    def _operator_merged_addresses(self, requester_merged_addresses, merged_net, chainid=98):
-        """Reward-path fix: committed merged_addresses for a share that has been
-        assigned to the operator's OWN key -- via the -f fee cross-stamp, or the
-        operator mining directly.
-
-        Committing the operator's chosen merged (DOGE) payout address INTO the
-        share is the only consensus-safe way to redirect the operator's merged
-        commission. data.build_canonical_merged_coinbase() (the peer verifier,
-        which REJECTS shares whose served coinbase does not match) and
-        data.compute_merged_payout_hash() (the committed distribution hash) have
-        no operator-override awareness -- they read the committed merged_addresses
-        via get_v36_merged_weights(). A redirect applied only in the served
-        coinbase (as the old work.py override did) diverges from that committed
-        distribution and forks / is rejected on any multi-node pool. Stamping it
-        here makes the served coinbase, the canonical verifier, and the payout
-        hash agree on every node given identical shares.
-
-        * --merged-operator-address set and valid on the merged net -> return a
-          merged_addresses dict whose '_validated' entry is the operator's chosen
-          merged script.
-        * otherwise, if the requester's merged addresses do NOT belong to the
-          operator's key -> drop them ({}) so operator weight auto-converts to the
-          operator's OWN hash-preserving merged address (deterministic on every
-          node) and no FOREIGN DOGE script binds to the operator's new_script via
-          data.OkayTracker.add (_miner_merged_addr, first-write-wins). If they
-          already belong to the operator (or none exist) -> pass through unchanged.
-        """
-        if merged_net is not None and self.merged_operator_address:
-            override_addr = self._get_validated_merged_operator_address(merged_net, chainid)
-            if override_addr is not None:
-                try:
-                    pubkey_hash, version, witver = bitcoin_data.address_to_pubkey_hash(
-                        override_addr, merged_net)
-                    script = bitcoin_data.pubkey_hash_to_script2(
-                        pubkey_hash, version, witver, merged_net)
-                    return {
-                        'dogecoin': override_addr,
-                        '_validated': [{'chain_id': chainid, 'script': script}],
-                        '_operator_stamped': True,
-                    }
-                except Exception:
-                    pass  # fall through to the drop-foreign guard below
-        if requester_merged_addresses and not self._merged_addresses_belong_to_operator(requester_merged_addresses):
-            return {}
-        return requester_merged_addresses
-
     def _get_pplns_entries(self):
         """Get cached PPLNS weight entries.
 
@@ -1956,23 +1887,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         print >>sys.stderr, '[POOL] Invalid miner address %s from %s - redistributed (%s mode)' % (
                             user[:30] + ('...' if len(user) > 30 else '') if user else '(empty)', peer_addr or 'unknown', getattr(self.args, 'redistribute_mode', 'pplns'))
         
-        # --- Reward-path fix: operator-owned share merged payout stamp ---
-        # When this share is assigned to the operator's own key -- via the -f fee
-        # cross-stamp near the top of this method, or the operator mining directly
-        # -- commit the operator's chosen merged (DOGE) payout address into the
-        # share instead of the requesting miner's. This is the ONLY consensus-safe
-        # redirect: build_canonical_merged_coinbase() (peer verifier) and
-        # compute_merged_payout_hash() (committed hash) read the committed
-        # merged_addresses, so stamping here keeps the served coinbase, the
-        # verifier, and the payout hash in agreement on every node. It also
-        # prevents a foreign miner's DOGE script (from a -f-reassigned request)
-        # binding to the operator's new_script (data.OkayTracker.add /
-        # _miner_merged_addr, first-write-wins). Excludes redistributed shares,
-        # whose pubkey_hash is a random PPLNS miner, not the operator.
-        if self.my_pubkey_hash is not None and pubkey_hash == self.my_pubkey_hash:
-            merged_addresses = self._operator_merged_addresses(
-                merged_addresses, self._get_merged_address_net(98), 98)
-
         # Append worker name to user for identification
         if worker:
             user = user + '.' + worker

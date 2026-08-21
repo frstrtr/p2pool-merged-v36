@@ -50,12 +50,3 @@ jobs:
           else
             echo "skip: p2pool/test/test_whale_latch.py absent on this tree"
           fi
-      - name: Merged operator-address reward-path KAT (if present)
-        run: |
-          if [ -f p2pool/test/test_v36_merged_operator_reward.py ]; then
-            pip install "twisted<21" || echo "warn: twisted install failed; KAT will self-skip"
-            find . -name '*.pyc' -delete || true
-            python -m unittest -v p2pool.test.test_v36_merged_operator_reward
-          else
-            echo "skip: p2pool/test/test_v36_merged_operator_reward.py absent on this tree"
-          fi
