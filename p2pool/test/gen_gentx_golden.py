@@ -47,7 +47,7 @@ from p2pool.networks import litecoin as ltc_net
 
 NEW_TX_BUDGET_BYTES = 50 * 1000   # mirrors the live harness's crossing valve
 
-GOLDEN_DIR = os.path.join(os.path.dirname(__file__), 'golden')
+GOLDEN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'golden')
 
 # A fixed wall-clock epoch so the emitted fixtures are reproducible byte-for-
 # byte on any host (the live harness freezes to "now"; a frozen reference file
