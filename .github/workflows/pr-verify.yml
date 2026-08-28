@@ -32,7 +32,11 @@ jobs:
       - name: C1 merged-determinism (chain-split guard, if present)
         run: |
           if [ -f tests/test_c1_merged_determinism.py ]; then
-            python tests/test_c1_merged_determinism.py
+            # twisted + repo root on PYTHONPATH so the REAL-MODULE leg (assertions
+            # against the actual py2 p2pool.data runtime) runs here, not just the
+            # standalone SHADOW leg. Without these it self-skips on ImportError.
+            pip install "twisted<21" || echo "warn: twisted install failed; real-module leg will self-skip"
+            PYTHONPATH="$PWD" python tests/test_c1_merged_determinism.py
           else
             echo "skip: tests/test_c1_merged_determinism.py absent on this tree (ships with v36-fix/merged-divergence, PR #1)"
           fi
