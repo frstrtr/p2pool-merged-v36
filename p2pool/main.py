@@ -732,6 +732,14 @@ def run():
     parser.add_argument('--rconsole',
         help='enable rconsole debugging mode (requires rfoo)',
         action='store_const', const=True, default=False, dest='rconsole')
+    parser.add_argument('--solo', '--bootstrap',
+        help='allow serving work with no p2pool peers connected and/or an empty '
+             'sharechain, even on a PERSIST=True network. Use ONLY for intentional '
+             'solo mining or bootstrapping a brand-new chain. This is the dynamic '
+             'equivalent of setting PERSIST=False in the network file, applied only '
+             'to the stratum/getwork serve-gate. Default OFF so pool nodes never '
+             'serve stale-head work on restart before the sharechain has converged.',
+        action='store_const', const=True, default=False, dest='solo')
 
     parser.add_argument('-a', '--address',
         help='generate payouts to this address (default: <address requested from bitcoind>), or (dynamic)',

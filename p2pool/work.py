@@ -190,6 +190,12 @@ class WorkerBridge(worker_interface.WorkerBridge):
         self.my_pubkey_hash = my_pubkey_hash
         self.my_pubkey_type = my_pubkey_type  # V36: 0=P2PKH, 1=P2WPKH/bech32, 2=P2SH
 		
+        # Canonical serve-gate opt-out for intentional solo/bootstrap mining.
+        # When True, the PERSIST=True refuse-work guards below are bypassed --
+        # the dynamic equivalent of setting PERSIST=False in the network file,
+        # applied only to the two upstream stratum/getwork guard sites.
+        self.allow_peerless_mining = bool(getattr(args, 'solo', False))
+
         self.donation_percentage = args.donation_percentage
         self.node_owner_fee = getattr(args, 'node_owner_fee', worker_fee)
         self.worker_fee = self.node_owner_fee
@@ -2078,10 +2084,26 @@ class WorkerBridge(worker_interface.WorkerBridge):
         #print '[DEBUG] get_user_details returning: user=%r, merged_addresses=%r' % (user, merged_addresses)
         return user, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses
 
+    def _persist_serve_gate_active(self):
+        # Canonical p2pool refuses to serve work on a PERSIST=True network while
+        # it cannot know the true sharechain head (no p2pool peers) -- any work it
+        # would hand out builds on the persisted OLD head and orphans once think()
+        # adopts the real network head. The --solo/--bootstrap flag (allow_peerless_mining)
+        # is the dynamic equivalent of PERSIST=False and opts out of the gate.
+        return self.node.net.PERSIST and not self.allow_peerless_mining
+
+    def _peerless(self):
+        return self.node.p2p_node is None or len(self.node.p2p_node.peers) == 0
+
     def preprocess_request(self, user, peer_addr=None):
         # Debug: Uncomment to trace preprocess flow
         #print '[DEBUG] preprocess_request called with user:', repr(user)
-        # Removed peer connection check - allow solo mining
+        # Canonical guard (jtoomim p2pool work.py preprocess_request): refuse work
+        # when we have no p2pool peers on a PERSIST=True network. Stratum's
+        # _send_work turns the raise into loseConnection, so rigs retry-poll until
+        # a peer is up -- the canonical "hold until connected" with no stale-head work.
+        if self._peerless() and self._persist_serve_gate_active():
+            raise jsonrpc.Error_for_code(-12345)(u'p2pool is not connected to any peers')
         if time.time() > self.current_work.value['last_update'] + 60:
             raise jsonrpc.Error_for_code(-12345)(u'lost contact with coind')
         username, pubkey_hash, pubkey_type, desired_share_target, desired_pseudoshare_target, merged_addresses = self.get_user_details(user, peer_addr=peer_addr)
@@ -2784,9 +2806,22 @@ class WorkerBridge(worker_interface.WorkerBridge):
         if merged_addresses is None:
             merged_addresses = {}
         self._current_merged_addresses = merged_addresses
-        
-        # Removed peer connection check - allow solo mining
-        # P2Pool can work standalone even with PERSIST=True
+
+        # Canonical guards (jtoomim p2pool work.py get_work): on a PERSIST=True
+        # network, refuse work while (a) no p2pool peers are connected, or (b) the
+        # tracker has no best share yet -- in both cases we cannot know the true
+        # head and would serve stale-head work off the persisted OLD chain, which
+        # orphans (the restart-DOA spike). This also neutralizes the V36 secondary
+        # amplifiers: the emergency time-based difficulty decay (data.py) and the
+        # whale-departure override both key off the persisted head's stale
+        # timestamp, so by not building work off that head until convergence, no
+        # drastically-too-easy work is ever computed from it. --solo/--bootstrap
+        # (allow_peerless_mining) opts out for intentional solo/new-chain mining.
+        if self._persist_serve_gate_active():
+            if self._peerless():
+                raise jsonrpc.Error_for_code(-12345)(u'p2pool is not connected to any peers')
+            if self.node.best_share_var.value is None:
+                raise jsonrpc.Error_for_code(-12345)(u'p2pool is downloading shares')
 
         # Build user-specific merged templates so finder fee can target the work recipient.
         effective_merged_work = self._build_user_specific_merged_work(user, merged_addresses, share_pubkey_hash=pubkey_hash, share_pubkey_type=pubkey_type)
