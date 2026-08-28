@@ -58,3 +58,11 @@ jobs:
           else
             echo "skip: p2pool/test/test_v36_merged_operator_fee.py absent on this tree"
           fi
+      - name: Restart serve-gate regression suite (if present)
+        run: |
+          if [ -f p2pool/test/test_serve_gate.py ]; then
+            pip install "twisted<21" || echo "warn: twisted install failed; serve-gate tests will self-skip"
+            python -m unittest -v p2pool.test.test_serve_gate
+          else
+            echo "skip: p2pool/test/test_serve_gate.py absent on this tree"
+          fi
