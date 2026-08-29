@@ -110,8 +110,14 @@ class OverrideGovernor(object):
             rearm_blocked=(now < self._cooldown.get(name, 0)))
         if reason is not None:
             del self._active[name]
-            if reason in ('duration_bound', 'orphan_breaker') and reason == 'orphan_breaker':
-                self._cooldown[name] = now + self.REARM_COOLDOWN   # cooldown ONLY on orphan-forced exit
+            # Re-arm cooldown on EVERY exit, not only the orphan-forced one. A
+            # latch-breaker that can be re-armed on the very next 5s tick is not a
+            # latch-breaker: when the entry condition is self-sustained by the
+            # override's own flood, a duration_bound exit at T_MAX would otherwise
+            # re-arm immediately and re-engage the easy-target mode forever. The
+            # cooldown forces a normal-difficulty interval between arms so the
+            # entry signal can actually recover before the override may re-apply.
+            self._cooldown[name] = now + self.REARM_COOLDOWN
             return False
         return True
 
