@@ -64,13 +64,31 @@ class FakeP2PNode(object):
         self.peers = dict((i, object()) for i in range(npeers))
 
 
+class _Item(object):
+    __slots__ = ('timestamp',)
+    def __init__(self, timestamp):
+        self.timestamp = timestamp
+
+
+class FakeTracker(object):
+    '''Only surface the stale-tip guard reads: items[best].timestamp.'''
+    def __init__(self, items=None):
+        self.items = items or {}
+
+
 class FakeNode(object):
-    def __init__(self, persist=True, npeers=0, best_share=None):
+    def __init__(self, persist=True, npeers=0, best_share=None, tip_timestamp=None):
         self.net = FakeNet(persist)
         # p2p_node is None until the p2p server starts -- the guard treats that
         # as peerless, same as an empty peers dict.
         self.p2p_node = None if npeers is None else FakeP2PNode(npeers)
         self.best_share_var = FakeVar(best_share)
+        # Tracker with a dated tip only when the caller wants the stale-tip guard
+        # exercised; otherwise an empty tracker (guard reads -> miss -> not stale).
+        items = {}
+        if best_share is not None and tip_timestamp is not None:
+            items[best_share] = _Item(tip_timestamp)
+        self.tracker = FakeTracker(items)
 
 
 class _Sentinel(Exception):
@@ -80,9 +98,11 @@ class _Sentinel(Exception):
     pass
 
 
-def make_bridge(persist=True, npeers=0, best_share=None, allow_peerless=False):
+def make_bridge(persist=True, npeers=0, best_share=None, allow_peerless=False,
+                tip_timestamp=None):
     wb = WorkerBridge.__new__(WorkerBridge)
-    wb.node = FakeNode(persist=persist, npeers=npeers, best_share=best_share)
+    wb.node = FakeNode(persist=persist, npeers=npeers, best_share=best_share,
+                       tip_timestamp=tip_timestamp)
     wb.allow_peerless_mining = allow_peerless
     return wb
 
@@ -242,6 +262,97 @@ class GetWorkGate(unittest.TestCase):
 
     def test_persist_false_serves_peerless_empty_tracker(self):
         wb = make_bridge(persist=False, npeers=0, best_share=None)
+        self._plant_post_guard_sentinel(wb)
+        self.assertRaises(_Sentinel, self._call, wb)
+
+
+# --------------------------------------------------------------------------
+# Stale-tip serve-gate backstop (after-hours-latch fix): with peers present but
+# the served sharechain tip dead >600s, refuse work so the emergency time-decay
+# cannot compute drastically-too-easy work off a dead tip (the diff-corruption
+# flood). Node-local serving policy; self-clears when the tip advances.
+# --------------------------------------------------------------------------
+
+@unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))
+class StaleTipHelper(unittest.TestCase):
+    def test_fresh_tip_not_stale(self):
+        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 30)
+        self.assertFalse(wb._tip_is_stale())
+
+    def test_old_tip_is_stale(self):
+        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 1200)
+        self.assertTrue(wb._tip_is_stale())
+
+    def test_none_best_share_not_stale(self):
+        wb = make_bridge(npeers=1, best_share=None)
+        self.assertFalse(wb._tip_is_stale())
+
+    def test_missing_tracker_item_not_stale(self):
+        # best set but tracker has no dated item -> read miss -> never a false refusal.
+        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=None)
+        self.assertFalse(wb._tip_is_stale())
+
+    def test_boundary_at_max_age(self):
+        wb = make_bridge(npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - (wb_max_age() + 5))
+        self.assertTrue(wb._tip_is_stale())
+
+
+def wb_max_age():
+    return WorkerBridge._serve_stale_tip_max_age
+
+
+@unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))
+class GetWorkStaleTipGate(unittest.TestCase):
+    def _plant_post_guard_sentinel(self, wb):
+        def _boom(*a, **k):
+            raise _Sentinel()
+        wb._build_user_specific_merged_work = _boom
+
+    def _call(self, wb):
+        return wb.get_work('user', 'pkh', 0, 1, 1)
+
+    def test_refuses_when_tip_stale(self):
+        # Peer connected, head present, but tip dead >600s -> stale-tip refusal.
+        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - 1200)
+        self._plant_post_guard_sentinel(wb)
+        try:
+            self._call(wb)
+            self.fail('expected stale-tip refusal')
+        except _Sentinel:
+            self.fail('guard did not fire on a stale tip')
+        except jsonrpc.Error as e:
+            self.assertEqual(e.code, -12345)
+            self.assertIn(u'tip is stale', e.message)
+
+    def test_serves_when_tip_fresh(self):
+        # Same node, fresh tip -> guard inert, reaches template build.
+        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - 30)
+        self._plant_post_guard_sentinel(wb)
+        self.assertRaises(_Sentinel, self._call, wb)
+
+    def test_self_clears_when_tip_advances(self):
+        # A node that was refusing on a stale tip must serve again the instant the
+        # tip advances -- proving the refusal is not a latch.
+        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - 1200)
+        self._plant_post_guard_sentinel(wb)
+        self.assertRaises(jsonrpc.Error, self._call, wb)
+        # Tip advances (fresh share): same bridge now passes the gate.
+        wb.node.tracker.items['HEAD'].timestamp = time.time()
+        self.assertRaises(_Sentinel, self._call, wb)
+
+    def test_solo_flag_bypasses_stale_tip_gate(self):
+        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - 1200, allow_peerless=True)
+        self._plant_post_guard_sentinel(wb)
+        self.assertRaises(_Sentinel, self._call, wb)
+
+    def test_persist_false_bypasses_stale_tip_gate(self):
+        wb = make_bridge(persist=False, npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - 1200)
         self._plant_post_guard_sentinel(wb)
         self.assertRaises(_Sentinel, self._call, wb)
 

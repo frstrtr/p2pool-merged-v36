@@ -174,10 +174,14 @@ class Rig(object):
 
         # REAL governor, controllable probes: own_mint/own_notchain via the REAL
         # get_stale_counts (so my_share_hashes drives them), own_hr controllable.
+        # Wiring MIRRORS production (work.py __init__): refused stale-tip siblings
+        # count as own production AND own not-in-chain, so a refusal storm cannot
+        # starve the orphan circuit-breaker. refused stays 0 for all pre-existing
+        # tests (zero behavioural change there); the refusal-storm case drives it.
         wb._override_gov = OverrideGovernor(
             own_hr_fn=lambda: self.own_hr[0],
-            own_mint_fn=lambda: wb.get_stale_counts()[1],
-            own_notchain_fn=lambda: sum(wb.get_stale_counts()[0]),
+            own_mint_fn=lambda: wb.get_stale_counts()[1] + wb._whale_refused_siblings,
+            own_notchain_fn=lambda: sum(wb.get_stale_counts()[0]) + wb._whale_refused_siblings,
             clock=clock,
         )
         self.wb = wb
@@ -207,7 +211,12 @@ class Rig(object):
     def tracker_view_in_chain_add(self, n):
         self.wb.tracker_view.in_chain += n
 
-    def tick(self, dt=5.0, orphans=0, survivors=0, pool_hr=None, gap=None):
+    def add_refused(self, n):
+        # Stale-tip siblings the mint gate REFUSED: dead own work never minted,
+        # so it does NOT enter my_share_hashes -- only the refused counter climbs.
+        self.wb._whale_refused_siblings += n
+
+    def tick(self, dt=5.0, orphans=0, survivors=0, refused=0, pool_hr=None, gap=None):
         '''One poll cadence: advance clock, mutate own-production + instrument,
         then run the REAL sample()+detector (unwrapped so errors surface).'''
         self.clock.advance(dt)
@@ -223,6 +232,8 @@ class Rig(object):
             self.add_orphans(orphans)
         if survivors:
             self.add_survivors(survivors)
+        if refused:
+            self.add_refused(refused)
         self.wb._override_gov.sample()
         self.wb._detect_whale_departure('timer')
 
@@ -299,7 +310,13 @@ class TestLatchAndExits(_Base):
         self.assertFalse(rig.wb._override_gov.arm('whale'),
             'orphan exit must set the re-arm cooldown')
 
-    def test_T3_duration_backstop_no_cooldown(self):
+    def test_T3_duration_backstop_sets_cooldown(self):
+        # After-hours-latch fix: a duration_bound exit MUST also set the re-arm
+        # cooldown. The latch was: when the entry condition is self-sustained by
+        # the override's own flood, a duration_bound exit at T_MAX re-armed on the
+        # very next 5s tick and re-engaged easy-target mode forever. Blocking
+        # instant re-arm forces a normal-difficulty interval between arms so the
+        # entry signal can recover.
         clock = Clock()
         rig = self.make_entered_rig(clock)
         # All own shares survive (orphan rate 0). Only the duration bound can fire.
@@ -311,9 +328,13 @@ class TestLatchAndExits(_Base):
                 break
         self.assertTrue(exited)
         self.assertEqual(rig.wb._whale_last_exit_reason, 'duration_bound')
-        # Duration exit must NOT set a cooldown: immediate re-arm allowed.
+        # Duration exit now sets the cooldown too: instant re-arm is REFUSED.
+        self.assertFalse(rig.wb._override_gov.arm('whale'),
+            'duration exit must block instant re-arm (after-hours-latch fix)')
+        # ...and is allowed again only after the cooldown elapses.
+        clock.advance(rig.wb._override_gov.REARM_COOLDOWN + 1.0)
         self.assertTrue(rig.wb._override_gov.arm('whale'),
-            'duration exit must NOT block re-arm')
+            're-arm allowed after the cooldown window')
 
     def test_T4_feature_preserved_stays_active_20min(self):
         clock = Clock()
@@ -332,6 +353,86 @@ class TestLatchAndExits(_Base):
                 break
         self.assertFalse(rig.wb._whale_departure_active)
         self.assertEqual(rig.wb._whale_last_exit_reason, 'duration_bound')
+
+
+# --------------------------------------------------------------------------
+# After-hours runtime-latch regression (p2p-spb ~100%-DOA-after-6h incident).
+# Reproduces the two defects that let the easy-target override re-engage at
+# runtime and STICK: (P1) duration_bound exit re-armed instantly, and (P2) the
+# orphan circuit-breaker was STARVED because refused stale-tip siblings were
+# never counted as own production -- plus the F3 self-heal that structurally
+# disables the override while own production is majority-dead.
+# --------------------------------------------------------------------------
+
+@unittest.skipUnless(HAVE_WORK, 'p2pool.work/twisted unavailable: %s' % _WORK_IMPORT_ERR)
+class TestAfterHoursLatch(_Base):
+
+    def test_refusal_storm_exits_via_orphan_breaker_not_starved(self):
+        # P2 reproduction: in easy-target mode the stale-tip sibling refusal fires
+        # continuously (own work is refused, never minted). On master the governor
+        # own_mint delta stays 0 -> _windowed_orphan returns None forever -> the
+        # orphan breaker can NEVER fire; only the 1800s duration bound exits, then
+        # (P1) it re-arms instantly -> latched. FIX: refused siblings count as own
+        # production, so the breaker warms and fires WELL BEFORE the duration bound.
+        clock = Clock()
+        rig = self.make_entered_rig(clock)
+        # Pure refusal storm: NO shares minted (mint from get_stale_counts stays 0),
+        # only the refused counter climbs. ~5 refusals / 5s tick.
+        exited_reason = None
+        for _ in xrange(340):   # up to 1700s -- strictly LESS than the 1800s bound
+            rig.tick(dt=5.0, refused=5, pool_hr=100.0, gap=1.0)
+            if not rig.wb._whale_departure_active:
+                exited_reason = rig.wb._whale_last_exit_reason
+                break
+        self.assertEqual(exited_reason, 'orphan_breaker',
+            'refusal storm must trip the orphan breaker before the duration bound '
+            '(master starves it and can only ever hit duration_bound)')
+        # And the orphan-forced exit sets the re-arm cooldown (belt to F1).
+        self.assertFalse(rig.wb._override_gov.arm('whale'),
+            'orphan exit must block instant re-arm')
+
+    def test_override_disabled_while_own_production_majority_dead(self):
+        # F3 self-heal: the easy-target override may NOT be applied while our own
+        # windowed dead/refused fraction is at/above the ORPHAN_CEILING -- a
+        # ~100%-DOA state structurally disables the override that causes it.
+        clock = Clock()
+        rig = self.make_entered_rig(clock)
+        # Drive a warmed, majority-dead window: >MIN_OWN_DELTA fresh own shares,
+        # ~80% of them orphaned.
+        for _ in xrange(40):
+            rig.tick(dt=5.0, orphans=4, survivors=1, pool_hr=100.0, gap=1.0)
+            if not rig.wb._whale_departure_active:
+                break
+        # The detector may or may not still be armed here, but the self-heal
+        # predicate must report the majority-dead state...
+        self.assertTrue(rig.wb._override_dead_majority(),
+            'windowed own-dead fraction must be recognised as majority-dead')
+        # ...and the EXACT get_work application composition must therefore refuse
+        # to apply the override even with ample local hashrate.
+        local_hr = rig.wb._whale_min_local_hashrate * 10
+        applied = (rig.wb._detect_whale_departure()
+                   and local_hr >= rig.wb._whale_min_local_hashrate
+                   and not rig.wb._override_dead_majority())
+        self.assertFalse(applied,
+            'override must be structurally disabled while own production is '
+            'majority-dead (the flood source cannot re-enable itself)')
+
+    def test_self_heal_re_enables_once_production_recovers(self):
+        # Complement to the above: once own production is healthy again (orphan
+        # fraction below the ceiling across the window), the self-heal predicate
+        # clears, so the override is free to apply on a genuine future departure.
+        clock = Clock()
+        rig = self.make_entered_rig(clock)
+        # First: majority-dead window.
+        for _ in xrange(30):
+            rig.tick(dt=5.0, orphans=4, survivors=1, pool_hr=100.0, gap=1.0)
+        self.assertTrue(rig.wb._override_dead_majority())
+        # Then: a long window of all-surviving production ages the dead samples
+        # out (ORPHAN_WINDOW=600s) and drives the windowed fraction to ~0.
+        for _ in xrange(160):   # 800s > ORPHAN_WINDOW
+            rig.tick(dt=5.0, survivors=6, pool_hr=100.0, gap=1.0)
+        self.assertFalse(rig.wb._override_dead_majority(),
+            'self-heal predicate must clear once own production is healthy again')
 
 
 # --------------------------------------------------------------------------
@@ -434,6 +535,30 @@ class TestGovernor(unittest.TestCase):
         clock.advance(901.0)
         self.assertTrue(gov.arm('whale'), 're-arm allowed after cooldown')
 
+    def test_duration_exit_sets_rearm_cooldown(self):
+        # After-hours-latch fix at the governor level: a duration_bound exit must
+        # set the re-arm cooldown (master set it only on orphan_breaker).
+        clock = Clock()
+        state = dict(hr=5e6, mint=0, nc=0)
+        gov = self.make_gov(clock, state)
+        gov.sample(); gov.arm('whale')
+        # All survive (orphan rate 0): only the duration bound can fire.
+        exited = False
+        for _ in xrange(400):
+            clock.advance(5.0)
+            state['mint'] += 3   # all in-chain (nc unchanged) -> rate 0
+            gov.sample()
+            if not gov.tick('whale'):
+                exited = True
+                break
+        self.assertTrue(exited)
+        self.assertEqual(gov.status()['whale']['exit_reason'], 'duration_bound')
+        # Instant re-arm refused; allowed only after REARM_COOLDOWN.
+        self.assertFalse(gov.arm('whale'),
+            'duration_bound exit must block instant re-arm')
+        clock.advance(gov.REARM_COOLDOWN + 1.0)
+        self.assertTrue(gov.arm('whale'))
+
     def test_T9a_ownhealth_has_no_chain_surviving_field(self):
         self.assertEqual(
             set(OwnHealth._fields),
@@ -478,6 +603,21 @@ class TestStaticInvariant(unittest.TestCase):
         exit_block = det_src[det_src.index(marker):]
         self.assertNotIn('get_pool_attempts_per_second', exit_block,
             'the degraded metric must not appear in any exit path')
+
+    def test_governor_wiring_feeds_refused_siblings(self):
+        # F2: the PRODUCTION governor wiring must add _whale_refused_siblings into
+        # BOTH own_mint_fn and own_notchain_fn, so a refusal storm cannot starve
+        # the orphan circuit-breaker (P2). Asserted on the real __init__ source so
+        # the guarantee is about production code, not the test harness.
+        import inspect
+        init_src = inspect.getsource(WorkerBridge.__init__)
+        mint_lines = [ln for ln in init_src.splitlines() if 'own_mint_fn' in ln]
+        nc_lines = [ln for ln in init_src.splitlines() if 'own_notchain_fn' in ln]
+        self.assertTrue(mint_lines and nc_lines, 'governor wiring lines not found')
+        self.assertTrue(any('_whale_refused_siblings' in ln for ln in mint_lines),
+            'own_mint_fn must include refused siblings (F2)')
+        self.assertTrue(any('_whale_refused_siblings' in ln for ln in nc_lines),
+            'own_notchain_fn must include refused siblings (F2)')
 
 
 # --------------------------------------------------------------------------

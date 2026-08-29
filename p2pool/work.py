@@ -308,12 +308,19 @@ class WorkerBridge(worker_interface.WorkerBridge):
         def _own_hr():
             mh, dh = self.get_local_rates()                 # 2-tuple, verified work.py:2005
             return sum(mh.itervalues()) + sum(dh.itervalues())
+        # Refused stale-tip siblings (mandate-3 refusal below) are dead own work
+        # that is NEVER minted -- so without them the orphan circuit-breaker's
+        # own_mint delta can stay below MIN_OWN_DELTA forever and the breaker is
+        # STARVED (it can never warm up), letting the easy-target override latch
+        # while producing majority-dead work. Count each refused sibling as one
+        # unit of own production AND one unit of not-in-chain production, so a
+        # refusal storm warms the window and trips the breaker within ~T_ORPHAN.
+        self._whale_refused_siblings = 0
         self._override_gov = OverrideGovernor(
             own_hr_fn       = _own_hr,
-            own_mint_fn     = lambda: self.get_stale_counts()[1],
-            own_notchain_fn = lambda: sum(self.get_stale_counts()[0]),
+            own_mint_fn     = lambda: self.get_stale_counts()[1] + self._whale_refused_siblings,
+            own_notchain_fn = lambda: sum(self.get_stale_counts()[0]) + self._whale_refused_siblings,
         )
-        self._whale_refused_siblings = 0
         self._whale_last_exit_reason = None
 
         self.removed_unstales_var = variable.Variable((0, 0, 0))
@@ -2095,6 +2102,33 @@ class WorkerBridge(worker_interface.WorkerBridge):
     def _peerless(self):
         return self.node.p2p_node is None or len(self.node.p2p_node.peers) == 0
 
+    # Cap on how far the served sharechain tip may lag wall-clock before the
+    # #19 serve-gate refuses work. 600s = 40*SHARE_PERIOD(15s) on litecoin --
+    # well past the emergency-decay threshold (20*SHARE_PERIOD=300s, data.py)
+    # and the whale gap trigger (8*SHARE_PERIOD=120s), so a healthy pool never
+    # reaches it; only a genuinely stalled/partitioned tip does.
+    _serve_stale_tip_max_age = 600.0
+
+    def _tip_is_stale(self):
+        '''True iff the best share's miner-set timestamp lags wall-clock by more
+        than _serve_stale_tip_max_age. Node-local serving policy only: while the
+        served tip is this stale, the emergency time-based difficulty decay
+        (data.py:840-854) would ease the served target without bound, computing
+        drastically-too-easy work off a dead tip -- the diff-corruption flood
+        source. Refusing to serve caps the served easing (~4x at 600s) and makes
+        the flood unservable, WITHOUT touching the consensus decay formula (share
+        verification stays byte-identical network-wide). Self-clears the instant
+        the tip advances, since the timestamp is read live each call. Any read
+        failure (missing tracker item) -> not stale (never a false refusal).'''
+        best = self.node.best_share_var.value
+        if best is None:
+            return False
+        try:
+            ts = self.node.tracker.items[best].timestamp
+        except Exception:
+            return False
+        return (time.time() - ts) > self._serve_stale_tip_max_age
+
     def preprocess_request(self, user, peer_addr=None):
         # Debug: Uncomment to trace preprocess flow
         #print '[DEBUG] preprocess_request called with user:', repr(user)
@@ -2244,6 +2278,23 @@ class WorkerBridge(worker_interface.WorkerBridge):
                         trigger_source, ratio, share_gap, _fmt_hr(att_s), _fmt_hr(baseline_hr), _fmt_hr(avg_hr))
 
         return self._whale_departure_active
+
+    def _override_dead_majority(self):
+        '''Self-healing invariant for the easy-target override. Returns True when
+        our OWN windowed dead/refused fraction is at or above the governor's
+        ORPHAN_CEILING -- i.e. the easy-target mode is currently producing a
+        majority of dead/orphan work. In that state the override is net-harmful
+        (it is the flood source), so it must NOT be applied: a ~100%-DOA state
+        structurally disables the override that causes it, and the mode re-enables
+        only once own production is healthy again. Reuses the governor's own
+        windowed-orphan estimate (own-production + wall-clock only -- a signal the
+        easy-target override cannot itself distort). Warm-up (rate is None) does
+        NOT disable the override.'''
+        try:
+            rate, _ = self._override_gov._windowed_orphan()
+        except Exception:
+            return False
+        return rate is not None and rate >= self._override_gov.ORPHAN_CEILING
 
     def _share_job_lags_tip(self, job_prev):
         '''Fork-safe: True iff the job's parent (job_prev) lags the current best
@@ -2822,6 +2873,13 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 raise jsonrpc.Error_for_code(-12345)(u'p2pool is not connected to any peers')
             if self.node.best_share_var.value is None:
                 raise jsonrpc.Error_for_code(-12345)(u'p2pool is downloading shares')
+            # Stale-tip backstop (extends the #19 gate): with peers present but the
+            # served tip dead >600s, the emergency time-decay would compute
+            # drastically-too-easy work off it -- the diff-corruption flood. Hold
+            # and retry-poll (same semantics as the peerless/downloading refusals)
+            # until the tip advances. Self-clears when a fresh share arrives.
+            if self._tip_is_stale():
+                raise jsonrpc.Error_for_code(-12345)(u'p2pool sharechain tip is stale')
 
         # Build user-specific merged templates so finder fee can target the work recipient.
         effective_merged_work = self._build_user_specific_merged_work(user, merged_addresses, share_pubkey_hash=pubkey_hash, share_pubkey_type=pubkey_type)
@@ -2930,18 +2988,30 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # the stale-tip sibling refusal consults it. Override magnitude is
         # unchanged (still 2**256-1, still clamped at data.py:857).
         whale_override_applied = (self._detect_whale_departure()
-                                  and local_hash_rate_for_guard >= self._whale_min_local_hashrate)
+                                  and local_hash_rate_for_guard >= self._whale_min_local_hashrate
+                                  and not self._override_dead_majority())
         if whale_override_applied:
             desired_share_target = 2**256 - 1  # will be clamped to pre_target3 (easiest)
         elif self._detect_whale_departure() and time.time() - self._whale_last_no_local_log > 30:
             self._whale_last_no_local_log = time.time()
             metrics = self._whale_last_metrics or {}
-            print '[WHALE-DEPARTURE] ACTIVE but override skipped: local=%sH/s < %.1fMH/s (ratio=%.2f gap=%.0fs src=%s)' % (
-                _fmt_hr(local_hash_rate_for_guard),
-                self._whale_min_local_hashrate/1e6,
-                metrics.get('ratio', 0),
-                metrics.get('share_gap', 0),
-                metrics.get('source', 'unknown'))
+            if self._override_dead_majority():
+                # Self-heal: detector still armed, but own production is majority
+                # dead -- the override is structurally disabled until it recovers.
+                rate, _dm = self._override_gov._windowed_orphan()
+                print '[WHALE-DEPARTURE] ACTIVE but override DISABLED (self-heal): own_dead=%.2f >= ceiling=%.2f (ratio=%.2f gap=%.0fs src=%s)' % (
+                    (rate if rate is not None else -1.0),
+                    self._override_gov.ORPHAN_CEILING,
+                    metrics.get('ratio', 0),
+                    metrics.get('share_gap', 0),
+                    metrics.get('source', 'unknown'))
+            else:
+                print '[WHALE-DEPARTURE] ACTIVE but override skipped: local=%sH/s < %.1fMH/s (ratio=%.2f gap=%.0fs src=%s)' % (
+                    _fmt_hr(local_hash_rate_for_guard),
+                    self._whale_min_local_hashrate/1e6,
+                    metrics.get('ratio', 0),
+                    metrics.get('share_gap', 0),
+                    metrics.get('source', 'unknown'))
 
         if True:
             # Build share_data differently based on share version
