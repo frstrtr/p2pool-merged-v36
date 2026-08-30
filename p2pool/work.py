@@ -2129,6 +2129,95 @@ class WorkerBridge(worker_interface.WorkerBridge):
             return False
         return (time.time() - ts) > self._serve_stale_tip_max_age
 
+    # --- v36-0.21: bound the stale-tip serve-hold + clamp the served easing ---
+    # v36-0.20 (F4) refused ALL get_work while the served tip was dead >600s.
+    # On a MAJORITY-hashrate node that is an unbounded deadlock: refusing removes
+    # the only hashrate that can advance the tip, so the hold NEVER self-clears
+    # and the miners starve off (the kr1z1s 2026-08-30 after-hours latch -- 80
+    # min of zero work, gap->5331s, miners disconnected). F4's docstring claimed
+    # the hold "self-clears the instant the tip advances", but a >50% node's tip
+    # cannot advance while it is refused. v36-0.21 makes the hold ESCAPABLE and
+    # moves the flood-cap from "refuse" to a consensus-safe serve-side clamp.
+    _stale_tip_majority_frac    = 0.5     # >= this share of the pool -> must serve
+    _stale_tip_hold_max         = 1200.0  # 2*_serve_stale_tip_max_age: absolute hold ceiling
+    _stale_tip_serve_max_easing = 4       # served target capped at 4x the tip's own target
+
+    def _local_pool_fraction(self):
+        '''Our own recent hashrate as a fraction of the whole pool's, read from
+        the same surface MONITOR-CONC prints: get_local_rates() (live + dead
+        local hashrate) over get_pool_attempts_per_second() (whole-pool realized
+        hashrate). Any read failure or missing monitor -> 0.0, i.e. treated as a
+        minority node so the hold stays armed (never a false escape).'''
+        try:
+            mh, dh = self.get_local_rates()
+            local = sum(mh.itervalues()) + sum(dh.itervalues())
+            if local <= 0:
+                return 0.0
+            best = self.node.best_share_var.value
+            height = self.node.tracker.get_height(best)
+            lookbehind = min(height - 1, self.node.net.TARGET_LOOKBEHIND)
+            if lookbehind < 2:
+                return 0.0
+            pool = p2pool_data.get_pool_attempts_per_second(
+                self.node.tracker, best, lookbehind)
+            if pool <= 0:
+                return 0.0
+            return float(local) / float(pool)
+        except Exception:
+            return 0.0
+
+    def _stale_tip_hold_active(self):
+        '''Bounded successor to the v36-0.20 stale-tip refusal. Refuse work ONLY
+        while the tip is stale AND neither escape condition holds:
+          (a) majority-escape: our own hashrate is >= _stale_tip_majority_frac of
+              the pool. Remote peers cannot advance the tip fast enough without
+              us (kr1z1s was 96.9-99.0% -- MONITOR-CONC), so refusing is a
+              self-inflicted deadlock; serve instead (the served easing is
+              clamped, so this cannot re-create the flood).
+          (b) duration-escape: the hold has already lasted >= _stale_tip_hold_max
+              (two full stale windows). A minority node that has waited that long
+              resumes serving rather than starve its miners forever.
+        Self-clears its hold-start state the instant the tip is fresh again, so a
+        transient stall never leaves the timer armed.'''
+        if not self._tip_is_stale():
+            self._stale_tip_hold_since = None
+            return False
+        now = time.time()
+        if getattr(self, '_stale_tip_hold_since', None) is None:
+            self._stale_tip_hold_since = now
+        # (a) majority-escape -- evaluated BEFORE any sustained refusal, so a >50%
+        # node's local rate is still high at the moment the hold would engage and
+        # it never enters the death-latch.
+        if self._local_pool_fraction() >= self._stale_tip_majority_frac:
+            return False
+        # (b) duration-escape.
+        if (now - self._stale_tip_hold_since) >= self._stale_tip_hold_max:
+            return False
+        return True
+
+    def _clamp_stale_tip_serve_target(self, desired_share_target, previous_share):
+        '''Serve-side easing cap (v36-0.21) -- the consensus-safe replacement for
+        the emergency-decay clamp. While the tip is stale, cap the SERVED target
+        at _stale_tip_serve_max_easing x the tip share's own target, so a node
+        whose stale-tip hold has RESUMED serving (majority/duration escape) can
+        never MINT flood-diff work off a dead tip.
+
+        Consensus-safe: this only ever HARDENS the served share (min() picks the
+        smaller = harder target). A share can always be mined harder than the
+        consensus floor, so verification is unaffected. Critically, the emergency
+        time-decay formula in data.py generate_transaction() -- which runs inside
+        Share.check() during network-wide share VERIFICATION -- is left byte-for-
+        byte untouched, so this node neither rejects the network's shares nor
+        mints shares the network would reject. No-op when the tip is fresh or the
+        tip target is unreadable.'''
+        if previous_share is None or not self._tip_is_stale():
+            return desired_share_target
+        try:
+            cap = previous_share.target * self._stale_tip_serve_max_easing
+            return min(desired_share_target, cap)
+        except Exception:
+            return desired_share_target
+
     def preprocess_request(self, user, peer_addr=None):
         # Debug: Uncomment to trace preprocess flow
         #print '[DEBUG] preprocess_request called with user:', repr(user)
@@ -2875,10 +2964,15 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 raise jsonrpc.Error_for_code(-12345)(u'p2pool is downloading shares')
             # Stale-tip backstop (extends the #19 gate): with peers present but the
             # served tip dead >600s, the emergency time-decay would compute
-            # drastically-too-easy work off it -- the diff-corruption flood. Hold
-            # and retry-poll (same semantics as the peerless/downloading refusals)
-            # until the tip advances. Self-clears when a fresh share arrives.
-            if self._tip_is_stale():
+            # drastically-too-easy work off it -- the diff-corruption flood.
+            # v36-0.21: the hold is now BOUNDED (_stale_tip_hold_active): a
+            # majority-hashrate node, or any node held for two full windows,
+            # RESUMES serving rather than deadlock -- because refusing the only
+            # tip-advancing hashrate is what starved kr1z1s's miners (2026-08-30).
+            # The flood is instead capped consensus-safely on the serve side
+            # (_clamp_stale_tip_serve_target, below). Self-clears when the tip is
+            # fresh again.
+            if self._stale_tip_hold_active():
                 raise jsonrpc.Error_for_code(-12345)(u'p2pool sharechain tip is stale')
 
         # Build user-specific merged templates so finder fee can target the work recipient.
@@ -3012,6 +3106,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     metrics.get('ratio', 0),
                     metrics.get('share_gap', 0),
                     metrics.get('source', 'unknown'))
+
+        # v36-0.21: serve-side easing clamp -- the consensus-safe replacement for
+        # the un-shipped emergency-decay clamp. While the tip is stale (the hold
+        # has RESUMED serving via the majority/duration escape above, or is about
+        # to on a non-PERSIST/solo node), cap the SERVED target at 4x the tip's
+        # own target so this node never MINTS flood-diff work off a dead tip.
+        # Only ever hardens the served share -> byte-identical share verification
+        # network-wide (data.py generate_transaction is untouched). No-op when the
+        # tip is fresh.
+        desired_share_target = self._clamp_stale_tip_serve_target(desired_share_target, previous_share)
 
         if True:
             # Build share_data differently based on share version

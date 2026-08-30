@@ -357,5 +357,140 @@ class GetWorkStaleTipGate(unittest.TestCase):
         self.assertRaises(_Sentinel, self._call, wb)
 
 
+# --------------------------------------------------------------------------
+# v36-0.21: the stale-tip serve-hold is now BOUNDED. v36-0.20 refused ALL work
+# on a stale tip; on a majority-hashrate node that deadlocks (refusing the only
+# hashrate that can advance the tip), which is exactly what starved kr1z1s's
+# miners on 2026-08-30. The hold must ESCAPE for a majority node, or after two
+# full windows for a minority node, and the flood must instead be capped on the
+# serve side (a consensus-safe hardening) rather than by refusing.
+# --------------------------------------------------------------------------
+
+class _FakeShare(object):
+    __slots__ = ('target',)
+    def __init__(self, target):
+        self.target = target
+
+
+@unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))
+class BoundedStaleTipHoldHelper(unittest.TestCase):
+    '''_stale_tip_hold_active truth table: refuse only while stale AND minority
+    AND within the hold window; escape on majority or on the duration ceiling.'''
+
+    def _stale_bridge(self):
+        return make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 1200)
+
+    def test_minority_within_window_refuses(self):
+        wb = self._stale_bridge()
+        wb._local_pool_fraction = lambda: 0.10   # small miner
+        wb._stale_tip_hold_since = None          # hold just starting
+        self.assertTrue(wb._stale_tip_hold_active())
+
+    def test_majority_escapes_immediately(self):
+        # kr1z1s was 96.9-99.0% of the pool -- refusing him is the deadlock.
+        wb = self._stale_bridge()
+        wb._local_pool_fraction = lambda: 0.90
+        wb._stale_tip_hold_since = None
+        self.assertFalse(wb._stale_tip_hold_active())
+
+    def test_exactly_majority_frac_escapes(self):
+        wb = self._stale_bridge()
+        wb._local_pool_fraction = lambda: WorkerBridge._stale_tip_majority_frac
+        wb._stale_tip_hold_since = None
+        self.assertFalse(wb._stale_tip_hold_active())
+
+    def test_minority_escapes_after_duration_ceiling(self):
+        wb = self._stale_bridge()
+        wb._local_pool_fraction = lambda: 0.0
+        wb._stale_tip_hold_since = time.time() - (WorkerBridge._stale_tip_hold_max + 60)
+        self.assertFalse(wb._stale_tip_hold_active())
+
+    def test_fresh_tip_never_holds_and_resets_timer(self):
+        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 30)
+        wb._local_pool_fraction = lambda: 0.0
+        wb._stale_tip_hold_since = time.time() - 99999  # stale timer left armed
+        self.assertFalse(wb._stale_tip_hold_active())
+        self.assertIsNone(wb._stale_tip_hold_since)     # cleared on a fresh tip
+
+    def test_hold_since_is_stamped_on_first_stale_call(self):
+        wb = self._stale_bridge()
+        wb._local_pool_fraction = lambda: 0.0
+        wb._stale_tip_hold_since = None
+        wb._stale_tip_hold_active()
+        self.assertIsNotNone(wb._stale_tip_hold_since)
+
+
+@unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))
+class GetWorkBoundedStaleTipGate(unittest.TestCase):
+    def _plant_post_guard_sentinel(self, wb):
+        def _boom(*a, **k):
+            raise _Sentinel()
+        wb._build_user_specific_merged_work = _boom
+
+    def _call(self, wb):
+        return wb.get_work('user', 'pkh', 0, 1, 1)
+
+    def test_majority_node_serves_despite_stale_tip(self):
+        # The regression under test: v36-0.20 refused here forever; v36-0.21 serves.
+        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - 1200)
+        wb._local_pool_fraction = lambda: 0.97
+        wb._stale_tip_hold_since = None
+        self._plant_post_guard_sentinel(wb)
+        self.assertRaises(_Sentinel, self._call, wb)   # reached template build => served
+
+    def test_minority_node_still_refuses_stale_tip(self):
+        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - 1200)
+        wb._local_pool_fraction = lambda: 0.05
+        wb._stale_tip_hold_since = None
+        self._plant_post_guard_sentinel(wb)
+        try:
+            self._call(wb)
+            self.fail('expected stale-tip refusal for a minority node')
+        except _Sentinel:
+            self.fail('minority node served a stale tip (should refuse)')
+        except jsonrpc.Error as e:
+            self.assertIn(u'tip is stale', e.message)
+
+    def test_duration_ceiling_lets_minority_node_resume(self):
+        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
+                         tip_timestamp=time.time() - 1200)
+        wb._local_pool_fraction = lambda: 0.05
+        wb._stale_tip_hold_since = time.time() - (WorkerBridge._stale_tip_hold_max + 60)
+        self._plant_post_guard_sentinel(wb)
+        self.assertRaises(_Sentinel, self._call, wb)
+
+
+@unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))
+class StaleTipServeClamp(unittest.TestCase):
+    '''The serve-side easing cap: under a stale tip the served target is capped
+    at _stale_tip_serve_max_easing x the tip's own target, and only ever hardens
+    (never eases) the share -- so it is consensus-safe.'''
+
+    def test_clamp_hardens_easy_target_under_stale_tip(self):
+        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 1200)
+        tip = _FakeShare(target=1000)
+        out = wb._clamp_stale_tip_serve_target(2**256 - 1, tip)
+        self.assertEqual(out, 1000 * WorkerBridge._stale_tip_serve_max_easing)
+
+    def test_clamp_keeps_a_harder_request(self):
+        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 1200)
+        tip = _FakeShare(target=1000)
+        out = wb._clamp_stale_tip_serve_target(500, tip)
+        self.assertEqual(out, 500)
+
+    def test_clamp_is_noop_on_fresh_tip(self):
+        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 30)
+        tip = _FakeShare(target=1000)
+        out = wb._clamp_stale_tip_serve_target(2**256 - 1, tip)
+        self.assertEqual(out, 2**256 - 1)
+
+    def test_clamp_is_noop_without_previous_share(self):
+        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 1200)
+        out = wb._clamp_stale_tip_serve_target(2**256 - 1, None)
+        self.assertEqual(out, 2**256 - 1)
+
+
 if __name__ == '__main__':
     unittest.main()
