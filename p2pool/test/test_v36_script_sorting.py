@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Test V36 script-based output sorting consensus rule.
 
