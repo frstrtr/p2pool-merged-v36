@@ -2662,6 +2662,36 @@ def get_decayed_cumulative_weights(tracker, start_hash, max_shares, desired_weig
 
     return weights, total_weight, donation_weight
 
+class _VerifyBudget(object):
+    '''Per-think() budget for EXPENSIVE share verifications (attempt_verify ->
+    Share.check()).  For V36 merged mining each check() is O(window) -- the
+    PPLNS decay walk (get_decayed_cumulative_weights) cannot use the skip list --
+    so verifying a freshly-adopted higher-work foreign chain of up to
+    CHAIN_LENGTH shares in ONE reactor callback is O(n^2) and blocks the reactor
+    for tens of seconds.  While blocked, p2p peers time out and drop, in-flight
+    share downloads abort, and clean_tracker purges the partially-synced chain --
+    the kr1z1s minority-fork adoption livelock.  This bounds the reactor time (or
+    count) spent verifying per think() call; think() runs on every handle_shares
+    batch plus a 5s LoopingCall, so already-verified / negative-cached shares are
+    O(1) skips and verification resumes on the next call -- progress stays
+    monotone and incremental without a long stall.'''
+    __slots__ = ['deadline', 'remaining', 'spent']
+    def __init__(self, time_budget, count_budget):
+        self.deadline = (time.time() + time_budget) if time_budget else None
+        self.remaining = count_budget  # None -> no count cap
+        self.spent = 0
+    def exhausted(self):
+        if self.remaining is not None and self.remaining <= 0:
+            return True
+        if self.deadline is not None and time.time() >= self.deadline:
+            return True
+        return False
+    def spend(self):
+        self.spent += 1
+        if self.remaining is not None:
+            self.remaining -= 1
+
+
 class OkayTracker(forest.Tracker):
     def __init__(self, net):
         forest.Tracker.__init__(self, delta_type=forest.get_attributedelta_type(dict(forest.AttributeDelta.attrs,
@@ -2688,7 +2718,20 @@ class OkayTracker(forest.Tracker):
         # they are retried normally once the missing data arrives.
         self._negative_verify_cache = collections.OrderedDict()  # hash -> None, FIFO
         self._negative_verify_cache_max = 10000
-    
+        # --- v36 convergence fix: bounded synchronous verification budget ---
+        # think() verifies foreign shares synchronously; when a minority node
+        # adopts a higher-work chain it must verify up to CHAIN_LENGTH foreign
+        # shares, and each Share.check() is O(window).  Verifying them all in one
+        # think() callback blocks the reactor tens of seconds, dropping the very
+        # peers serving the majority chain and letting clean_tracker purge the
+        # partial download -> the node never converges.  We cap the reactor time
+        # spent verifying per think() (verify_time_budget seconds) and/or the
+        # number of expensive verifications (verify_count_budget); the next
+        # think() continues where this one stopped.  Both None -> unbounded
+        # (legacy behaviour).  Tests set a count budget for determinism.
+        self.verify_time_budget = 0.5   # seconds of reactor time per think()
+        self.verify_count_budget = None  # optional hard cap on check() calls
+
     @staticmethod
     def _normalize_script_for_merged(script):
         """Normalize parent chain script to merged chain form.
@@ -2758,6 +2801,17 @@ class OkayTracker(forest.Tracker):
         while len(cache) > self._negative_verify_cache_max:
             cache.popitem(last=False)  # evict oldest
 
+    def _needs_verification(self, share_hash):
+        '''True iff attempt_verify(share_hash) would run the EXPENSIVE check()
+        path (i.e. the share is neither already verified nor negative-cached).
+        Used by think() to charge only real verifications against the budget --
+        cache hits stay free so incremental resume is O(1) per already-done
+        share.'''
+        return share_hash not in self.verified.items and share_hash not in self._negative_verify_cache
+
+    def _make_verify_budget(self):
+        return _VerifyBudget(self.verify_time_budget, self.verify_count_budget)
+
     def attempt_verify(self, share, block_abs_height_func, known_txs):
         if share.hash in self.verified.items:
             return True
@@ -2792,6 +2846,18 @@ class OkayTracker(forest.Tracker):
         desired = set()
         bad_peer_addresses = set()
         
+        # Bound the reactor time spent verifying foreign shares this cycle so a
+        # deep minority-fork adoption cannot block the reactor (which would drop
+        # the peers serving the majority chain and let clean_tracker purge the
+        # partial download). Both loops below share this one budget; when it is
+        # exhausted we stop verifying and return normally -- the next think()
+        # (every handle_shares batch + 5s LoopingCall) resumes, skipping the
+        # already-verified shares in O(1). Verification thus proceeds
+        # incrementally at full throughput without a long stall, and the EXISTING
+        # best-tail/best-head selection adopts the foreign chain the moment its
+        # verified height crosses the thresholds.
+        verify_budget = self._make_verify_budget()
+
         # O(len(self.heads))
         #   make 'unverified heads' set?
         # for each overall head, attempt verification
@@ -2800,8 +2866,12 @@ class OkayTracker(forest.Tracker):
         bads = []
         for head in set(self.heads) - set(self.verified.heads):
             head_height, last = self.get_height_and_last(head)
-            
+
             for share in self.get_chain(head, head_height if last is None else min(5, max(0, head_height - self.net.CHAIN_LENGTH))):
+                if self._needs_verification(share.hash):
+                    if verify_budget.exhausted():
+                        break  # resume this head on a later think() -- no desired add, no bad mark
+                    verify_budget.spend()
                 if self.attempt_verify(share, block_abs_height_func, known_txs):
                     break
                 bads.append(share.hash)
@@ -2837,6 +2907,10 @@ class OkayTracker(forest.Tracker):
             get = min(want, can)
             #print 'Z', head_height, last_hash is None, last_height, last_last_hash is None, want, can, get
             for share in self.get_chain(last_hash, get):
+                if self._needs_verification(share.hash):
+                    if verify_budget.exhausted():
+                        break  # resume this head's catch-up on a later think()
+                    verify_budget.spend()
                 if not self.attempt_verify(share, block_abs_height_func, known_txs):
                     break
             if head_height < self.net.CHAIN_LENGTH and last_last_hash is not None:

@@ -357,16 +357,32 @@ class Node(object):
         
         # eat away at heads
         if decorated_heads:
+            top5 = set(head_hash for score, head_hash in decorated_heads[-5:])
             for i in xrange(1000):
                 to_remove = set()
                 for share_hash, tail in self.tracker.heads.iteritems():
-                    if share_hash in [head_hash for score, head_hash in decorated_heads[-5:]]:
+                    if share_hash in top5:
                         #print 1
                         continue
                     if self.tracker.items[share_hash].time_seen > time.time() - 300:
                         #print 2
                         continue
-                    if share_hash not in self.tracker.verified.items and max(self.tracker.items[after_tail_hash].time_seen for after_tail_hash in self.tracker.reverse.get(tail)) > time.time() - 120: # XXX stupid
+                    # v36 convergence fix: protect any head whose FRONTIER (the
+                    # oldest-downloaded shares, reverse[tail]) received a share in
+                    # the last 300s -- i.e. a chain that is actively being
+                    # downloaded/extended toward a common ancestor. On master this
+                    # protection (originally 120s) was gated on
+                    # 'share_hash not in verified.items', so the instant the
+                    # incremental verifier (data.py think, budgeted) verified the
+                    # head it LOST protection and was purged mid-catch-up -- the
+                    # foreign majority chain could never finish syncing and the
+                    # minority node re-downloaded the same shares forever (kr1z1s:
+                    # spb re-downloaded 505,935 shares in 76 min without adopting).
+                    # We protect the head regardless of its verification state; the
+                    # window still self-lapses 300s after download activity stops,
+                    # so genuinely dead chains are still reaped.
+                    reverse_tail = self.tracker.reverse.get(tail)
+                    if reverse_tail and max(self.tracker.items[after_tail_hash].time_seen for after_tail_hash in reverse_tail) > time.time() - 300:
                         #print 3
                         continue
                     to_remove.add(share_hash)
