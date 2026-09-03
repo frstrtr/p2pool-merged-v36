@@ -11,8 +11,19 @@ from p2pool.util import deferral, variable
 
 
 class P2PNode(p2p.Node):
+    # v36-0.24 convergence: how long a per-peer failure to serve a given share
+    # hash is remembered. Within this window that peer is skipped for THAT hash
+    # (we fail over to other peers), and a head is "abandoned" (reapable) only
+    # once EVERY connected peer has failed its missing parent inside the window.
+    # Long enough to route around a black-hole/slow peer across several download
+    # attempts; short enough that a transiently-busy honest peer is retried and
+    # a parent that becomes available again is re-fetched. ~6*SHARE_PERIOD(15s).
+    _fetch_failure_ttl = 90.0
+
     def __init__(self, node, **kwargs):
         self.node = node
+        # share_hash -> {peer_key: last_failure_timestamp}
+        self._share_fetch_failures = {}
         p2p.Node.__init__(self,
             best_share_hash_func=lambda: node.best_share_var.value,
             net=node.net,
@@ -20,7 +31,66 @@ class P2PNode(p2p.Node):
             mining_txs_var=node.mining_txs_var,   # transactions from getblocktemplate
             mining2_txs_var=node.mining2_txs_var, # transactions sent to miners
         **kwargs)
-    
+
+    # --- v36-0.24 parent-fetch failover: no single peer can wedge convergence --
+    @staticmethod
+    def _peer_key(peer):
+        return getattr(peer, 'addr', None) or id(peer)
+
+    def _prune_fetch_failures(self, now):
+        for h in list(self._share_fetch_failures):
+            d = self._share_fetch_failures[h]
+            for k in list(d):
+                if now - d[k] > self._fetch_failure_ttl:
+                    del d[k]
+            if not d:
+                del self._share_fetch_failures[h]
+
+    def _record_fetch_failure(self, share_hash, peer):
+        self._share_fetch_failures.setdefault(share_hash, {})[self._peer_key(peer)] = time.time()
+
+    def _failed_peer_keys(self, share_hash, now):
+        d = self._share_fetch_failures.get(share_hash)
+        if not d:
+            return set()
+        return set(k for k, ts in d.iteritems() if now - ts <= self._fetch_failure_ttl)
+
+    def _choose_download_peer(self, share_hash, advertised_addr):
+        '''Pick a connected peer to request share_hash from, EXCLUDING peers that
+        have failed to serve this exact hash within _fetch_failure_ttl. Prefer the
+        peer that advertised the hash if it is still eligible. Returns None iff
+        every connected peer has recently failed this hash -- the caller then
+        backs off and lets the failures age out. This is the attack-vector fix:
+        a single black-hole/slow/malicious peer can never wedge a parent fetch,
+        because the node always fails over to another peer that may have it.'''
+        peers = list(self.peers.values())
+        if not peers:
+            return None
+        now = time.time()
+        failed = self._failed_peer_keys(share_hash, now)
+        eligible = [p for p in peers if self._peer_key(p) not in failed]
+        if not eligible:
+            return None
+        if advertised_addr is not None:
+            for p in eligible:
+                if getattr(p, 'addr', None) == advertised_addr:
+                    return p
+        return random.choice(eligible)
+
+    def _parent_abandoned(self, share_hash):
+        '''True iff there ARE connected peers and every one has recently failed to
+        serve share_hash -- the parent is unfetchable from the whole peer set, so
+        a head waiting on it may be reaped (memory stays bounded, and a peer that
+        merely re-advertises an unservable fragment cannot pin the tracker). With
+        no peers, or any peer not yet failed, returns False: the download is still
+        viable, so clean_tracker keeps protecting the head.'''
+        peers = list(self.peers.values())
+        if not peers:
+            return False
+        now = time.time()
+        failed = self._failed_peer_keys(share_hash, now)
+        return all(self._peer_key(p) in failed for p in peers)
+
     def handle_shares(self, shares, peer):
         if len(shares) > 5:
             print 'Processing %i shares from %s...' % (len(shares), '%s:%i' % peer.addr if peer is not None else None)
@@ -109,12 +179,23 @@ class P2PNode(p2p.Node):
             while True:
                 desired = yield self.node.desired_var.get_when_satisfies(lambda val: len(val) != 0)
                 peer_addr, share_hash = random.choice(desired)
-                
+
                 if len(self.peers) == 0:
                     yield deferral.sleep(1)
                     continue
-                peer = random.choice(self.peers.values())
-                
+                # v36-0.24: fail over across peers instead of picking a fully random
+                # one. Skip peers that have failed to serve THIS hash within the TTL
+                # and prefer the peer that advertised it. If every peer has recently
+                # failed this exact hash, back off briefly and let the loop pick a
+                # DIFFERENT desired parent -- a single black-hole/slow/malicious peer
+                # can no longer trap us re-requesting one unservable parent forever
+                # (the kr1z1s wall-parent loop: one hash requested 247x in 40 min).
+                self._prune_fetch_failures(time.time())
+                peer = self._choose_download_peer(share_hash, peer_addr)
+                if peer is None:
+                    yield deferral.sleep(1)
+                    continue
+
                 print 'Requesting parent share %s from %s' % (p2pool_data.format_hash(share_hash), '%s:%i' % peer.addr)
                 try:
                     shares = yield peer.get_shares(
@@ -126,18 +207,27 @@ class P2PNode(p2p.Node):
                     )
                 except defer.TimeoutError:
                     print 'Share request timed out!'
+                    self._record_fetch_failure(share_hash, peer)
                     continue
                 except (error.ConnectionLost, error.ConnectionDone, error.ConnectError):
                     print 'Lost connection to %s:%i during share download' % peer.addr
+                    self._record_fetch_failure(share_hash, peer)
                     continue
                 except:
                     log.err(None, 'in download_shares:')
+                    self._record_fetch_failure(share_hash, peer)
                     peer.badPeerHappened(30)
                     continue
-                
+
                 if not shares:
+                    # this peer does not have the requested parent -- remember that
+                    # so we ask a DIFFERENT peer next time, and only abandon the head
+                    # once the whole peer set has failed it (see _parent_abandoned).
+                    self._record_fetch_failure(share_hash, peer)
                     yield deferral.sleep(1) # sleep so we don't keep rerequesting the same share nobody has
                     continue
+                # got shares -> this parent is fetchable again; clear its failure memory
+                self._share_fetch_failures.pop(share_hash, None)
                 self.handle_shares([(share, []) for share in shares], peer)
         
         
@@ -352,9 +442,33 @@ class Node(object):
     def get_current_txouts(self):
         return p2pool_data.get_expected_payouts(self.tracker, self.best_share_var.value, self.bitcoind_work.value['bits'].target, self.bitcoind_work.value['subsidy'], self.net)
     
+    def _desired_parent_abandoned(self, parent_hash):
+        '''True iff every connected peer has recently failed to serve parent_hash,
+        so a head still requesting it may be reaped. p2p_node absent / no peers /
+        any peer not-yet-failed -> False (the download is still viable, keep the
+        head). Never raises: any error degrades to "not abandoned" (protect).'''
+        p2p = self.p2p_node
+        if p2p is None:
+            return False
+        try:
+            return p2p._parent_abandoned(parent_hash)
+        except Exception:
+            return False
+
     def clean_tracker(self):
         best, desired, decorated_heads, bad_peer_addresses, self.punish = self.tracker.think(self.get_height_rel_highest, self.get_height, self.bitcoind_work.value['previous_block'], self.bitcoind_work.value['bits'], self.known_txs_var.value)
-        
+
+        # v36-0.24 convergence: the parents think() still wants (its `desired`
+        # set). A head whose missing parent is here is one the node is ACTIVELY
+        # downloading -- it must not be purged just because a peer is slow, or the
+        # partial chain gets thrown away and re-downloaded from scratch forever
+        # (the kr1z1s 12,929-request relapse loop, which the self-lapsing 300s
+        # frontier timer below could not stop). The protection is bounded by
+        # _desired_parent_abandoned: once EVERY connected peer has failed to serve
+        # the parent it is unfetchable and the head becomes reapable, so a
+        # malicious peer re-advertising an unservable fragment cannot pin memory.
+        desired_parents = set(d[1] for d in desired)
+
         # eat away at heads
         if decorated_heads:
             top5 = set(head_hash for score, head_hash in decorated_heads[-5:])
@@ -366,6 +480,10 @@ class Node(object):
                         continue
                     if self.tracker.items[share_hash].time_seen > time.time() - 300:
                         #print 2
+                        continue
+                    # PRIMARY protection: the node still wants this head's missing
+                    # parent and the peer set has not collectively given up on it.
+                    if tail in desired_parents and not self._desired_parent_abandoned(tail):
                         continue
                     # v36 convergence fix: protect any head whose FRONTIER (the
                     # oldest-downloaded shares, reverse[tail]) received a share in
