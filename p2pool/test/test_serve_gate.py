@@ -303,7 +303,14 @@ def wb_max_age():
 
 
 @unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))
-class GetWorkStaleTipGate(unittest.TestCase):
+class GetWorkServesStaleTip(unittest.TestCase):
+    '''v36-0.24: the stale-tip serve-HOLD (v0.20 refusal + v0.21/0.22
+    majority/duration escapes) is REMOVED. get_work keeps only the two canonical
+    jtoomim guards (peerless / no-best-share); a stale tip is SERVED, not refused
+    (restoring v35 behaviour), with the flood contained by the serve-side clamp.
+    Reaching _build_user_specific_merged_work (the planted _Sentinel) proves the
+    request was served past all guards.'''
+
     def _plant_post_guard_sentinel(self, wb):
         def _boom(*a, **k):
             raise _Sentinel()
@@ -312,154 +319,52 @@ class GetWorkStaleTipGate(unittest.TestCase):
     def _call(self, wb):
         return wb.get_work('user', 'pkh', 0, 1, 1)
 
-    def test_refuses_when_tip_stale(self):
-        # Peer connected, head present, but tip dead >600s -> stale-tip refusal.
+    def test_serves_when_tip_stale(self):
+        # The v36-0.24 change: v0.20 refused here; we now SERVE (no self-desync door).
         wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
                          tip_timestamp=time.time() - 1200)
         self._plant_post_guard_sentinel(wb)
-        try:
-            self._call(wb)
-            self.fail('expected stale-tip refusal')
-        except _Sentinel:
-            self.fail('guard did not fire on a stale tip')
-        except jsonrpc.Error as e:
-            self.assertEqual(e.code, -12345)
-            self.assertIn(u'tip is stale', e.message)
+        self.assertRaises(_Sentinel, self._call, wb)
 
     def test_serves_when_tip_fresh(self):
-        # Same node, fresh tip -> guard inert, reaches template build.
         wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
                          tip_timestamp=time.time() - 30)
         self._plant_post_guard_sentinel(wb)
         self.assertRaises(_Sentinel, self._call, wb)
 
-    def test_self_clears_when_tip_advances(self):
-        # A node that was refusing on a stale tip must serve again the instant the
-        # tip advances -- proving the refusal is not a latch.
-        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
+    def test_still_refuses_when_peerless(self):
+        # The canonical peerless guard is untouched.
+        wb = make_bridge(persist=True, npeers=0, best_share='HEAD',
                          tip_timestamp=time.time() - 1200)
         self._plant_post_guard_sentinel(wb)
-        self.assertRaises(jsonrpc.Error, self._call, wb)
-        # Tip advances (fresh share): same bridge now passes the gate.
-        wb.node.tracker.items['HEAD'].timestamp = time.time()
-        self.assertRaises(_Sentinel, self._call, wb)
+        try:
+            self._call(wb)
+            self.fail('expected peerless refusal')
+        except _Sentinel:
+            self.fail('served work with no peers')
+        except jsonrpc.Error as e:
+            self.assertEqual(e.code, -12345)
+            self.assertIn(u'not connected to any peers', e.message)
 
-    def test_solo_flag_bypasses_stale_tip_gate(self):
-        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
-                         tip_timestamp=time.time() - 1200, allow_peerless=True)
+    def test_still_refuses_when_no_best_share(self):
+        # The canonical downloading-shares guard is untouched.
+        wb = make_bridge(persist=True, npeers=1, best_share=None)
         self._plant_post_guard_sentinel(wb)
-        self.assertRaises(_Sentinel, self._call, wb)
+        try:
+            self._call(wb)
+            self.fail('expected downloading-shares refusal')
+        except _Sentinel:
+            self.fail('served work with no best share')
+        except jsonrpc.Error as e:
+            self.assertEqual(e.code, -12345)
+            self.assertIn(u'downloading shares', e.message)
 
-    def test_persist_false_bypasses_stale_tip_gate(self):
-        wb = make_bridge(persist=False, npeers=1, best_share='HEAD',
-                         tip_timestamp=time.time() - 1200)
-        self._plant_post_guard_sentinel(wb)
-        self.assertRaises(_Sentinel, self._call, wb)
 
-
-# --------------------------------------------------------------------------
-# v36-0.21: the stale-tip serve-hold is now BOUNDED. v36-0.20 refused ALL work
-# on a stale tip; on a majority-hashrate node that deadlocks (refusing the only
-# hashrate that can advance the tip), which is exactly what starved kr1z1s's
-# miners on 2026-08-30. The hold must ESCAPE for a majority node, or after two
-# full windows for a minority node, and the flood must instead be capped on the
-# serve side (a consensus-safe hardening) rather than by refusing.
-# --------------------------------------------------------------------------
-
+# Retained helper for the serve-side clamp suite below.
 class _FakeShare(object):
     __slots__ = ('target',)
     def __init__(self, target):
         self.target = target
-
-
-@unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))
-class BoundedStaleTipHoldHelper(unittest.TestCase):
-    '''_stale_tip_hold_active truth table: refuse only while stale AND minority
-    AND within the hold window; escape on majority or on the duration ceiling.'''
-
-    def _stale_bridge(self):
-        return make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 1200)
-
-    def test_minority_within_window_refuses(self):
-        wb = self._stale_bridge()
-        wb._local_pool_fraction = lambda: 0.10   # small miner
-        wb._stale_tip_hold_since = None          # hold just starting
-        self.assertTrue(wb._stale_tip_hold_active())
-
-    def test_majority_escapes_immediately(self):
-        # kr1z1s was 96.9-99.0% of the pool -- refusing him is the deadlock.
-        wb = self._stale_bridge()
-        wb._local_pool_fraction = lambda: 0.90
-        wb._stale_tip_hold_since = None
-        self.assertFalse(wb._stale_tip_hold_active())
-
-    def test_exactly_majority_frac_escapes(self):
-        wb = self._stale_bridge()
-        wb._local_pool_fraction = lambda: WorkerBridge._stale_tip_majority_frac
-        wb._stale_tip_hold_since = None
-        self.assertFalse(wb._stale_tip_hold_active())
-
-    def test_minority_escapes_after_duration_ceiling(self):
-        wb = self._stale_bridge()
-        wb._local_pool_fraction = lambda: 0.0
-        wb._stale_tip_hold_since = time.time() - (WorkerBridge._stale_tip_hold_max + 60)
-        self.assertFalse(wb._stale_tip_hold_active())
-
-    def test_fresh_tip_never_holds_and_resets_timer(self):
-        wb = make_bridge(npeers=1, best_share='HEAD', tip_timestamp=time.time() - 30)
-        wb._local_pool_fraction = lambda: 0.0
-        wb._stale_tip_hold_since = time.time() - 99999  # stale timer left armed
-        self.assertFalse(wb._stale_tip_hold_active())
-        self.assertIsNone(wb._stale_tip_hold_since)     # cleared on a fresh tip
-
-    def test_hold_since_is_stamped_on_first_stale_call(self):
-        wb = self._stale_bridge()
-        wb._local_pool_fraction = lambda: 0.0
-        wb._stale_tip_hold_since = None
-        wb._stale_tip_hold_active()
-        self.assertIsNotNone(wb._stale_tip_hold_since)
-
-
-@unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))
-class GetWorkBoundedStaleTipGate(unittest.TestCase):
-    def _plant_post_guard_sentinel(self, wb):
-        def _boom(*a, **k):
-            raise _Sentinel()
-        wb._build_user_specific_merged_work = _boom
-
-    def _call(self, wb):
-        return wb.get_work('user', 'pkh', 0, 1, 1)
-
-    def test_majority_node_serves_despite_stale_tip(self):
-        # The regression under test: v36-0.20 refused here forever; v36-0.21 serves.
-        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
-                         tip_timestamp=time.time() - 1200)
-        wb._local_pool_fraction = lambda: 0.97
-        wb._stale_tip_hold_since = None
-        self._plant_post_guard_sentinel(wb)
-        self.assertRaises(_Sentinel, self._call, wb)   # reached template build => served
-
-    def test_minority_node_still_refuses_stale_tip(self):
-        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
-                         tip_timestamp=time.time() - 1200)
-        wb._local_pool_fraction = lambda: 0.05
-        wb._stale_tip_hold_since = None
-        self._plant_post_guard_sentinel(wb)
-        try:
-            self._call(wb)
-            self.fail('expected stale-tip refusal for a minority node')
-        except _Sentinel:
-            self.fail('minority node served a stale tip (should refuse)')
-        except jsonrpc.Error as e:
-            self.assertIn(u'tip is stale', e.message)
-
-    def test_duration_ceiling_lets_minority_node_resume(self):
-        wb = make_bridge(persist=True, npeers=1, best_share='HEAD',
-                         tip_timestamp=time.time() - 1200)
-        wb._local_pool_fraction = lambda: 0.05
-        wb._stale_tip_hold_since = time.time() - (WorkerBridge._stale_tip_hold_max + 60)
-        self._plant_post_guard_sentinel(wb)
-        self.assertRaises(_Sentinel, self._call, wb)
 
 
 @unittest.skipUnless(HAVE_WORK, 'p2pool.work unavailable: %s' % (_WORK_IMPORT_ERR,))

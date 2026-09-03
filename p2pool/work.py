@@ -2129,153 +2129,39 @@ class WorkerBridge(worker_interface.WorkerBridge):
             return False
         return (time.time() - ts) > self._serve_stale_tip_max_age
 
-    # --- v36-0.21: bound the stale-tip serve-hold + clamp the served easing ---
-    # v36-0.20 (F4) refused ALL get_work while the served tip was dead >600s.
-    # On a MAJORITY-hashrate node that is an unbounded deadlock: refusing removes
-    # the only hashrate that can advance the tip, so the hold NEVER self-clears
-    # and the miners starve off (the kr1z1s 2026-08-30 after-hours latch -- 80
-    # min of zero work, gap->5331s, miners disconnected). F4's docstring claimed
-    # the hold "self-clears the instant the tip advances", but a >50% node's tip
-    # cannot advance while it is refused. v36-0.21 makes the hold ESCAPABLE and
-    # moves the flood-cap from "refuse" to a consensus-safe serve-side clamp.
-    _stale_tip_majority_frac    = 0.5     # >= this share of the pool -> must serve
-    _stale_tip_hold_max         = 1200.0  # 2*_serve_stale_tip_max_age: absolute hold ceiling
+    # --- v36-0.24: the stale-tip serve-HOLD and its escapes are REMOVED --------
+    # HISTORY. v36-0.20 (#21) refused ALL get_work while the served tip was dead
+    # >600s, to stop the v36-only emergency time-decay from minting flood-diff
+    # work off a dead tip. v36-0.21 (#22, da77f64) found that refusal deadlocks a
+    # majority node (refusing the only tip-advancing hashrate -> the tip can never
+    # advance -> the hold never clears -> miners starve; kr1z1s 2026-08-30) and so
+    # made the hold ESCAPABLE via a "majority-escape" that served work again when
+    # _local_pool_fraction() >= 0.5. v0.22 (#24, F4) then had to widen that
+    # fraction's denominator because a minority-fork node with local miners always
+    # measured >= 0.5 and self-escaped onto its own fork.
+    #
+    # WHY IT IS GONE. Any mechanism where a node's OWN local state decides "I am
+    # the majority, so I may resume minting on this (possibly minority) tip" is a
+    # fork-birth / self-desync door -- exactly the attack class this fix closes: a
+    # node on a minority tip must never be able to declare itself the majority and
+    # self-sustain a fork while a longer live chain is reachable. v35 (jtoomim)
+    # had NO such hold, NO escapes, and NO emergency decay, and converged
+    # flawlessly with the identical chain-selection code (grep confirms 0
+    # occurrences of any of these symbols in v35 work.py). The flood the v0.20
+    # hold was invented to stop is contained CONSENSUS-SAFELY, without ever
+    # refusing work, by _clamp_stale_tip_serve_target below (it only HARDENS the
+    # served target; share verification network-wide is byte-identical). So we
+    # restore v35's serve-always behaviour and keep only the serve-side clamp.
     _stale_tip_serve_max_easing = 4       # served target capped at 4x the tip's own target
 
-    def _chain_attempts_per_second(self, head_hash):
-        '''Realized whole-chain hashrate (attempts/sec) over the lookbehind
-        window ending at head_hash, computed on the tracker's RAW forest.
-        get_height/get_nth_parent_hash/get_delta all work on UNVERIFIED items,
-        so a partially-downloaded foreign chain contributes as soon as its
-        downloaded height >= 3 (lookbehind >= 2, the get_pool_attempts_per_second
-        consensus guard). Returns None on any failure or non-positive rate, so a
-        single broken/short head can never poison the majority determination.'''
-        try:
-            height = self.node.tracker.get_height(head_hash)
-            lookbehind = min(height - 1, self.node.net.TARGET_LOOKBEHIND)
-            if lookbehind < 2:
-                return None
-            rate = p2pool_data.get_pool_attempts_per_second(
-                self.node.tracker, head_hash, lookbehind)
-            if rate <= 0:
-                return None
-            return rate
-        except Exception:
-            return None
-
-    def _local_pool_fraction(self):
-        '''Our own recent hashrate as a fraction of the BEST-KNOWN LIVE chain's,
-        read from the same surface MONITOR-CONC prints: get_local_rates() (live +
-        dead local hashrate) over the realized whole-chain hashrate.
-
-        v36-0.22 (F4) fixes a self-referential defect in the v0.21 denominator.
-        v0.21 divided local by get_pool_attempts_per_second() over OUR OWN best
-        tail only -- a window that counts just the shares our own chain minted. On
-        a MINORITY-FORK node WITH local miners the own-fork window is tiny, so
-        local/pool >= 0.5 ALWAYS -> the majority-escape always fires -> the node
-        resumes minting on its OWN fork -> refreshes its own stale tip -> the fork
-        becomes self-sustaining, and #23's F1/F2 adoption gets a zero-second
-        window to switch away (the ekb 2026-09-01 measurement: apparent local
-        ~4.1 GH/s vs own-fork pool ~1.6 MH/s, gap 161s, 91.4% own-share orphans
-        8248/9087 -- the escape fired but never converged).
-
-        The fix makes the majority determination robust to THIS node being on a
-        minority chain: the denominator is the fastest realized rate across our
-        own best chain AND every tracker head that is LIVE -- whose newest share
-        timestamp is within _serve_stale_tip_max_age of wall-clock. That is the
-        SAME staleness predicate as _tip_is_stale(); since this code only runs
-        while our own tip is >600s stale, any head that passes it is strictly
-        fresher than ours -- a genuine higher-work adoption candidate that #23's
-        F2 frontier retention keeps present in tracker.heads and F1's verify
-        budget keeps growing. No new wire messages: purely local tracker reads.
-
-          TRUE-majority node (rov/kr1z1s): every foreign head is either stale/dead
-          (after-hours -> skipped by the liveness filter -> denominator == v0.21's
-          own-chain rate byte-identical) or a live minority fork whose window
-          spans the pre-fork common history the whole pool (incl. us) minted, so
-          its rate does not exceed our own-chain window rate -> max() unchanged ->
-          fraction still >= 0.5 -> escape fires immediately, exactly as da77f64
-          intended (no v0.20 deadlock regression).
-
-          MINORITY-fork-with-local-miners node (ekb): the live majority chain is
-          in tracker.heads, its timestamps are fresh, its realized rate is the
-          true pool rate >> our local -> denominator jumps to the real pool rate
-          -> fraction < 0.5 -> the false majority claim is suppressed -> the hold
-          persists -> own minting stops -> the fork stops self-refreshing its tip
-          -> F1/F2 adoption switches best -> the tip advances and the hold
-          self-clears. If local hashrate genuinely IS >= 50% of the best live
-          chain, the escape still fires -- which is then correct.
-
-        Any total read failure or missing monitor -> 0.0, i.e. treated as a
-        minority node so the hold stays armed (never a false escape). A single
-        broken foreign head degrades to today's behaviour (skipped), never to a
-        false hold.'''
-        try:
-            mh, dh = self.get_local_rates()
-            local = sum(mh.itervalues()) + sum(dh.itervalues())
-            if local <= 0:
-                return 0.0
-            # (1) our own best-chain realized rate, exactly as v0.21 computed it.
-            pool = self._chain_attempts_per_second(self.node.best_share_var.value)
-            # (2) widen to the fastest LIVE chain the tracker knows. Only heads
-            # fresher than _serve_stale_tip_max_age count (dead/after-hours forks
-            # are excluded, so the original kr1z1s scenario is byte-identical).
-            # A live foreign chain can only RAISE the denominator, never lower it,
-            # so this can suppress a false escape but never manufacture one.
-            now = time.time()
-            for head in list(self.node.tracker.heads):
-                try:
-                    item = self.node.tracker.items[head]
-                    if (now - item.timestamp) > self._serve_stale_tip_max_age:
-                        continue
-                except Exception:
-                    continue
-                rate = self._chain_attempts_per_second(head)
-                if rate is None:
-                    continue
-                if pool is None or rate > pool:
-                    pool = rate
-            if pool is None or pool <= 0:
-                return 0.0
-            return float(local) / float(pool)
-        except Exception:
-            return 0.0
-
-    def _stale_tip_hold_active(self):
-        '''Bounded successor to the v36-0.20 stale-tip refusal. Refuse work ONLY
-        while the tip is stale AND neither escape condition holds:
-          (a) majority-escape: our own hashrate is >= _stale_tip_majority_frac of
-              the pool. Remote peers cannot advance the tip fast enough without
-              us (kr1z1s was 96.9-99.0% -- MONITOR-CONC), so refusing is a
-              self-inflicted deadlock; serve instead (the served easing is
-              clamped, so this cannot re-create the flood).
-          (b) duration-escape: the hold has already lasted >= _stale_tip_hold_max
-              (two full stale windows). A minority node that has waited that long
-              resumes serving rather than starve its miners forever.
-        Self-clears its hold-start state the instant the tip is fresh again, so a
-        transient stall never leaves the timer armed.'''
-        if not self._tip_is_stale():
-            self._stale_tip_hold_since = None
-            return False
-        now = time.time()
-        if getattr(self, '_stale_tip_hold_since', None) is None:
-            self._stale_tip_hold_since = now
-        # (a) majority-escape -- evaluated BEFORE any sustained refusal, so a >50%
-        # node's local rate is still high at the moment the hold would engage and
-        # it never enters the death-latch.
-        if self._local_pool_fraction() >= self._stale_tip_majority_frac:
-            return False
-        # (b) duration-escape.
-        if (now - self._stale_tip_hold_since) >= self._stale_tip_hold_max:
-            return False
-        return True
-
     def _clamp_stale_tip_serve_target(self, desired_share_target, previous_share):
-        '''Serve-side easing cap (v36-0.21) -- the consensus-safe replacement for
-        the emergency-decay clamp. While the tip is stale, cap the SERVED target
-        at _stale_tip_serve_max_easing x the tip share's own target, so a node
-        whose stale-tip hold has RESUMED serving (majority/duration escape) can
-        never MINT flood-diff work off a dead tip.
+        '''Serve-side easing cap (v36-0.21, retained) -- the consensus-safe
+        replacement for the emergency-decay clamp, and now (v36-0.24) the SOLE
+        containment for the stale-tip flood after the serve-hold + escapes were
+        removed. While the tip is stale, cap the SERVED target at
+        _stale_tip_serve_max_easing x the tip share's own target, so a node still
+        serving work off a dead tip (we no longer refuse it) can never MINT
+        flood-diff work off that tip.
 
         Consensus-safe: this only ever HARDENS the served share (min() picks the
         smaller = harder target). A share can always be mined harder than the
@@ -3037,18 +2923,16 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 raise jsonrpc.Error_for_code(-12345)(u'p2pool is not connected to any peers')
             if self.node.best_share_var.value is None:
                 raise jsonrpc.Error_for_code(-12345)(u'p2pool is downloading shares')
-            # Stale-tip backstop (extends the #19 gate): with peers present but the
-            # served tip dead >600s, the emergency time-decay would compute
-            # drastically-too-easy work off it -- the diff-corruption flood.
-            # v36-0.21: the hold is now BOUNDED (_stale_tip_hold_active): a
-            # majority-hashrate node, or any node held for two full windows,
-            # RESUMES serving rather than deadlock -- because refusing the only
-            # tip-advancing hashrate is what starved kr1z1s's miners (2026-08-30).
-            # The flood is instead capped consensus-safely on the serve side
-            # (_clamp_stale_tip_serve_target, below). Self-clears when the tip is
-            # fresh again.
-            if self._stale_tip_hold_active():
-                raise jsonrpc.Error_for_code(-12345)(u'p2pool sharechain tip is stale')
+            # v36-0.24: the stale-tip serve-HOLD (v0.20 refusal + v0.21/0.22
+            # majority/duration escapes) is REMOVED -- it was a self-desync door
+            # (a node's own local state deciding "I am the majority" resumed
+            # minting on its own possibly-minority tip) and v35 converged flawlessly
+            # with no such hold. We keep only the two canonical jtoomim guards above
+            # (peerless / no-best-share). The emergency-decay flood the hold was
+            # invented to stop is now contained on the serve side, without ever
+            # refusing work, by _clamp_stale_tip_serve_target (below): it only
+            # HARDENS the served target, so share verification stays byte-identical
+            # network-wide and a majority node is never starved of work.
 
         # Build user-specific merged templates so finder fee can target the work recipient.
         effective_merged_work = self._build_user_specific_merged_work(user, merged_addresses, share_pubkey_hash=pubkey_hash, share_pubkey_type=pubkey_type)

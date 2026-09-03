@@ -74,6 +74,14 @@ jobs:
           else
             echo "skip: p2pool/test/test_convergence.py absent on this tree"
           fi
+      - name: Minority-fork livelock convergence suite (if present)
+        run: |
+          if [ -f p2pool/test/test_minority_fork_livelock.py ]; then
+            pip install "twisted<21" || echo "warn: twisted install failed; livelock tests will self-skip"
+            python -m unittest -v p2pool.test.test_minority_fork_livelock
+          else
+            echo "skip: p2pool/test/test_minority_fork_livelock.py absent on this tree"
+          fi
       - name: Offline gentx golden-vector differential (if present)
         run: |
           if [ -f p2pool/test/test_gentx_golden_offline.py ]; then
