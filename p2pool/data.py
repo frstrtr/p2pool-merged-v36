@@ -3279,6 +3279,23 @@ class AutoRatchet(object):
             # CONFIRMED is permanent for bootstrap, but still respects network consensus
             if full_window and vote_pct < self.DEACTIVATION_THRESHOLD:
                 print '[AutoRatchet] WARNING: CONFIRMED but network is %d%% V35 - following network consensus' % (100 - vote_pct)
+                # Reset MINIMUM_PROTOCOL_VERSION so V35 peers can reconnect.
+                # We are choosing to follow the old-version majority chain, so we
+                # must stop banning the very peers that produce it - otherwise the
+                # bump to 3600 (done while CONFIRMED) keeps p2p.py rejecting every
+                # producer with protocol < 3600 as 'peer too old', and our shares
+                # never reach the chain we are following. Mirror the ACTIVATED ->
+                # VOTING reset above exactly (same helper, same 3301 base).
+                base_min = getattr(net, '_base_minimum_protocol_version', None)
+                if base_min is None:
+                    from p2pool.networks import litecoin_testnet, litecoin
+                    # Use 3301 as the safe default that accepts both V35 (3502) and V36 (3503)
+                    base_min = 3301
+                cur_min = getattr(net, 'MINIMUM_PROTOCOL_VERSION', 1400)
+                if cur_min > base_min:
+                    net.MINIMUM_PROTOCOL_VERSION = base_min
+                    print '[AutoRatchet] Reset MINIMUM_PROTOCOL_VERSION %d -> %d (allow V35 peers)' % (
+                        cur_min, base_min)
                 return (PaddingBugfixShare, 36)
         
         # --- Output ---
