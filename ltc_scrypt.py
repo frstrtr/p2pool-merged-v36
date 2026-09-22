@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Scrypt PoW hash shim for p2pool.
 
