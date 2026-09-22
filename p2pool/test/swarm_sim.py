@@ -37,9 +37,24 @@ high-hash / low-difficulty reject (the replayed nonce failing PoW on a job that
 WAS still current) is counted as reject-other, never as DOA -- so the DOA% is
 not inflated by the fact that we cannot produce real PoW.
 
+p2pool does NOT tag DOA with an error: work.py got_response returns its
+on_time flag, so a stale submit comes back as {"result": false, "error": null}
+(and so does a PoW miss on a current job -- got_response returns on_time on
+every path). A bare false is therefore counted as node-reported DOA, not as
+reject-other. On an isolated (PERSIST=False) net that flag is loose
+(on_time = work-event lag <= 30), so --dump also records every notify and
+submit reply with its job prevhash; t4ab_analyze.py joins that against the
+coind tip timeline to give an implementation-independent stale-on-arrival %.
+
+--miss-block (regtest only): on regtest the block target (~2**255) is easier
+than any pseudo-share target, so a replayed header that passes share PoW is
+also a real block and the node submits it, draining the mempool the benchmark
+depends on. With --miss-block the replay grinds the nonce until the scrypt
+PoW hash is >= 2**255, so it can never meet a block or share target.
+
 Python2 / Twisted (reactor) -- matches the fork runtime.
 """
-import json, time
+import binascii, hashlib, json, struct, time
 from twisted.internet import reactor, defer, protocol
 from twisted.protocols import basic
 
@@ -71,6 +86,35 @@ def _looks_stale(err):
     return any(tok in m for tok in _STALE_TOKENS)
 
 
+def _sha256d(b):
+    return hashlib.sha256(hashlib.sha256(b).digest()).digest()
+
+
+def _swap4(b):
+    return "".join(b[i:i + 4][::-1] for i in range(0, len(b), 4))
+
+
+def _grind_miss_nonce(job, extranonce1, extranonce2, ntime):
+    """Return a nonce (8 hex, stratum BE) whose scrypt PoW hash is >= 2**255,
+    i.e. fails every target a regtest node can hold. ~2 scrypt calls."""
+    import ltc_scrypt
+    coinb = (binascii.unhexlify(job["coinb1"]) + binascii.unhexlify(extranonce1)
+             + binascii.unhexlify(extranonce2) + binascii.unhexlify(job["coinb2"]))
+    root = _sha256d(coinb)
+    for br in job["branch"]:
+        root = _sha256d(root + binascii.unhexlify(br))
+    head = (binascii.unhexlify(job["version"])[::-1]
+            + _swap4(binascii.unhexlify(job["prevhash"]))
+            + root
+            + binascii.unhexlify(ntime)[::-1]
+            + binascii.unhexlify(job["nbits"])[::-1])
+    for n in xrange(1 << 16):
+        pow_le = ltc_scrypt.getPoWHash(head + struct.pack("<I", n))
+        if ord(pow_le[31]) & 0x80:
+            return "%08x" % n
+    raise RuntimeError("could not grind a block-missing nonce")
+
+
 class StratumConn(basic.LineReceiver):
     delimiter = '\n'
     MAX_LENGTH = 1 << 20
@@ -86,7 +130,8 @@ class StratumConn(basic.LineReceiver):
         self.cur_job = None            # job_id from the latest notify
         self.cur_ntime = "00000000"
         self._subscribe_id = None
-        self._submits = {}             # rpc id -> job_id submitted against
+        self._submits = {}             # rpc id -> (job_id, prevhash, t_sent)
+        self._jobs = {}                # job_id -> notify fields for --miss-block
         self._n_submitted = 0
 
     def connectionMade(self):
@@ -131,14 +176,17 @@ class StratumConn(basic.LineReceiver):
             return
         # submit response: classify accepted / stale(DOA) / reject-other
         if rid in self._submits:
-            self._submits.pop(rid, None)
+            job_id, prevhash, t_sent = self._submits.pop(rid)
             err = msg.get("error")
             if msg.get("result") is True and err is None:
-                self.stats.record_submit("accepted")
-            elif _looks_stale(err):
-                self.stats.record_submit("stale")
+                kind = "accepted"
+            elif (msg.get("result") is False and err is None) or _looks_stale(err):
+                kind = "stale"
             else:
-                self.stats.record_submit("reject")
+                kind = "reject"
+            self.stats.record_submit(kind)
+            self.stats.dump("submit", self.cid, prevhash=prevhash, t_sent=t_sent,
+                            t_reply=time.time(), kind=kind)
 
     def _on_notify(self, params):
         now = time.time()
@@ -151,6 +199,13 @@ class StratumConn(basic.LineReceiver):
         # ntime is params[7] in the standard stratum notify layout.
         if len(params) > 7 and params[7]:
             self.cur_ntime = params[7]
+        if len(params) > 6:
+            self._jobs[params[0]] = dict(prevhash=params[1], coinb1=params[2],
+                                         coinb2=params[3], branch=params[4],
+                                         version=params[5], nbits=params[6])
+            if len(self._jobs) > 64:
+                self._jobs.pop(next(iter(self._jobs)))
+            self.stats.dump("notify", self.cid, prevhash=params[1], t=now)
         # arm a replayed share submit for the job we just saw.
         if self.cfg["submit"] and self._n_submitted < self.cfg["max_submits"]:
             job_at_arm = self.cur_job
@@ -163,15 +218,19 @@ class StratumConn(basic.LineReceiver):
             return
         extranonce2 = "00" * self.extranonce2_size
         nonce = self.cfg["nonce"]
+        job = self._jobs.get(job_id)
+        if self.cfg["miss_block"] and job is not None:
+            nonce = _grind_miss_nonce(job, self.extranonce1, extranonce2, ntime)
         rid = self._send("mining.submit",
                          ["swarm.%d" % self.cid, job_id, extranonce2, ntime, nonce])
-        self._submits[rid] = job_id
+        self._submits[rid] = (job_id, job["prevhash"] if job else None, time.time())
         self._n_submitted += 1
         self.stats.record_submit("sent")
 
 
 class Stats(object):
-    def __init__(self):
+    def __init__(self, dump_path=None):
+        self._dump = open(dump_path, "w") if dump_path else None
         self.first_notify = []
         self.last_notify_at = {}
         self.inter_notify = []
@@ -196,6 +255,11 @@ class Stats(object):
 
     def record_submit(self, kind):
         self.submits[kind] = self.submits.get(kind, 0) + 1
+
+    def dump(self, ev, cid, **kw):
+        if self._dump is not None:
+            kw.update(ev=ev, cid=cid)
+            self._dump.write(json.dumps(kw) + "\n")
 
     def report(self):
         def pct(xs, p):
@@ -231,9 +295,11 @@ class Stats(object):
         print("submits sent=%d  accepted=%d  stale/DOA=%d  reject-other=%d  pending=%d"
               % (s["sent"], s["accepted"], s["stale"], s["reject"],
                  s["sent"] - resolved))
-        print("DOA%%  = %.2f%%  (stale / resolved; kr1z1s baseline 10-12%%, G1 target ~1-2%%)"
+        print("DOA%%  = %.2f%%  (node-reported stale / resolved; kr1z1s baseline 10-12%%, G1 target ~1-2%%)"
               % doa_pct)
         print("=" * 66)
+        if self._dump is not None:
+            self._dump.close()
 
 
 class ConnFactory(protocol.ClientFactory):
@@ -249,7 +315,7 @@ class ConnFactory(protocol.ClientFactory):
 
 @defer.inlineCallbacks
 def run(host, port, n, seconds, cfg):
-    stats = Stats()
+    stats = Stats(cfg["dump"])
     print("swarm: %d connections -> %s:%d for %ds  (submit=%s delay=%.0fms)"
           % (n, host, port, seconds, cfg["submit"], cfg["submit_delay"] * 1e3))
     for cid in range(n):
@@ -280,12 +346,19 @@ if __name__ == "__main__":
                     help="cap replayed submits per connection")
     ap.add_argument("--nonce", default="00000000",
                     help="replayed share-diff template nonce (8 hex)")
+    ap.add_argument("--miss-block", action="store_true",
+                    help="regtest/scrypt: grind the replay nonce so PoW >= 2**255 "
+                         "(never a block or share; keeps the mempool intact)")
+    ap.add_argument("--dump", default=None,
+                    help="write per-notify / per-submit JSON lines here")
     a = ap.parse_args()
     cfg = {
         "submit": a.submit,
         "submit_delay": a.submit_delay_ms / 1e3,
         "max_submits": a.max_submits_per_conn,
         "nonce": a.nonce,
+        "miss_block": a.miss_block,
+        "dump": a.dump,
     }
     reactor.callWhenRunning(run, a.host, a.port, a.n, a.seconds, cfg)
     reactor.run()
