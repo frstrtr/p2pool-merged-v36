@@ -52,9 +52,18 @@ also a real block and the node submits it, draining the mempool the benchmark
 depends on. With --miss-block the replay grinds the nonce until the scrypt
 PoW hash is >= 2**255, so it can never meet a block or share target.
 
+--submit-mode clock: the default (notify) mode arms one submit per notify, a
+fixed delay after it, so a submit can never straddle a tip change and DOA% is
+zero by construction. In clock mode each connection "finds" shares on its own
+Poisson clock (--find-rate-hz, seeded per conn by --seed), independent of
+notify arrival, and submits against whatever job it holds at that instant. A
+find that lands between a block being mined and that block's notify reaching
+the connection is submitted against the superseded job -- the real DOA window,
+whose width is the notify fan-out lag the G1 fix is meant to shrink.
+
 Python2 / Twisted (reactor) -- matches the fork runtime.
 """
-import binascii, hashlib, json, struct, time
+import binascii, hashlib, json, random, struct, time
 from twisted.internet import reactor, defer, protocol
 from twisted.protocols import basic
 
@@ -133,14 +142,32 @@ class StratumConn(basic.LineReceiver):
         self._submits = {}             # rpc id -> (job_id, prevhash, t_sent)
         self._jobs = {}                # job_id -> notify fields for --miss-block
         self._n_submitted = 0
+        self._rng = random.Random(cfg["seed"] * 100003 + cid)
+        self._find_call = None         # pending clock-mode find
 
     def connectionMade(self):
         self._t_subscribe = time.time()
         self._subscribe_id = self._send("mining.subscribe", ["t4-swarm/0.2"])
         self._send("mining.authorize", ["swarm.%d" % self.cid, "x"])
+        if self.cfg["submit"] and self.cfg["submit_mode"] == "clock":
+            self._arm_find()
 
     def connectionLost(self, reason):
+        if self._find_call is not None and self._find_call.active():
+            self._find_call.cancel()
         self.stats.record_disconnect(self.cid)
+
+    def _arm_find(self):
+        self._find_call = reactor.callLater(
+            self._rng.expovariate(self.cfg["find_rate"]), self._on_find)
+
+    def _on_find(self):
+        self._find_call = None
+        if self.transport is None or self._n_submitted >= self.cfg["max_submits"]:
+            return
+        if self.cur_job is not None:
+            self._replay_submit(self.cur_job, self.cur_ntime)
+        self._arm_find()
 
     def _send(self, method, params):
         self._id += 1
@@ -207,7 +234,8 @@ class StratumConn(basic.LineReceiver):
                 self._jobs.pop(next(iter(self._jobs)))
             self.stats.dump("notify", self.cid, prevhash=params[1], t=now)
         # arm a replayed share submit for the job we just saw.
-        if self.cfg["submit"] and self._n_submitted < self.cfg["max_submits"]:
+        if (self.cfg["submit"] and self.cfg["submit_mode"] == "notify"
+                and self._n_submitted < self.cfg["max_submits"]):
             job_at_arm = self.cur_job
             ntime_at_arm = self.cur_ntime
             reactor.callLater(self.cfg["submit_delay"],
@@ -316,8 +344,12 @@ class ConnFactory(protocol.ClientFactory):
 @defer.inlineCallbacks
 def run(host, port, n, seconds, cfg):
     stats = Stats(cfg["dump"])
-    print("swarm: %d connections -> %s:%d for %ds  (submit=%s delay=%.0fms)"
-          % (n, host, port, seconds, cfg["submit"], cfg["submit_delay"] * 1e3))
+    if cfg["submit_mode"] == "clock":
+        mode = "clock %.2fHz/conn seed=%d" % (cfg["find_rate"], cfg["seed"])
+    else:
+        mode = "notify+%.0fms" % (cfg["submit_delay"] * 1e3)
+    print("swarm: %d connections -> %s:%d for %ds  (submit=%s %s)"
+          % (n, host, port, seconds, cfg["submit"], mode))
     for cid in range(n):
         reactor.connectTCP(host, port, ConnFactory(cid, stats, cfg))
     yield task_sleep(seconds)
@@ -342,6 +374,13 @@ if __name__ == "__main__":
                     help="measure notify/reactor-stall only, do not replay submits")
     ap.add_argument("--submit-delay-ms", type=float, default=250.0,
                     help="model miner find-time: delay after notify before replay submit")
+    ap.add_argument("--submit-mode", choices=("notify", "clock"), default="notify",
+                    help="notify: one submit --submit-delay-ms after each notify; "
+                         "clock: per-conn Poisson finds, independent of notify")
+    ap.add_argument("--find-rate-hz", type=float, default=0.2,
+                    help="clock mode: mean share finds per second per connection")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="clock mode: RNG seed (per-conn stream = seed, cid)")
     ap.add_argument("--max-submits-per-conn", type=int, default=1000,
                     help="cap replayed submits per connection")
     ap.add_argument("--nonce", default="00000000",
@@ -355,6 +394,9 @@ if __name__ == "__main__":
     cfg = {
         "submit": a.submit,
         "submit_delay": a.submit_delay_ms / 1e3,
+        "submit_mode": a.submit_mode,
+        "find_rate": a.find_rate_hz,
+        "seed": a.seed,
         "max_submits": a.max_submits_per_conn,
         "nonce": a.nonce,
         "miss_block": a.miss_block,
