@@ -1,0 +1,249 @@
+{
+  "_comment": "OFFLINE golden vector set #2 for the LTC gentx path: populated tracker (PPLNS payout outputs). Frozen reference target for c2pool ltc_gentx_dump. Regenerate with p2pool.test.gen_gentx_golden_pplns.", 
+  "artifact": {
+    "gentx_hex": "010000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff040380841effffffff080000000000000000266a24aa21a9eda6f476b663531fe725a724de245142c10d0a7d004d4055b2ce95a425b34c4f1548ef5005000000001976a914efcdab8967452301efcdab8967452301efcdab8988ac0289a20a00000000160014efcdab8967452301efcdab8967452301efcdab8974bca40f000000001976a91498badcfe1032547698badcfe1032547698badcfe88ac0926cd0f000000001976a91467452301efcdab8967452301efcdab896745230188ac01695b1a00000000160014ce8a4602de9b5713cf8a4602de9b5713cf8a4602b8b8c0000000000017a9148c6272621d89e8fa526dd86acff60c7136be8e858700000000000000002a6a28b3c0e21376e6be7a067a868ae9f353f823b51be68b7f09e637dc33388c01aae8000000000000000001205b5032506f6f6c5d5b5032506f6f6c5d5b5032506f6f6c5d5b5032506f6f6c5d00000000", 
+    "gentx_txid_hex": "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff040380841effffffff080000000000000000266a24aa21a9eda6f476b663531fe725a724de245142c10d0a7d004d4055b2ce95a425b34c4f1548ef5005000000001976a914efcdab8967452301efcdab8967452301efcdab8988ac0289a20a00000000160014efcdab8967452301efcdab8967452301efcdab8974bca40f000000001976a91498badcfe1032547698badcfe1032547698badcfe88ac0926cd0f000000001976a91467452301efcdab8967452301efcdab896745230188ac01695b1a00000000160014ce8a4602de9b5713cf8a4602de9b5713cf8a4602b8b8c0000000000017a9148c6272621d89e8fa526dd86acff60c7136be8e858700000000000000002a6a28b3c0e21376e6be7a067a868ae9f353f823b51be68b7f09e637dc33388c01aae8000000000000000000000000", 
+    "new_tx_bytes": 187, 
+    "other_tx_hashes": [
+      "653b2e0b2061788a9f93d8d0a7dbf469f72407b1944ac27b9d9d70e6e9c19841", 
+      "b668088ebd4ecbe61d85a78f09e8d991cb40fefea2988aefa514d88304777114"
+    ], 
+    "share_info": {
+      "absheight": 8, 
+      "abswork": 15728671, 
+      "bits": {
+        "__floatinginteger_bits__": 504365055
+      }, 
+      "far_share_hash": null, 
+      "max_bits": {
+        "__floatinginteger_bits__": 504365055
+      }, 
+      "merged_addresses": null, 
+      "merged_coinbase_info": null, 
+      "merged_payout_hash": 33767646012632156751380817789454906414765293511714448244348436020151526622970, 
+      "segwit_data": {
+        "txid_merkle_link": {
+          "branch": [
+            45788159464033286127369463833799921008767842079284580797967791505657263396929, 
+            8859742648666923327804044782388915676279839733971246680963548844893144175462
+          ], 
+          "index": 0
+        }, 
+        "wtxid_merkle_root": 61900901454555766205236516933145462873951574491966020060412654908150232913885
+      }, 
+      "share_data": {
+        "coinbase": {
+          "__hex__": "0380841e"
+        }, 
+        "desired_version": 36, 
+        "donation": 655, 
+        "nonce": 1526618878, 
+        "previous_share_hash": 40907530096159249407821433332341112137186551388179124251389351217061502010093, 
+        "pubkey_hash": 6495562832581790663061892574634853316331521383, 
+        "pubkey_type": 0, 
+        "stale_info": null, 
+        "subsidy": 1250000000
+      }, 
+      "timestamp": 1700000000
+    }, 
+    "share_info_packed_hex": "ed42b6536cf9fea96292811b5e34ace4bdcc15b4de205ed4d6bac96b6ed7705a040380841efe5afe5a67452301efcdab8967452301efcdab896745230100fe807c814a8f020024024198c1e9e6709d9d7bc24a94b10724f769f4dba7d0d8939f8a7861200b2e3b656653d1b037d86595347244ef03deeefb9431b808a837e27225046a42c76f9613dd17947d08c7965b5e162dce553ccbf3af4274a92c56cdc63ae655152cabda88000000000000000000000000000000000000000000000000000000000000000000ffff0f1effff0f1e00f1536508000000fe1f00f00000fa0618d3644b01df465c609ee1e547995fe42bd615f9b5567acdc8d772cfa74a", 
+    "template_weight": 187
+  }, 
+  "block_target_hex": "00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 
+  "desired_target_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 
+  "expected_intermediate": {
+    "decayed_weights": {
+      "0014ce8a4602de9b5713cf8a4602de9b5713cf8a4602": 340071828880, 
+      "0014efcdab8967452301efcdab8967452301efcdab89": 137216724255, 
+      "76a91467452301efcdab8967452301efcdab896745230188ac": 203876900720, 
+      "76a91498badcfe1032547698badcfe1032547698badcfe88ac": 201840100175, 
+      "76a914efcdab8967452301efcdab8967452301efcdab8988ac": 68591584400
+    }, 
+    "donation_weight": 9713232530, 
+    "merged_payout_hash_hex": "4aa7cf72d7c8cd7a56b5f915d62be45f9947e5e19e605c46df014b64d31806fa", 
+    "payout_outputs": [
+      {
+        "script_hex": "76a914efcdab8967452301efcdab8967452301efcdab8988ac", 
+        "value": 89190216
+      }, 
+      {
+        "script_hex": "0014efcdab8967452301efcdab8967452301efcdab89", 
+        "value": 178424066
+      }, 
+      {
+        "script_hex": "76a91498badcfe1032547698badcfe1032547698badcfe88ac", 
+        "value": 262454388
+      }, 
+      {
+        "script_hex": "76a91467452301efcdab8967452301efcdab896745230188ac", 
+        "value": 265102857
+      }, 
+      {
+        "script_hex": "0014ce8a4602de9b5713cf8a4602de9b5713cf8a4602", 
+        "value": 442198273
+      }, 
+      {
+        "script_hex": "a9148c6272621d89e8fa526dd86acff60c7136be8e8587", 
+        "value": 12630200
+      }
+    ], 
+    "pplns_window_shares": 7, 
+    "total_weight": 961310370960
+  }, 
+  "frozen_epoch": 1700000000.0, 
+  "gbt_transaction_fees": [
+    1000, 
+    2000
+  ], 
+  "gbt_transaction_hashes": [
+    "653b2e0b2061788a9f93d8d0a7dbf469f72407b1944ac27b9d9d70e6e9c19841", 
+    "b668088ebd4ecbe61d85a78f09e8d991cb40fefea2988aefa514d88304777114"
+  ], 
+  "gbt_transactions": [
+    "0100000001111111111111111111111111111111111111111111111111111111111111111100000000085151515151515151ffffffff01a0860100000000001976a914202020202020202020202020202020202020202088ac00000000", 
+    "010000000112111111111111111111111111111111111111111111111111111111111111110100000009515151515151515151ffffffff01888a0100000000001976a914212121212121212121212121212121212121212188ac00000000"
+  ], 
+  "height": 2000000, 
+  "net": "litecoin", 
+  "padding_bugfix": true, 
+  "previous_share_hash": "5a70d76e6bc9bad6d45e20deb415ccbde4ac345e1b819262a9fef96c53b642ed", 
+  "pubkey_hash": "0123456789abcdef0123456789abcdef01234567", 
+  "pubkey_type": 0, 
+  "scenario": "twotx", 
+  "share_version": 36, 
+  "subsidy": 1250000000, 
+  "tracker_state": {
+    "order": "genesis_first", 
+    "shares": [
+      {
+        "absheight": 1, 
+        "abswork": 1048577, 
+        "bits": 504365055, 
+        "desired_version": 36, 
+        "donation": 655, 
+        "hash": "bc25d287622baeb786118027641b66cb5f3dd38c80926a0ee824dd106c76bb32", 
+        "max_bits": 504365055, 
+        "max_target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "merged_addresses": null, 
+        "miner": "p2pkh_a", 
+        "new_script_hex": "76a91467452301efcdab8967452301efcdab896745230188ac", 
+        "previous_share_hash": null, 
+        "pubkey_hash": "0123456789abcdef0123456789abcdef01234567", 
+        "pubkey_type": 0, 
+        "target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "timestamp": 1699999895
+      }, 
+      {
+        "absheight": 2, 
+        "abswork": 3145733, 
+        "bits": 503840767, 
+        "desired_version": 36, 
+        "donation": 0, 
+        "hash": "ed493ee75ee3dd5b0adfcdb67a4839dd36924943a97ab0f34f351663961830fc", 
+        "max_bits": 504365055, 
+        "max_target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "merged_addresses": null, 
+        "miner": "p2wpkh_c", 
+        "new_script_hex": "0014efcdab8967452301efcdab8967452301efcdab89", 
+        "previous_share_hash": "bc25d287622baeb786118027641b66cb5f3dd38c80926a0ee824dd106c76bb32", 
+        "pubkey_hash": "89abcdef0123456789abcdef0123456789abcdef", 
+        "pubkey_type": 1, 
+        "target_hex": "000007ffff000000000000000000000000000000000000000000000000000000", 
+        "timestamp": 1699999910
+      }, 
+      {
+        "absheight": 3, 
+        "abswork": 4194310, 
+        "bits": 504365055, 
+        "desired_version": 36, 
+        "donation": 655, 
+        "hash": "4845e624604747fd9bacbd03168cf05676993663469ea54b904b07669d131383", 
+        "max_bits": 504365055, 
+        "max_target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "merged_addresses": null, 
+        "miner": "p2wpkh_b", 
+        "new_script_hex": "0014ce8a4602de9b5713cf8a4602de9b5713cf8a4602", 
+        "previous_share_hash": "ed493ee75ee3dd5b0adfcdb67a4839dd36924943a97ab0f34f351663961830fc", 
+        "pubkey_hash": "02468acf13579bde02468acf13579bde02468ace", 
+        "pubkey_type": 1, 
+        "target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "timestamp": 1699999925
+      }, 
+      {
+        "absheight": 4, 
+        "abswork": 7340041, 
+        "bits": 503666005, 
+        "desired_version": 36, 
+        "donation": 1310, 
+        "hash": "3e51e4c8c854bb3ba384a5b23616be9c2d091b3cb328262a967c195bfd466220", 
+        "max_bits": 504365055, 
+        "max_target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "merged_addresses": null, 
+        "miner": "p2pkh_d", 
+        "new_script_hex": "76a91498badcfe1032547698badcfe1032547698badcfe88ac", 
+        "previous_share_hash": "4845e624604747fd9bacbd03168cf05676993663469ea54b904b07669d131383", 
+        "pubkey_hash": "fedcba9876543210fedcba9876543210fedcba98", 
+        "pubkey_type": 0, 
+        "target_hex": "0000055555000000000000000000000000000000000000000000000000000000", 
+        "timestamp": 1699999940
+      }, 
+      {
+        "absheight": 5, 
+        "abswork": 9437197, 
+        "bits": 503840767, 
+        "desired_version": 36, 
+        "donation": 655, 
+        "hash": "f441bc85699d3f460d4ff0aacead4873e54552e619b12e01b3ca9a34b4085e23", 
+        "max_bits": 504365055, 
+        "max_target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "merged_addresses": null, 
+        "miner": "p2pkh_a", 
+        "new_script_hex": "76a91467452301efcdab8967452301efcdab896745230188ac", 
+        "previous_share_hash": "3e51e4c8c854bb3ba384a5b23616be9c2d091b3cb328262a967c195bfd466220", 
+        "pubkey_hash": "0123456789abcdef0123456789abcdef01234567", 
+        "pubkey_type": 0, 
+        "target_hex": "000007ffff000000000000000000000000000000000000000000000000000000", 
+        "timestamp": 1699999955
+      }, 
+      {
+        "absheight": 6, 
+        "abswork": 10485774, 
+        "bits": 504365055, 
+        "desired_version": 36, 
+        "donation": 100, 
+        "hash": "3232afc25323c0b91df2f33c0d2ec19f7b9360cf206e249525dbf444718f5ad6", 
+        "max_bits": 504365055, 
+        "max_target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "merged_addresses": null, 
+        "miner": "p2pkh_e", 
+        "new_script_hex": "76a914efcdab8967452301efcdab8967452301efcdab8988ac", 
+        "previous_share_hash": "f441bc85699d3f460d4ff0aacead4873e54552e619b12e01b3ca9a34b4085e23", 
+        "pubkey_hash": "89abcdef0123456789abcdef0123456789abcdef", 
+        "pubkey_type": 0, 
+        "target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "timestamp": 1699999970
+      }, 
+      {
+        "absheight": 7, 
+        "abswork": 14680094, 
+        "bits": 503578623, 
+        "desired_version": 36, 
+        "donation": 655, 
+        "hash": "5a70d76e6bc9bad6d45e20deb415ccbde4ac345e1b819262a9fef96c53b642ed", 
+        "max_bits": 504365055, 
+        "max_target_hex": "00000fffff000000000000000000000000000000000000000000000000000000", 
+        "merged_addresses": null, 
+        "miner": "p2wpkh_b", 
+        "new_script_hex": "0014ce8a4602de9b5713cf8a4602de9b5713cf8a4602", 
+        "previous_share_hash": "3232afc25323c0b91df2f33c0d2ec19f7b9360cf206e249525dbf444718f5ad6", 
+        "pubkey_hash": "02468acf13579bde02468acf13579bde02468ace", 
+        "pubkey_type": 1, 
+        "target_hex": "000003ffff000000000000000000000000000000000000000000000000000000", 
+        "timestamp": 1699999985
+      }
+    ], 
+    "tip_hash": "5a70d76e6bc9bad6d45e20deb415ccbde4ac345e1b819262a9fef96c53b642ed"
+  }, 
+  "user": "difftest_p2pkh", 
+  "v36_active": true
+}
