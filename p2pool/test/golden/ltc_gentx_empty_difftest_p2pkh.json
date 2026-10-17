@@ -1,0 +1,61 @@
+{
+  "_comment": "OFFLINE golden vector for the LTC gentx path. Frozen reference target for c2pool ltc_gentx_dump. Regenerate with p2pool.test.gen_gentx_golden.", 
+  "artifact": {
+    "gentx_hex": "010000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff040380841effffffff030000000000000000266a24aa21a9ed92ac07c7b9e008effde0e4753064f2328b1c8cd3d0b488f4bf1bba8cb9338c36807c814a0000000017a9148c6272621d89e8fa526dd86acff60c7136be8e858700000000000000002a6a28d3fb6ef66d53e2d3d6fdd1815c480b0cccd0ba2dbaa55138758845ea8d622027000000000000000001205b5032506f6f6c5d5b5032506f6f6c5d5b5032506f6f6c5d5b5032506f6f6c5d00000000", 
+    "gentx_txid_hex": "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff040380841effffffff030000000000000000266a24aa21a9ed92ac07c7b9e008effde0e4753064f2328b1c8cd3d0b488f4bf1bba8cb9338c36807c814a0000000017a9148c6272621d89e8fa526dd86acff60c7136be8e858700000000000000002a6a28d3fb6ef66d53e2d3d6fdd1815c480b0cccd0ba2dbaa55138758845ea8d622027000000000000000000000000", 
+    "new_tx_bytes": 0, 
+    "other_tx_hashes": [], 
+    "share_info": {
+      "absheight": 1, 
+      "abswork": 1048577, 
+      "bits": {
+        "__floatinginteger_bits__": 504365055
+      }, 
+      "far_share_hash": null, 
+      "max_bits": {
+        "__floatinginteger_bits__": 504365055
+      }, 
+      "merged_addresses": null, 
+      "merged_coinbase_info": null, 
+      "merged_payout_hash": null, 
+      "segwit_data": {
+        "txid_merkle_link": {
+          "branch": [], 
+          "index": 0
+        }, 
+        "wtxid_merkle_root": 0
+      }, 
+      "share_data": {
+        "coinbase": {
+          "__hex__": "0380841e"
+        }, 
+        "desired_version": 36, 
+        "donation": 655, 
+        "nonce": 1526618878, 
+        "previous_share_hash": null, 
+        "pubkey_hash": 6495562832581790663061892574634853316331521383, 
+        "pubkey_type": 0, 
+        "stale_info": null, 
+        "subsidy": 1250000000
+      }, 
+      "timestamp": 1700000000
+    }, 
+    "share_info_packed_hex": "0000000000000000000000000000000000000000000000000000000000000000040380841efe5afe5a67452301efcdab8967452301efcdab896745230100fe807c814a8f020024000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ffff0f1effff0f1e00f1536501000000fe01001000000000000000000000000000000000000000000000000000000000000000000000", 
+    "template_weight": 0
+  }, 
+  "block_target_hex": "00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 
+  "desired_target_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 
+  "frozen_epoch": 1700000000.0, 
+  "gbt_transaction_fees": [], 
+  "gbt_transaction_hashes": [], 
+  "gbt_transactions": [], 
+  "height": 2000000, 
+  "net": "litecoin", 
+  "pubkey_hash": "0123456789abcdef0123456789abcdef01234567", 
+  "pubkey_type": 0, 
+  "scenario": "empty", 
+  "share_version": 36, 
+  "subsidy": 1250000000, 
+  "user": "difftest_p2pkh", 
+  "v36_active": true
+}
