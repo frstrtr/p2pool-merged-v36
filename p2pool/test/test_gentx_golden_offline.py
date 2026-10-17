@@ -30,7 +30,7 @@ import unittest
 
 from p2pool.test import gen_gentx_golden as gen
 
-GOLDEN_DIR = os.path.join(os.path.dirname(__file__), 'golden')
+GOLDEN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'golden')
 
 
 class GentxGoldenOfflineTest(unittest.TestCase):
