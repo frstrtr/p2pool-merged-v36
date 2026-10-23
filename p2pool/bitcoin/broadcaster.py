@@ -998,8 +998,9 @@ class NetworkBroadcaster(object):
                     self.chain_name, _safe_addr_str(addr)))
                 return defer.succeed(False)
             
-            # Send block via P2P (synchronous - just queues to write buffer)
-            factory.conn.value.send_block(block=block)
+            # Send block via P2P (synchronous - just queues to write buffer).
+            # Carries the MWEB extension when the block has one (LTC).
+            bitcoin_p2p.send_block_with_mweb(factory.conn.value, block)
             
             return defer.succeed(True)
             

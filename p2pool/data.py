@@ -885,7 +885,13 @@ class BaseShare(object):
                 this_real_size = 0
                 this_weight = 0
 
-            if all_transaction_stripped_size + this_stripped_size + 80 + cls.gentx_size +  500 > net.BLOCK_MAX_SIZE:
+            # IMMUTABLE_BLOCKS (Litecoin MWEB): the GBT tx set is taken
+            # VERBATIM and IN ORDER. getblocktemplate returns the HogEx as the
+            # LAST tx, and litecoind reads the MWEB extension only when the
+            # block's last tx is a HogEx -- any break here drops the HogEx
+            # first and the block is rejected 'mweb-missing'. All three size
+            # breaks (stripped size, weight, G2 budget) carry the same gate.
+            if all_transaction_stripped_size + this_stripped_size + 80 + cls.gentx_size +  500 > net.BLOCK_MAX_SIZE and not getattr(net, 'IMMUTABLE_BLOCKS', False):
                 break
             if all_transaction_weight + this_weight + 4*80 + cls.gentx_weight + 2000 > net.BLOCK_MAX_WEIGHT and not getattr(net, 'IMMUTABLE_BLOCKS', False):
                 break
@@ -895,10 +901,12 @@ class BaseShare(object):
             # Inert on the verify path: check() calls with known_txs=None,
             # so this_real_size == 0 and the condition can never trip
             # there; new_tx_budget=None (every call site that does not opt
-            # in, including check()) disables it entirely.
+            # in, including check()) disables it entirely. Never applied on
+            # IMMUTABLE_BLOCKS networks (see above).
             if (new_tx_budget is not None and known_txs is not None
                     and tx_hash not in tx_hash_to_this
-                    and new_transaction_size + this_real_size > new_tx_budget):
+                    and new_transaction_size + this_real_size > new_tx_budget
+                    and not getattr(net, 'IMMUTABLE_BLOCKS', False)):
                 break
 
             if tx_hash in tx_hash_to_this:
@@ -1765,7 +1773,9 @@ class BaseShare(object):
             this_real_size     = bitcoin_data.get_size(known_txs[tx_hash])
             this_weight        = this_real_size + 3*this_stripped_size
 
-            if all_transaction_stripped_size + this_stripped_size + 80 + cls.gentx_size +  500 > net.BLOCK_MAX_SIZE:
+            # IMMUTABLE_BLOCKS: GBT set taken verbatim, in order (HogEx stays
+            # last) -- same gate on every break, see generate_transaction().
+            if all_transaction_stripped_size + this_stripped_size + 80 + cls.gentx_size +  500 > net.BLOCK_MAX_SIZE and not getattr(net, 'IMMUTABLE_BLOCKS', False):
                 break
             if all_transaction_weight + this_weight + 4*80 + cls.gentx_weight + 2000 > net.BLOCK_MAX_WEIGHT and not getattr(net, 'IMMUTABLE_BLOCKS', False):
                 break
@@ -1779,10 +1789,11 @@ class BaseShare(object):
             # NOTE above reserves this spot for. known_txs is guaranteed
             # non-None on this path; the verify path never reaches this
             # method. Cached under a key that includes new_tx_budget (via
-            # txs_key above).
+            # txs_key above). Never applied on IMMUTABLE_BLOCKS networks.
             if (new_tx_budget is not None
                     and tx_hash not in tx_hash_to_this
-                    and new_transaction_size + this_real_size > new_tx_budget):
+                    and new_transaction_size + this_real_size > new_tx_budget
+                    and not getattr(net, 'IMMUTABLE_BLOCKS', False)):
                 break
 
             if tx_hash in tx_hash_to_this:

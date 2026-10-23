@@ -4,7 +4,7 @@ import time
 from twisted.internet import defer
 
 import p2pool
-from p2pool.bitcoin import data as bitcoin_data
+from p2pool.bitcoin import data as bitcoin_data, p2p as bitcoin_p2p
 from p2pool.util import deferral, jsonrpc, pack
 txlookup = {}
 
@@ -141,7 +141,7 @@ def submit_block_p2p(block, factory, net):
     if factory.conn.value is None:
         print >>sys.stderr, 'No coind connection when block submittal attempted! %s%064x' % (net.PARENT.BLOCK_EXPLORER_URL_PREFIX, bitcoin_data.hash256(bitcoin_data.block_header_type.pack(block['header'])))
         raise deferral.RetrySilentlyException()
-    factory.conn.value.send_block(block=block)
+    bitcoin_p2p.send_block_with_mweb(factory.conn.value, block)
 
 @deferral.retry('Error submitting block: (will retry)', 10, 10)
 @defer.inlineCallbacks
@@ -155,7 +155,11 @@ def submit_block_rpc(block, ignore_failure, coind, coind_work, net):
                   ''.join(block['txs'])
     if coind_work.value['use_getblocktemplate']:
         try:
-            result = yield coind.rpc_submitblock(hexed_block + coind_work.value['mweb'])
+            # MWEB extension: prefer the one frozen with the job (block['mweb'],
+            # set by work.py) -- it belongs to THIS block's HogEx. The current
+            # GBT's extension may already belong to a newer template. Blocks
+            # built elsewhere (no 'mweb' key) keep the old behaviour.
+            result = yield coind.rpc_submitblock(hexed_block + block.get('mweb', coind_work.value['mweb']))
         except jsonrpc.Error_for_code(-32601): # Method not found, for older litecoin versions
             result = yield coind.rpc_getblocktemplate(dict(mode='submit', data=hexed_block))
         success = result is None

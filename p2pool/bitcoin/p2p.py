@@ -170,6 +170,17 @@ class Protocol(p2protocol.Protocol):
         if p2pool.DEBUG and not getattr(self.factory, '_broadcaster_connection', False):
             print >>sys.stderr, 'Bitcoin connection lost. Reason:', reason.getErrorMessage()
 
+def send_block_with_mweb(conn, block):
+    '''P2P `block` send that keeps the Litecoin MWEB extension. litecoind
+    reads the extension block right after the tx list whenever the last tx
+    is a HogEx, which block_type cannot express, so such a block goes out as
+    a raw payload. A block without 'mweb' takes the unchanged
+    send_block() path (byte-identical to before).'''
+    if not block.get('mweb'):
+        conn.send_block(block=block)
+        return
+    conn.sendPacketRaw('block', bitcoin_data.pack_block_with_mweb(block))
+
 class ClientFactory(protocol.ReconnectingClientFactory):
     protocol = Protocol
     

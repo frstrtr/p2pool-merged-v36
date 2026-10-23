@@ -90,3 +90,11 @@ jobs:
           else
             echo "skip: p2pool/test/test_gentx_golden_offline.py absent on this tree"
           fi
+      - name: LTC MWEB/HogEx block-body KATs (if present)
+        run: |
+          if [ -f p2pool/test/test_ltc_mweb_hogex.py ]; then
+            pip install "twisted<21" || echo "warn: twisted install failed; the MWEB KATs will fail to import"
+            python -m unittest -v p2pool.test.test_ltc_mweb_hogex
+          else
+            echo "skip: p2pool/test/test_ltc_mweb_hogex.py absent on this tree"
+          fi

@@ -174,6 +174,56 @@ def _fmt_hr(n):
     return '%.1f%s' % (n, 'E')
 
 
+def _tx_hex(tx):
+    '''Raw hex of a template tx: GBT dicts carry it in 'data'; unpacked txs
+    are serialized.'''
+    if isinstance(tx, dict) and 'data' in tx:
+        return tx['data']
+    if isinstance(tx, (str, unicode)):
+        return tx
+    return bitcoin_data.tx_type.pack(tx).encode('hex')
+
+
+def is_hogex_tx_hex(tx_hex):
+    '''Litecoin HogEx (integrating tx): extended serialization (marker 0x00
+    after the 4-byte version) with the MWEB flag bit 0x08 set.'''
+    return (len(tx_hex) >= 12 and tx_hex[8:10] == '00'
+            and (int(tx_hex[10:12], 16) & 0x08) != 0)
+
+
+def mweb_rule_active(net, work):
+    '''MWEB applies when GBT lists the 'mweb' rule or the network requires
+    the 'mweb' softfork.'''
+    rules = set(r.lstrip('!') for r in (work.get('rules') or []))
+    return 'mweb' in rules or 'mweb' in getattr(net, 'SOFTFORKS_REQUIRED', set())
+
+
+def immutable_template_violation(net, work, other_transaction_hashes, other_transactions):
+    '''Return None when a block body built from this selection is one the
+    coin daemon can accept, else a reason string. Two checks:
+      * IMMUTABLE_BLOCKS: the selected txs must be the GBT list verbatim
+        (same count, same order). Anything else drops/moves the HogEx.
+      * MWEB active: the extension block is present exactly when the block's
+        last tx is a HogEx (litecoind reads the extension only then:
+        'mweb-missing' otherwise). The block body is the selected list, which
+        equals the GBT list once the first check passes.'''
+    if getattr(net, 'IMMUTABLE_BLOCKS', False):
+        gbt_hashes = list(work['transaction_hashes'])
+        selected = list(other_transaction_hashes)
+        if selected != gbt_hashes:
+            return ('IMMUTABLE_BLOCKS template mutated: %d of %d GBT txs selected%s'
+                    % (len(selected), len(gbt_hashes),
+                       '' if len(selected) != len(gbt_hashes) else ' (reordered)'))
+    if mweb_rule_active(net, work):
+        mweb_present = bool(work.get('mweb'))
+        last_is_hogex = bool(other_transactions) and is_hogex_tx_hex(_tx_hex(other_transactions[-1]))
+        if mweb_present and not last_is_hogex:
+            return 'MWEB extension present but the last tx is not a HogEx'
+        if last_is_hogex and not mweb_present:
+            return 'last tx is a HogEx but the template carries no MWEB extension'
+    return None
+
+
 class WorkerBridge(worker_interface.WorkerBridge):
     COINBASE_XNONCE1_LENGTH = 1
     COINBASE_NONCE_LENGTH = 8
@@ -2880,9 +2930,25 @@ class WorkerBridge(worker_interface.WorkerBridge):
         )
         template['tx_map'] = tx_map
         template['other_transactions'] = [tx_map[tx_hash] for tx_hash in template['other_transaction_hashes']]
+        # MWEB: freeze THIS template's extension block with the job (its HogEx
+        # is in other_transactions); got_response submits it, not whatever GBT
+        # is current at find time.
+        template['mweb'] = work.get('mweb', '')
+        template['immutable_violation'] = immutable_template_violation(
+            self.node.net, work, template['other_transaction_hashes'], template['other_transactions'])
         self._gentx_template_cache = (work, best, share_type, v36_active, template, g2_budget)
         if p2pool.BENCH: print '%8.3f ms for work.py:_get_gentx_template() (%i txs)' % ((time.time()-t0)*1000., len(tx_hashes))
         return template
+
+    def _refuse_mutated_template(self, violation):
+        '''Never hand out work whose block the coin daemon would reject
+        (truncated IMMUTABLE_BLOCKS template / HogEx-MWEB mismatch). Logged
+        CRITICAL, throttled to one line per 10 s.'''
+        now = time.time()
+        if now - getattr(self, '_immutable_violation_log_t', 0) > 10:
+            self._immutable_violation_log_t = now
+            print >>sys.stderr, '[CRITICAL] REFUSING WORK: %s -- a block from this template would be rejected by the coin daemon (mweb-missing class)' % (violation,)
+        raise jsonrpc.Error_for_code(-12345)(u'p2pool refuses an unminable block template: %s' % (violation,))
 
     def _prewarm_gentx_template(self, *args):
         '''First new_work_event watcher: build the template once per event,
@@ -3145,6 +3211,9 @@ class WorkerBridge(worker_interface.WorkerBridge):
                 # for identical inputs — gated by
                 # p2pool/test/test_getwork_differential.py.
                 template = self._get_gentx_template(share_type, v36_active)
+                if template['immutable_violation'] is not None:
+                    self._refuse_mutated_template(template['immutable_violation'])
+                job_mweb = template['mweb']   # MWEB extension bound to this job
                 tx_map = template['tx_map']
                 share_info, gentx, other_transaction_hashes, get_share = share_type.finalize_generate_transaction(
                     template=template,
@@ -3187,6 +3256,11 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     merged_coinbase_info=merged_coinbase_info_for_share,  # Merged coinbase verification data
                 )
                 other_transactions = [tx_map[tx_hash] for tx_hash in other_transaction_hashes]
+                _violation = immutable_template_violation(
+                    self.node.net, self.current_work.value, other_transaction_hashes, other_transactions)
+                if _violation is not None:
+                    self._refuse_mutated_template(_violation)
+                job_mweb = self.current_work.value.get('mweb', '')   # MWEB extension bound to this job
                 # G2: v34+ shares carry no cross-share tx refs, so every
                 # selected tx is new-to-window; for VERSION < 34 this
                 # overcounts re-referenced txs -- conservative for a local
@@ -3426,8 +3500,10 @@ class WorkerBridge(worker_interface.WorkerBridge):
                     
                     # Submit block and add error callback to catch any failures
                     # Use broadcaster for parallel propagation if available
+                    # mweb: the extension block of THIS job's template (pairs
+                    # with the HogEx in other_transactions), never the current GBT's.
                     block_submission = helper.submit_block(
-                        dict(header=header, txs=[new_hexed_gentx] + [tx["data"] for tx in other_transactions]),
+                        dict(header=header, txs=[new_hexed_gentx] + [tx["data"] for tx in other_transactions], mweb=job_mweb),
                         False,
                         self.node,
                         broadcaster=self.node.broadcaster

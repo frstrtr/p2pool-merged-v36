@@ -126,6 +126,20 @@ class Protocol(protocol.Protocol):
         self.traffic_happened.happened('p2p/out', len(data))
         self.transport.write(data)
     
+    def sendPacketRaw(self, command, payload):
+        '''sendPacket() for an already-serialized payload: identical framing,
+        no type_.pack(). For payloads the message type cannot express, e.g. a
+        Litecoin block followed by its MWEB extension block.'''
+        if len(command) >= 12:
+            raise ValueError('command too long')
+        if getattr(self, 'message_' + command, None) is None:
+            raise ValueError('invalid command')
+        if len(payload) > self._max_payload_length:
+            raise TooLong('payload too long')
+        data = self._message_prefix + struct.pack('<12sI', command, len(payload)) + hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4] + payload
+        self.traffic_happened.happened('p2p/out', len(data))
+        self.transport.write(data)
+    
     def __getattr__(self, attr):
         prefix = 'send_'
         if attr.startswith(prefix):
