@@ -249,6 +249,13 @@ block_type = pack.ComposedType([
     ('txs', pack.ListType(tx_type)),
 ])
 
+def pack_block_with_mweb(block):
+    '''Full serialization of a block as the coin daemon reads it: block_type
+    followed by the Litecoin MWEB extension block when the block carries one
+    (block['mweb']: hex, already '01'-prefixed as helper.getwork() stores it).
+    Without a non-empty 'mweb' this is exactly block_type.pack(block).'''
+    return block_type.pack(block) + (block.get('mweb') or '').decode('hex')
+
 stripped_block_type = pack.ComposedType([
     ('header', block_header_type),
     ('txs', pack.ListType(tx_id_type)),
