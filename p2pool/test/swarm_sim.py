@@ -52,6 +52,17 @@ also a real block and the node submits it, draining the mempool the benchmark
 depends on. With --miss-block the replay grinds the nonce until the scrypt
 PoW hash is >= 2**255, so it can never meet a block or share target.
 
+--real-pow (warm-up only): grind a bounded nonce batch per find against the
+connection's current pseudo-share target (mining.set_difficulty / DUMB_SCRYPT_DIFF)
+and submit only on a hit. Combined with --users (one payout address per line,
+cycled over the connections) this builds a REAL share chain with many distinct
+PPLNS dests, so the gentx the node rebuilds per connection carries a realistic
+payout set instead of the single-output empty-tracker coinbase. On LTC regtest
+every real share is also a block (block target ~2**255 is easier than any share
+target), so run it as a warm-up before the mempool refill, never during a
+measured arm. Grinding is in-reactor: do not read swarm timings from a
+--real-pow run.
+
 --submit-mode clock: the default (notify) mode arms one submit per notify, a
 fixed delay after it, so a submit can never straddle a tip change and DOA% is
 zero by construction. In clock mode each connection "finds" shares on its own
@@ -103,6 +114,39 @@ def _swap4(b):
     return "".join(b[i:i + 4][::-1] for i in range(0, len(b), 4))
 
 
+def _header76(job, extranonce1, extranonce2, ntime):
+    coinb = (binascii.unhexlify(job["coinb1"]) + binascii.unhexlify(extranonce1)
+             + binascii.unhexlify(extranonce2) + binascii.unhexlify(job["coinb2"]))
+    root = _sha256d(coinb)
+    for br in job["branch"]:
+        root = _sha256d(root + binascii.unhexlify(br))
+    return (binascii.unhexlify(job["version"])[::-1]
+            + _swap4(binascii.unhexlify(job["prevhash"]))
+            + root
+            + binascii.unhexlify(ntime)[::-1]
+            + binascii.unhexlify(job["nbits"])[::-1])
+
+
+def _stratum_diff_to_target(diff, dumb_scrypt_diff):
+    # inverse of p2pool stratum: diff = target_to_difficulty(target) * DUMB_SCRYPT_DIFF
+    d = float(diff) / dumb_scrypt_diff
+    if d <= 0:
+        return 2**256 - 1
+    return min(int((0xffff0000 * 2**(256 - 64) + 1) / d - 1 + 0.5), 2**256 - 1)
+
+
+def _grind_target_nonce(job, extranonce1, extranonce2, ntime, target, start, batch):
+    """Return a nonce (8 hex) whose scrypt PoW <= target, or None after batch tries."""
+    import ltc_scrypt
+    head = _header76(job, extranonce1, extranonce2, ntime)
+    for i in xrange(batch):
+        n = (start + i) & 0xffffffff
+        pow_le = ltc_scrypt.getPoWHash(head + struct.pack("<I", n))
+        if int(binascii.hexlify(pow_le[::-1]), 16) <= target:
+            return "%08x" % n
+    return None
+
+
 def _grind_miss_nonce(job, extranonce1, extranonce2, ntime):
     """Return a nonce (8 hex, stratum BE) whose scrypt PoW hash is >= 2**255,
     i.e. fails every target a regtest node can hold. ~2 scrypt calls."""
@@ -144,11 +188,14 @@ class StratumConn(basic.LineReceiver):
         self._n_submitted = 0
         self._rng = random.Random(cfg["seed"] * 100003 + cid)
         self._find_call = None         # pending clock-mode find
+        users = cfg.get("users") or []
+        self.user = users[cid % len(users)] if users else "swarm.%d" % cid
+        self.diff = None               # latest mining.set_difficulty
 
     def connectionMade(self):
         self._t_subscribe = time.time()
         self._subscribe_id = self._send("mining.subscribe", ["t4-swarm/0.2"])
-        self._send("mining.authorize", ["swarm.%d" % self.cid, "x"])
+        self._send("mining.authorize", [self.user, "x"])
         if self.cfg["submit"] and self.cfg["submit_mode"] == "clock":
             self._arm_find()
 
@@ -186,6 +233,7 @@ class StratumConn(basic.LineReceiver):
         elif method == "mining.set_difficulty":
             params = msg.get("params") or []
             if params:
+                self.diff = params[0]
                 self.stats.record_difficulty(params[0])
         elif "result" in msg and msg.get("id") is not None:
             self._on_result(msg)
@@ -247,10 +295,24 @@ class StratumConn(basic.LineReceiver):
         extranonce2 = "00" * self.extranonce2_size
         nonce = self.cfg["nonce"]
         job = self._jobs.get(job_id)
-        if self.cfg["miss_block"] and job is not None:
+        if self.cfg["real_pow"]:
+            if job is None or self.diff is None:
+                return
+            extranonce2 = "%0*x" % (2 * self.extranonce2_size,
+                                    self._rng.getrandbits(8 * self.extranonce2_size))
+            # Grind against the SHARE target when known (polled from the node), so only
+            # real shares are submitted; a pseudo-share flood stalls a regtest node.
+            target = self.cfg.get("share_target") or _stratum_diff_to_target(
+                self.diff, self.cfg["dumb_scrypt_diff"])
+            nonce = _grind_target_nonce(job, self.extranonce1, extranonce2, ntime, target,
+                                        self._rng.getrandbits(32), self.cfg["grind_batch"])
+            if nonce is None:
+                self.stats.record_submit("grind_miss")
+                return
+        elif self.cfg["miss_block"] and job is not None:
             nonce = _grind_miss_nonce(job, self.extranonce1, extranonce2, ntime)
         rid = self._send("mining.submit",
-                         ["swarm.%d" % self.cid, job_id, extranonce2, ntime, nonce])
+                         [self.user, job_id, extranonce2, ntime, nonce])
         self._submits[rid] = (job_id, job["prevhash"] if job else None, time.time())
         self._n_submitted += 1
         self.stats.record_submit("sent")
@@ -264,7 +326,7 @@ class Stats(object):
         self.inter_notify = []
         self.disconnects = 0
         self.difficulty = None
-        self.submits = {"sent": 0, "accepted": 0, "stale": 0, "reject": 0}
+        self.submits = {"sent": 0, "accepted": 0, "stale": 0, "reject": 0, "grind_miss": 0}
 
     def record_first_notify(self, dt):
         self.first_notify.append(dt)
@@ -323,6 +385,8 @@ class Stats(object):
         print("submits sent=%d  accepted=%d  stale/DOA=%d  reject-other=%d  pending=%d"
               % (s["sent"], s["accepted"], s["stale"], s["reject"],
                  s["sent"] - resolved))
+        if s.get("grind_miss"):
+            print("real-pow grind batches without a hit (not submitted)=%d" % s["grind_miss"])
         print("DOA%%  = %.2f%%  (node-reported stale / resolved; kr1z1s baseline 10-12%%, G1 target ~1-2%%)"
               % doa_pct)
         print("=" * 66)
@@ -350,11 +414,29 @@ def run(host, port, n, seconds, cfg):
         mode = "notify+%.0fms" % (cfg["submit_delay"] * 1e3)
     print("swarm: %d connections -> %s:%d for %ds  (submit=%s %s)"
           % (n, host, port, seconds, cfg["submit"], mode))
+    if cfg.get("share_diff_url"):
+        from twisted.internet import task
+        poller = task.LoopingCall(_poll_share_diff, cfg)
+        poller.start(2.0, now=True)
     for cid in range(n):
         reactor.connectTCP(host, port, ConnFactory(cid, stats, cfg))
     yield task_sleep(seconds)
     stats.report()
     reactor.stop()
+
+
+def _poll_share_diff(cfg):
+    # node /difficulty = target_to_difficulty(best share max_target), p2pool units
+    from twisted.web.client import getPage
+    def _ok(body):
+        try:
+            d = json.loads(body)
+        except ValueError:
+            return
+        if d:
+            cfg["share_target"] = min(
+                int((0xffff0000 * 2**(256 - 64) + 1) / float(d) - 1 + 0.5), 2**256 - 1)
+    return getPage(cfg["share_diff_url"], timeout=5).addCallbacks(_ok, lambda err: None)
 
 
 def task_sleep(seconds):
@@ -388,6 +470,19 @@ if __name__ == "__main__":
     ap.add_argument("--miss-block", action="store_true",
                     help="regtest/scrypt: grind the replay nonce so PoW >= 2**255 "
                          "(never a block or share; keeps the mempool intact)")
+    ap.add_argument("--real-pow", action="store_true",
+                    help="warm-up: grind a nonce batch per find against the pseudo-share "
+                         "target and submit only hits (builds a real share chain)")
+    ap.add_argument("--grind-batch", type=int, default=4096,
+                    help="--real-pow: scrypt tries per find before giving up")
+    ap.add_argument("--dumb-scrypt-diff", type=int, default=2**16,
+                    help="--real-pow: net.DUMB_SCRYPT_DIFF of the target node (LTC: 65536)")
+    ap.add_argument("--share-diff-url", default=None,
+                    help="--real-pow: poll this node URL (e.g. http://127.0.0.1:19477/difficulty) "
+                         "every 2s and grind against the share target instead of the pseudo target")
+    ap.add_argument("--users", default=None,
+                    help="file of stratum usernames (payout addresses), one per line, "
+                         "cycled over connections; default swarm.<cid>")
     ap.add_argument("--dump", default=None,
                     help="write per-notify / per-submit JSON lines here")
     a = ap.parse_args()
@@ -400,6 +495,12 @@ if __name__ == "__main__":
         "max_submits": a.max_submits_per_conn,
         "nonce": a.nonce,
         "miss_block": a.miss_block,
+        "real_pow": a.real_pow,
+        "share_diff_url": a.share_diff_url,
+        "share_target": None,
+        "grind_batch": a.grind_batch,
+        "dumb_scrypt_diff": a.dumb_scrypt_diff,
+        "users": ([l.strip() for l in open(a.users) if l.strip()] if a.users else []),
         "dump": a.dump,
     }
     reactor.callWhenRunning(run, a.host, a.port, a.n, a.seconds, cfg)
