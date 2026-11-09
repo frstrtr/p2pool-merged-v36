@@ -174,6 +174,21 @@ def _fmt_hr(n):
     return '%.1f%s' % (n, 'E')
 
 
+def select_committed_merged_work(effective_merged_work, v36_active):
+    """The merged chains a share's mm_data commits to: on a V36 share that
+    carries merged_coinbase_info for some chains, exactly those chains (a V36
+    peer checks the tree against them: data.check_merged_aux_commitment);
+    otherwise every chain with work, as before."""
+    if not effective_merged_work:
+        return {}
+    if v36_active:
+        carried = dict((chain_id, aux_work) for chain_id, aux_work in effective_merged_work.iteritems()
+                       if aux_work.get('merged_coinbase_info_entry'))
+        if carried:
+            return carried
+    return effective_merged_work
+
+
 class WorkerBridge(worker_interface.WorkerBridge):
     COINBASE_XNONCE1_LENGTH = 1
     COINBASE_NONCE_LENGTH = 8
@@ -2937,26 +2952,6 @@ class WorkerBridge(worker_interface.WorkerBridge):
         # Build user-specific merged templates so finder fee can target the work recipient.
         effective_merged_work = self._build_user_specific_merged_work(user, merged_addresses, share_pubkey_hash=pubkey_hash, share_pubkey_type=pubkey_type)
 
-        if effective_merged_work:
-            tree, size = bitcoin_data.make_auxpow_tree(effective_merged_work)
-            mm_hashes = [effective_merged_work.get(tree.get(i), dict(hash=0))['hash'] for i in xrange(size)]
-            mm_data = '\xfa\xbemm' + bitcoin_data.aux_pow_coinbase_type.pack(dict(
-                merkle_root=bitcoin_data.merkle_hash(mm_hashes),
-                size=size,
-                nonce=0,
-            ))
-            # Include chain_id in mm_later tuple for merged block recording
-            mm_later = [(dict(aux_work, chainid=chain_id), mm_hashes.index(aux_work['hash']), mm_hashes) for chain_id, aux_work in effective_merged_work.iteritems()]
-            
-            # Debug: Uncomment to trace merged mining data in coinbase (prints frequently)
-            # print >>sys.stderr, '[DEBUG] Merged mining data being embedded in Litecoin coinbase:'
-            # for chain_id, aux_work in self.merged_work.value.iteritems():
-            #     print >>sys.stderr, '[DEBUG]   Chain ID 0x%08x: hash=%064x' % (chain_id, aux_work['hash'])
-            # print >>sys.stderr, '[DEBUG]   Merkle root of mm_hashes: %064x' % bitcoin_data.merkle_hash(mm_hashes)
-        else:
-            mm_data = ''
-            mm_later = []
-
         # CRITICAL: Use txid (stripped hash without SegWit witness) for merkle root calculation!
         # For SegWit transactions, the merkle root uses txid (not wtxid).
         # get_txid() uses tx_id_type which strips the witness data before hashing.
@@ -2995,6 +2990,35 @@ class WorkerBridge(worker_interface.WorkerBridge):
             v36_active = True
         else:
             v36_active = False
+
+        # The merged-mining commitment (mm_data), now that the share version
+        # is known. A V36 share carries merged_coinbase_info for the chains
+        # whose canonical block it builds; once any chain is carried the tree
+        # holds exactly those (the rule V36 peers check:
+        # data.check_merged_aux_commitment; c2pool builds the same). A chain
+        # without an entry (getauxblock mode, no V36 weights yet, a failed
+        # build) is then not committed in this share.
+        committed_merged_work = select_committed_merged_work(effective_merged_work, v36_active)
+        if committed_merged_work:
+            tree, size = bitcoin_data.make_auxpow_tree(committed_merged_work)
+            mm_hashes = [committed_merged_work.get(tree.get(i), dict(hash=0))['hash'] for i in xrange(size)]
+            mm_data = '\xfa\xbemm' + bitcoin_data.aux_pow_coinbase_type.pack(dict(
+                merkle_root=bitcoin_data.merkle_hash(mm_hashes),
+                size=size,
+                nonce=0,
+            ))
+            # Include chain_id in mm_later tuple for merged block recording
+            mm_later = [(dict(aux_work, chainid=chain_id), mm_hashes.index(aux_work['hash']), mm_hashes) for chain_id, aux_work in committed_merged_work.iteritems()]
+            
+            # Debug: Uncomment to trace merged mining data in coinbase (prints frequently)
+            # print >>sys.stderr, '[DEBUG] Merged mining data being embedded in Litecoin coinbase:'
+            # for chain_id, aux_work in self.merged_work.value.iteritems():
+            #     print >>sys.stderr, '[DEBUG]   Chain ID 0x%08x: hash=%064x' % (chain_id, aux_work['hash'])
+            # print >>sys.stderr, '[DEBUG]   Merkle root of mm_hashes: %064x' % bitcoin_data.merkle_hash(mm_hashes)
+        else:
+            mm_data = ''
+            mm_later = []
+
         
         # Still run the original voting check for switchover logging and protocol version update.
         # The AutoRatchet already handles the actual share_type decision, but this keeps
