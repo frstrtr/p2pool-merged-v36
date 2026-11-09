@@ -836,6 +836,9 @@ def get_web_root(wb, datadir_path, bitcoind_getinfo_var, stop_event=variable.Eve
                 governor=(wb._override_gov.status().get('whale', {})
                           if hasattr(wb, '_override_gov') else {}),
             ),
+            # V36 merged-commitment rule (log-only this release): shares
+            # checked and the ones it would refuse (data.MERGED_RULE_STATS).
+            merged_commitment_rule=dict(p2pool_data.MERGED_RULE_STATS),
         )
     
     class WebInterface(deferred_resource.DeferredResource):

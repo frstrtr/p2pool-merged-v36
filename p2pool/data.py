@@ -412,57 +412,67 @@ def get_canonical_merged_finder_script(share_pubkey_hash, merged_addresses, chai
 
 MAX_CHECKED_AUX_TREE = 4096
 
-def expected_merged_aux_tree_size(merged_info_list):
-    """Size of the chain merkle tree a share's mm_data must commit to.
+# The rule below is LOG-ONLY this release where python master did not already
+# refuse the share: the shares it flags are counted here (/local_stats
+# "merged_commitment_rule") and logged. TODO(enforcement): refuse behind a
+# share-version / ratchet gate once nodes committing to a tree over chains
+# they do not carry are gone.
+MERGED_RULE_STATS = dict(mode='log-only', checked=0, would_reject=0, last_reason=None)
 
-    The parent coinbase commits to the root of the AuxPoW chain merkle tree
-    over the merged chains whose blocks the share carries in
-    merged_coinbase_info: each chain at its CAuxPow::getExpectedIndex slot
-    (nonce 0), in the smallest power-of-two tree where those slots are
-    distinct -- make_auxpow_tree over ALL of the share's chain ids, as the
-    share's builder computes it (work.py and c2pool commit exactly the carried
-    chains once any is carried). One chain: size 1.
-    """
-    chain_ids = dict((info['chain_id'], None) for info in merged_info_list)
-    return bitcoin_data.make_auxpow_tree(chain_ids)[1]
+def merged_aux_commitment_problem(merged_info_list, aux_merkle_root, aux_size):
+    """Why the commitment over several merged chains (or of a size other than
+    1) is not the tree over exactly the carried blocks, or None.
 
-def check_merged_aux_commitment(merged_info_list, aux_merkle_root, aux_size):
-    """The commitment over several merged chains (or of a size other than 1).
-
-    Raises ValueError unless: each chain is listed once; aux_size is
-    make_auxpow_tree over the carried chain ids (at most MAX_CHECKED_AUX_TREE
-    slots); every carried header is 80 bytes; and aux_merkle_root is the
-    merkle root over the carried blocks' hashes at their slots (empty slots
-    0). One chain at size 1 is left to the per-chain check. The same rule is
-    c2pool's check_merged_aux_commitment (src/c2pool/merged/
-    aux_commitment_rule.hpp): a share one side accepts, the other accepts.
+    Each chain listed once; aux_size is make_auxpow_tree over the carried
+    chain ids (at most MAX_CHECKED_AUX_TREE slots); every carried header is
+    80 bytes; aux_merkle_root is the merkle root over the carried blocks'
+    hashes at their slots (empty slots 0). One chain at size 1: None (the
+    per-chain check). The same verdict as c2pool's check_merged_aux_commitment
+    (src/c2pool/merged/aux_commitment_rule.hpp).
     """
     ids = [info['chain_id'] for info in merged_info_list]
+    seen = set()
     for cid in ids:
-        if ids.count(cid) > 1:
-            raise ValueError('merged_coinbase_info lists chain %d twice' % cid)
+        if cid in seen:
+            return 'merged_coinbase_info lists chain %d twice' % cid
+        seen.add(cid)
     if len(ids) <= 1 and aux_size == 1:
-        return
+        return None
     chain_list = sorted(ids)
     try:
         tree, size = bitcoin_data.make_auxpow_tree(dict((cid, None) for cid in ids))
     except AssertionError:
         size = None
     if size is None or size > MAX_CHECKED_AUX_TREE:
-        raise ValueError('merged aux tree for chains %s is larger than %d' % (chain_list, MAX_CHECKED_AUX_TREE))
+        return 'merged aux tree for chains %s is larger than %d' % (chain_list, MAX_CHECKED_AUX_TREE)
     if aux_size != size:
-        raise ValueError('merged aux tree size mismatch: expected %d for chains %s, got %d' % (
-            size, chain_list, aux_size))
+        return 'merged aux tree size mismatch: expected %d for chains %s, got %d' % (size, chain_list, aux_size)
     hashes = {}
     for info in merged_info_list:
         header_bytes = info['block_header_bytes']
         if len(header_bytes) != 80:
-            raise ValueError('merged block header for chain %d is not 80 bytes' % info['chain_id'])
+            return 'merged block header for chain %d is not 80 bytes' % info['chain_id']
         hashes[info['chain_id']] = bitcoin_data.hash256(header_bytes)
     mm_hashes = [hashes[tree[i]] if i in tree else 0 for i in xrange(size)]
     if bitcoin_data.merkle_hash(mm_hashes) != aux_merkle_root:
-        raise ValueError('merged aux root %064x is not the tree over the carried blocks of chains %s' % (
-            aux_merkle_root, chain_list))
+        return 'merged aux root %064x is not the tree over the carried blocks of chains %s' % (
+            aux_merkle_root, chain_list)
+    return None
+
+def check_merged_aux_commitment(merged_info_list, aux_merkle_root, aux_size):
+    """merged_aux_commitment_problem, raising ValueError on a problem."""
+    why = merged_aux_commitment_problem(merged_info_list, aux_merkle_root, aux_size)
+    if why:
+        raise ValueError(why)
+
+def note_merged_rule_verdict(why):
+    MERGED_RULE_STATS['checked'] += 1
+    if why:
+        MERGED_RULE_STATS['would_reject'] += 1
+        MERGED_RULE_STATS['last_reason'] = why
+        n = MERGED_RULE_STATS['would_reject']
+        if n <= 20 or n % 1000 == 0:
+            print >>sys.stderr, 'WARNING: merged commitment rule would reject a share (log-only this release; %d so far): %s' % (n, why)
 
 def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
     """Verify that the merged coinbase committed in mm_data matches canonical construction.
@@ -519,9 +529,11 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
     block_target = share.header['bits'].target
     chain_length = min(height, net.REAL_CHAIN_LENGTH)
 
-    # Several chains (or a size other than 1): the commitment must be the
-    # tree over exactly the carried blocks.
-    check_merged_aux_commitment(merged_info_list, aux_merkle_root, aux_size)
+    # Several chains (or a size other than 1): the commitment should be the
+    # tree over exactly the carried blocks. Log-only here; refused below only
+    # where python master already refused the share (aux_size other than 1).
+    aux_problem = merged_aux_commitment_problem(merged_info_list, aux_merkle_root, aux_size)
+    note_merged_rule_verdict(aux_problem)
 
     for info in merged_info_list:
         chain_id = info['chain_id']
@@ -590,16 +602,21 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
         doge_block_hash = bitcoin_data.hash256(header_bytes)
         
         # For single merged chain: aux_merkle_root == block_hash
-        # For multiple chains: need aux tree reconstruction
+        # For other sizes: the tree over the carried blocks (aux_problem)
         if aux_size == 1:
             if doge_block_hash != aux_merkle_root:
                 raise ValueError(
                     'merged block hash verification failed for chain %d: '
                     'block_hash %064x != aux_merkle_root %064x' % (
                         chain_id, doge_block_hash, aux_merkle_root))
-        # Several chains: checked above (check_merged_aux_commitment).
-            # For multi-chain, the aux_merkle_root check is weaker —
-            # we trust the single-chain case covers our deployment
+        else:
+            # Python master refused every share here (it expected the tree of
+            # this one chain, size 1), which refused every share carrying two
+            # or more chains. Accepted now only when the commitment is the
+            # tree over exactly the carried blocks (c2pool's and work.py's own
+            # multi-chain shares); everything else is refused as before.
+            if aux_problem:
+                raise ValueError('merged aux commitment for chain %d: %s' % (chain_id, aux_problem))
 
 
 def _get_merged_chain_net(chain_id, net):

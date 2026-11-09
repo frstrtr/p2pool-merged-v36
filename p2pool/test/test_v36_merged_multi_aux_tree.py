@@ -16,10 +16,14 @@
 #   * the sizes are pinned to c2pool's AuxPowTree::build KATs (the same chain
 #     sets give the same sizes), and the slots to getExpectedIndex in 32 bits;
 #   * the root must be the tree over exactly the carried blocks
-#     (check_merged_aux_commitment); the CROSS vectors below are pinned in
-#     c2pool's merged_aux_hardening_test.cpp too (the same rule there:
-#     src/c2pool/merged/aux_commitment_rule.hpp), so both implementations
-#     accept and refuse the same shares;
+#     (merged_aux_commitment_problem); the CROSS vectors and the generated
+#     PARITY vectors (5,000, pinned verdict digest) are pinned in c2pool's
+#     merged_aux_hardening_test.cpp too (the same rule there:
+#     src/c2pool/merged/aux_commitment_rule.hpp): both give the same verdicts;
+#   * this release the rule only logs (MERGED_RULE_STATS) except where python
+#     master already refused the share (aux size other than 1 on the DOGE
+#     check): no share master accepted is refused, and the only shares master
+#     refused that are accepted now are the well-formed multi-chain ones;
 #   * work.py commits exactly the carried chains once any is carried
 #     (select_committed_merged_work): its own DOGE + getauxblock-chain
 #     shares were refused by its peers;
@@ -62,6 +66,132 @@ def kat_infos(ids):
     return [dict(chain_id=c, block_header_bytes=kat_header(c)) for c in ids]
 
 
+# ---- the generated parity vectors (the same generator in c2pool's test) ----
+M64 = (1 << 64) - 1
+
+
+class SplitMix64(object):
+    def __init__(self, seed):
+        self.s = seed & M64
+
+    def next(self):
+        self.s = (self.s + 0x9E3779B97F4A7C15) & M64
+        z = self.s
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & M64
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & M64
+        return z ^ (z >> 31)
+
+    def below(self, n):
+        return self.next() % n
+
+
+def _sha256d(b):
+    import hashlib
+    return hashlib.sha256(hashlib.sha256(b).digest()).digest()
+
+
+PARITY_REAL = [98, 63, 16, 8211, 8224, 8225, 74, 50, 1, 2, 7]
+PARITY_SPECIAL = [5, 5 + (1 << 30), 5 + (1 << 29), 5 + (1 << 12), 5 + (1 << 11), 0xffffffff, 0]
+PARITY_KS = [1, 1, 2, 2, 2, 3, 3, 4, 5, 6, 8]
+PARITY_SEED, PARITY_N = 2026, 5000
+PARITY_DIGEST = 'a37fc58712ab0392114cd05d1e6cf13432ab577a3aaab06200b3d76f7677a83c'
+PARITY_COUNTS = {'A': 1896, 'R:big': 131, 'R:dup': 1121, 'R:hdr': 296, 'R:root': 671, 'R:size': 885}
+
+
+def _parity_id(r):
+    c = r.below(100)
+    if c < 60: return PARITY_REAL[r.below(len(PARITY_REAL))]
+    if c < 75: return r.below(1 << 16)
+    if c < 85: return r.next() & 0xffffffff
+    if c < 93: return PARITY_SPECIAL[r.below(len(PARITY_SPECIAL))]
+    return 98 + (1 << (1 + r.below(30)))
+
+
+def _parity_tree(ids):
+    for i in xrange(31):
+        size = 1 << i
+        if size < len(ids): continue
+        slots = {}
+        ok = True
+        for cid in ids:
+            pos = (1103515245 * cid + 1103515245 * 12345 + 12345) % size
+            if pos in slots.values():
+                ok = False
+                break
+            slots[cid] = pos
+        if ok: return size, slots
+    return 0, {}
+
+
+def _parity_merkle(size, leaves):
+    layer = [leaves.get(i, '\0' * 32) for i in xrange(size)]
+    while len(layer) > 1:
+        layer = [_sha256d(layer[2 * k] + layer[2 * k + 1]) for k in xrange(len(layer) // 2)]
+    return layer[0]
+
+
+def _parity_bytes(r, n):
+    return ''.join(chr(r.next() & 0xff) for _ in xrange(n))
+
+
+def parity_vector(r):
+    """(root bytes as the uint256's, size, [(chain id, header bytes)])."""
+    ids = [_parity_id(r) for _ in xrange(PARITY_KS[r.below(len(PARITY_KS))])]
+    if r.below(100) < 8: ids.append(ids[r.below(len(ids))])
+    carried = []
+    for cid in ids:
+        hl = 80
+        if r.below(100) < 4: hl = [0, 79, 81, 160][r.below(4)]
+        carried.append((cid, _parity_bytes(r, hl)))
+    uniq = []
+    for c in ids:
+        if c not in uniq: uniq.append(c)
+    size, slots = _parity_tree(uniq)
+    good = _parity_merkle(size, dict((slots[c], _sha256d(h)) for c, h in carried)) if 0 < size <= 4096 else '\0' * 32
+    mode = r.below(100)
+    if mode < 45: return good, size, carried
+    if mode < 55:
+        b = bytearray(good)
+        i = r.below(32)
+        b[i] ^= 1 << r.below(8)
+        return str(b), size, carried
+    if mode < 62:
+        opts = [0, 1, 2, 4, size * 2, max(size // 2, 1), 1 << 31, 4096, 8192, r.next() & 0xffffffff]
+        return good, opts[r.below(len(opts))] & 0xffffffff, carried
+    if mode < 75:
+        extra = [_parity_id(r) for _ in xrange(r.below(2) + 1)]
+        allids = list(uniq)
+        for c in extra:
+            if c not in allids: allids.append(c)
+        s2, sl2 = _parity_tree(allids)
+        if 0 < s2 <= 4096:
+            leaves = dict((sl2[c], _sha256d(h)) for c, h in carried)
+            for c in extra:
+                if c not in uniq and r.below(2) == 0: leaves[sl2[c]] = _parity_bytes(r, 32)
+            return _parity_merkle(s2, leaves), s2, carried
+        return good, size, carried
+    if mode < 82 and len(carried) == 1:
+        h = carried[0][1]
+        rt = _sha256d(h[:80]) if r.below(10) < 7 else _parity_bytes(r, 32)
+        return rt, [1, 1, 1, 2, 0][r.below(5)], carried
+    if mode < 90:
+        if 0 < size <= 4096 and len(uniq) >= 2:
+            leaves = dict((i % size, _sha256d(h)) for i, (c, h) in enumerate(carried))
+            return _parity_merkle(size, leaves), size, carried
+        return good, size, carried
+    rt = _parity_bytes(r, 32)
+    sz = (r.next() & 0xffffffff) if r.below(10) < 3 else [1, 2, 4, 8][r.below(4)]
+    return rt, sz, carried
+
+
+def parity_class(why):
+    if not why: return 'A'
+    for key, cls in (('twice', 'R:dup'), ('larger than', 'R:big'), ('size mismatch', 'R:size'),
+                     ('not 80 bytes', 'R:hdr'), ('aux root', 'R:root')):
+        if key in why: return cls
+    return 'R:other'
+
+
 def get_expected_index(nonce, chain_id, h):
     # CAuxPow::getExpectedIndex (namecoin/dogecoin auxpow.cpp), uint32 arithmetic.
     rand = nonce
@@ -102,10 +232,7 @@ def _canonical_tx():
 class MultiAuxTreeSize(unittest.TestCase):
 
     def size(self, ids):
-        f = getattr(p2pool_data, 'expected_merged_aux_tree_size', None)
-        if f is None:
-            self.fail('data.expected_merged_aux_tree_size missing (pre-fix tree)')
-        return f([dict(chain_id=c) for c in ids])
+        return bitcoin_data.make_auxpow_tree(dict((c, None) for c in ids))[1]
 
     def test_one_chain_is_size_one(self):
         for cid in (DOGE, PEP, NMC, SHIC):
@@ -171,6 +298,28 @@ class CommitmentRule(unittest.TestCase):
         self.assertRaises(ValueError, self.check, kat_infos([5, 5 + 2 ** 12]), 0, 8192)
         # equal mod 2^30: no tree at all
         self.assertRaises(ValueError, self.check, kat_infos([5, 5 + 2 ** 30]), 0, 2)
+
+
+@unittest.skipUnless(HAVE_DEPS, 'p2pool package not importable: %s' % (_IMPORT_ERR,))
+class ParityVectors(unittest.TestCase):
+    """5,000 generated vectors: this implementation's verdicts, digested,
+    equal c2pool's (MergedAuxCommitment.ParityVectors pins the same digest)."""
+
+    def test_digest(self):
+        import hashlib
+        from p2pool.util import pack
+        r = SplitMix64(PARITY_SEED)
+        dig = hashlib.sha256()
+        counts = {}
+        for _ in xrange(PARITY_N):
+            root_bytes, size, carried = parity_vector(r)
+            infos = [dict(chain_id=c, block_header_bytes=h) for c, h in carried]
+            v = parity_class(p2pool_data.merged_aux_commitment_problem(
+                infos, pack.IntType(256).unpack(root_bytes), size))
+            dig.update(v + '\n')
+            counts[v] = counts.get(v, 0) + 1
+        self.assertEqual(counts, PARITY_COUNTS)
+        self.assertEqual(dig.hexdigest(), PARITY_DIGEST)
 
 
 @unittest.skipUnless(HAVE_DEPS, 'p2pool package not importable: %s' % (_IMPORT_ERR,))
@@ -257,15 +406,37 @@ class VerifyMultiAuxCommitment(unittest.TestCase):
             self.assertRaises(ValueError, self.verify, self.share(ids, size=bad))
 
     def test_root_not_over_the_carried_blocks_rejected(self):
+        # size 2 on the DOGE check: python master refused it; still refused
         self.assertRaises(ValueError, self.verify, self.share([DOGE, PEP], root=12345))
 
     def test_tree_over_more_chains_than_carried_rejected(self):
-        # what work.py built before select_committed_merged_work: the tree over
-        # DOGE + a getauxblock-mode PEP, merged_coinbase_info for DOGE only
+        # what work.py built before select_committed_merged_work (and c2pool up
+        # to this release with an unproductive second chain): the tree over
+        # DOGE + PEP, merged_coinbase_info for DOGE only. Master refused it too.
         s = self.share([DOGE, PEP])
         s.share_info['merged_coinbase_info'] = [i for i in s.share_info['merged_coinbase_info']
                                                 if i['chain_id'] == DOGE]
         self.assertRaises(ValueError, self.verify, s)
+
+    def stats(self):
+        return dict(p2pool_data.MERGED_RULE_STATS)
+
+    def test_log_only_where_master_accepted(self):
+        # Shapes python master accepted: still accepted, the rule only counts
+        # them. PEP alone (an unknown net: no check), a commitment of size 1
+        # whose root is the DOGE block although PEP is carried too, and DOGE
+        # without V36 weights in the window.
+        before = self.stats()['would_reject']
+        self.verify(self.share([PEP], size=4, root=7))
+        s = self.share([DOGE, PEP])
+        doge_hash = bitcoin_data.hash256(s.share_info['merged_coinbase_info'][0]['block_header_bytes']) \
+            if s.share_info['merged_coinbase_info'][0]['chain_id'] == DOGE else \
+            bitcoin_data.hash256(s.share_info['merged_coinbase_info'][1]['block_header_bytes'])
+        self.verify(self.share([DOGE, PEP], size=1, root=doge_hash))
+        p2pool_data.get_v36_merged_weights = lambda *a, **k: ({}, 0, 0)
+        self.verify(self.share([DOGE, PEP], size=4))
+        self.assertEqual(self.stats()['would_reject'], before + 3)
+        self.assertEqual(self.stats()['mode'], 'log-only')
 
 
 if __name__ == '__main__':
