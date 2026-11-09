@@ -410,6 +410,20 @@ def get_canonical_merged_finder_script(share_pubkey_hash, merged_addresses, chai
     return None
 
 
+def expected_merged_aux_tree_size(merged_info_list):
+    """Size of the chain merkle tree a share's mm_data must commit to.
+
+    The parent coinbase commits to the root of the AuxPoW chain merkle tree
+    over the merged chains whose blocks the share carries in
+    merged_coinbase_info: each chain at its CAuxPow::getExpectedIndex slot
+    (nonce 0), in the smallest power-of-two tree where those slots are
+    distinct -- make_auxpow_tree over ALL of the share's chain ids, as the
+    share's builder computed it (p2pool work.py; c2pool AuxPowTree::build over
+    the chains committed in that round). One chain: size 1.
+    """
+    chain_ids = dict((info['chain_id'], None) for info in merged_info_list)
+    return bitcoin_data.make_auxpow_tree(chain_ids)[1]
+
 def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
     """Verify that the merged coinbase committed in mm_data matches canonical construction.
     
@@ -540,17 +554,16 @@ def verify_merged_coinbase_commitment(share, tracker, net, parent_net):
                     'block_hash %064x != aux_merkle_root %064x' % (
                         chain_id, doge_block_hash, aux_merkle_root))
         else:
-            # Multi-chain: verify block_hash at correct slot in aux merkle tree
-            # Reconstruct expected slot from chain_id
-            tree_slot = chain_id % aux_size
-            # We can only verify if aux_merkle_root is consistent with block_hash
-            # at the expected slot. Without other chains' hashes, we verify
-            # that make_auxpow_tree produces the expected slot.
-            expected_tree, expected_size = bitcoin_data.make_auxpow_tree({chain_id: None})
+            # Multi-chain: the tree is the one over every chain the share
+            # carries (expected_merged_aux_tree_size), not over this chain
+            # alone -- that rejected every share mining two or more chains.
+            expected_size = expected_merged_aux_tree_size(merged_info_list)
             if expected_size != aux_size:
                 raise ValueError(
                     'merged aux tree size mismatch for chain %d: '
-                    'expected %d, got %d' % (chain_id, expected_size, aux_size))
+                    'expected %d for chains %s, got %d' % (
+                        chain_id, expected_size,
+                        sorted(set(info['chain_id'] for info in merged_info_list)), aux_size))
             # For multi-chain, the aux_merkle_root check is weaker —
             # we trust the single-chain case covers our deployment
 
