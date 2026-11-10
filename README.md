@@ -1,6 +1,6 @@
 # P2Pool Merged Mining (V36)
 
-> **⚠ Unsupported — migrate to c2pool.** This Python implementation is no longer maintained. It has a known merged-mining payout vulnerability ([#33](https://github.com/frstrtr/p2pool-merged-v36/issues/33)) that is fixed only in [c2pool v0.2.12](https://github.com/frstrtr/c2pool/releases/tag/v0.2.12). From 2026-11-11 12:00 UTC the LTC share chain moves to share version 3601 and this implementation falls off it. All security updates for the V36 share chain are published only in c2pool.
+> **⚠ Unsupported — migrate to c2pool.** This Python implementation is no longer maintained. It has a known merged-mining payout vulnerability ([#33](https://github.com/frstrtr/p2pool-merged-v36/issues/33)) that is fixed only in [c2pool v0.2.12.1](https://github.com/frstrtr/c2pool/releases/tag/v0.2.12.1). From 2026-11-13 00:00 UTC the LTC share chain moves to share version 3601 and this implementation falls off it. All security updates for the V36 share chain are published only in c2pool.
 
 > **Lineage:** [`p2pool/p2pool`](https://github.com/p2pool/p2pool) (forrestv) → [`jtoomim/p2pool`](https://github.com/jtoomim/p2pool) (V35) → **`frstrtr/p2pool-merged-v36`** (V36 + merged mining)
 
